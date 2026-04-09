@@ -1568,24 +1568,23 @@ function applyCwRect() {
             const seg = segments[i];
             const segCols = seg.endCol - seg.startCol + 1;
 
-            // Physical width and scale (standard, before miter extension)
-            const segInW = segCols * PANEL_W_IN + (segCols - 1) * d.gap;
-            const segIppx = segInW / (segCols * PANEL_PX_W);
-
-            // Compute extra pixels at corner-adjacent edges to cover miter extension
-            let extLeftPx = 0, extRightPx = 0;
+            // Miter extension in inches at each edge of this segment
+            let extLeftIn = 0, extRightIn = 0;
             if (cMap[seg.startCol - 1] !== undefined) {
-                const hc = Math.min((PANEL_D_IN / 2) * Math.tan(Math.abs(cMap[seg.startCol - 1]) / 2 * Math.PI / 180), PANEL_W_IN / 2);
-                extLeftPx = Math.ceil(hc / segIppx);
+                extLeftIn = Math.min((PANEL_D_IN / 2) * Math.tan(Math.abs(cMap[seg.startCol - 1]) / 2 * Math.PI / 180), PANEL_W_IN / 2);
             }
             if (cMap[seg.endCol] !== undefined) {
-                const hc = Math.min((PANEL_D_IN / 2) * Math.tan(Math.abs(cMap[seg.endCol]) / 2 * Math.PI / 180), PANEL_W_IN / 2);
-                extRightPx = Math.ceil(hc / segIppx);
+                extRightIn = Math.min((PANEL_D_IN / 2) * Math.tan(Math.abs(cMap[seg.endCol]) / 2 * Math.PI / 180), PANEL_W_IN / 2);
             }
 
-            // Clip: overlap with content window, using extended pixel range at corners
-            const segStartPx = seg.startCol * PANEL_PX_W - extLeftPx;
-            const segEndPx = (seg.endCol + 1) * PANEL_PX_W + extRightPx;
+            // Physical width stretched to cover miter extensions
+            const segInW = segCols * PANEL_W_IN + (segCols - 1) * d.gap;
+            const extSegInW = segInW + extLeftIn + extRightIn;
+            const segIppx = extSegInW / (segCols * PANEL_PX_W);
+
+            // Standard pixel range (segment's own columns only — no adjacent pixels)
+            const segStartPx = seg.startCol * PANEL_PX_W;
+            const segEndPx = (seg.endCol + 1) * PANEL_PX_W;
             const cwLeft = state.cwRect.x;
             const cwRight = state.cwRect.x + state.cwRect.w;
 
@@ -1623,10 +1622,11 @@ function applyCwRect() {
             const rotY = firstCol.rotY;  // all columns in segment share rotation
             const cos = Math.cos(rotY), sin = Math.sin(rotY);
 
-            // Clip center relative to original segment center (in pixels)
+            // Position: pixel offset + physical shift for asymmetric miter extension
             const clipCenterPx = overlapLeft + clipW / 2;
-            const segCenterPx = seg.startCol * PANEL_PX_W + (segCols * PANEL_PX_W) / 2;
-            const offsetIn = (clipCenterPx - segCenterPx) * segIppx;
+            const segCenterPx = segStartPx + (segCols * PANEL_PX_W) / 2;
+            const miterShift = (extRightIn - extLeftIn) / 2;
+            const offsetIn = (clipCenterPx - segCenterPx) * segIppx + miterShift;
 
             // Local X offset along the segment, local Z from panel face
             const wx = segCx + offsetIn * cos - zOff * sin;
