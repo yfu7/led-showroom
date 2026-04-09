@@ -1,0 +1,1628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LED Wall Virtual Showroom</title>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+        }
+
+        /* ── Sidebar ── */
+        .sidebar {
+            width: 320px;
+            min-width: 320px;
+            background: #141414;
+            border-right: 1px solid #2a2a2a;
+            padding: 24px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .sidebar h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #fff;
+            letter-spacing: -0.5px;
+        }
+
+        .sidebar h1 span { color: #3b82f6; }
+
+        .section {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #888;
+            margin-bottom: 16px;
+        }
+
+        .config-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .config-row:last-child { margin-bottom: 0; }
+        .config-row label { font-size: 14px; color: #ccc; }
+
+        .config-row .input-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .config-row input[type="number"] {
+            width: 64px;
+            padding: 6px 10px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .config-row input[type="number"]:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 6px 10px;
+            background: #222;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #ccc;
+            font-size: 18px;
+            cursor: pointer;
+            transition: all 0.15s;
+            width: 32px;
+            height: 32px;
+        }
+
+        .btn:hover {
+            background: #2a2a2a;
+            border-color: #3b82f6;
+            color: #fff;
+        }
+
+        /* Wall info */
+        .wall-info {
+            background: #0f1729;
+            border: 1px solid #1e3a5f;
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 12px;
+        }
+
+        .wall-info .info-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            padding: 4px 0;
+        }
+
+        .wall-info .info-row .label { color: #6b8ab5; }
+        .wall-info .info-row .value { color: #93c5fd; font-weight: 500; }
+
+        /* ── Content Tabs ── */
+        .content-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 16px;
+        }
+
+        .content-tab {
+            flex: 1;
+            padding: 8px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #888;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.15s;
+        }
+
+        .content-tab.active {
+            background: #1e3a5f;
+            border-color: #3b82f6;
+            color: #93c5fd;
+        }
+
+        .content-tab:hover:not(.active) {
+            background: #1a1a1a;
+            color: #ccc;
+        }
+
+        .upload-zone {
+            border: 2px dashed #333;
+            border-radius: 10px;
+            padding: 28px 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .upload-zone:hover,
+        .upload-zone.dragover {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.05);
+        }
+
+        .upload-zone .icon { font-size: 28px; margin-bottom: 6px; }
+        .upload-zone .text { font-size: 13px; color: #888; }
+        .upload-zone .text strong { color: #3b82f6; }
+        .upload-zone .subtext { font-size: 11px; color: #555; margin-top: 4px; }
+
+        .url-input-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .url-input-group input {
+            flex: 1;
+            padding: 10px 12px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+        }
+
+        .url-input-group input:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+
+        .url-input-group button {
+            padding: 10px 16px;
+            background: #3b82f6;
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .url-input-group button:hover { background: #2563eb; }
+
+        .content-panel { display: none; }
+        .content-panel.active { display: block; }
+
+        .current-content {
+            margin-top: 12px;
+            padding: 10px 12px;
+            background: #0a0a0a;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #888;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .current-content .name {
+            color: #ccc;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 180px;
+        }
+
+        .clear-btn {
+            background: none;
+            border: none;
+            color: #ef4444;
+            cursor: pointer;
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .clear-btn:hover { background: rgba(239, 68, 68, 0.1); }
+
+        /* ── Content Window ── */
+        .cw-mode-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 16px;
+        }
+
+        .cw-mode-tab {
+            flex: 1;
+            padding: 8px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #888;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.15s;
+        }
+
+        .cw-mode-tab.active {
+            background: #1e3a5f;
+            border-color: #3b82f6;
+            color: #93c5fd;
+        }
+
+        .cw-mode-tab:hover:not(.active) {
+            background: #1a1a1a;
+            color: #ccc;
+        }
+
+        .cw-custom-controls { display: none; }
+        .cw-custom-controls.active { display: block; }
+
+        .cw-field-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+
+        .cw-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .cw-field .cw-label {
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .cw-field input[type="number"] {
+            width: 100%;
+            padding: 7px 10px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 13px;
+            text-align: center;
+        }
+
+        .cw-field input[type="number"]:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+
+        .cw-unit-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+        }
+
+        .cw-unit-row label {
+            font-size: 13px;
+            color: #999;
+        }
+
+        .cw-unit-toggle {
+            display: flex;
+            gap: 2px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .cw-unit-btn {
+            padding: 5px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .cw-unit-btn.active {
+            background: #1e3a5f;
+            color: #93c5fd;
+        }
+
+        .cw-align-label {
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            margin-bottom: 8px;
+        }
+
+        .cw-align-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+            margin-bottom: 14px;
+        }
+
+        .cw-align-btn {
+            aspect-ratio: 1.6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.15s;
+            position: relative;
+        }
+
+        .cw-align-btn:hover {
+            border-color: #3b82f6;
+            background: #111;
+        }
+
+        .cw-align-btn.active {
+            border-color: #3b82f6;
+            background: #1e3a5f;
+        }
+
+        .cw-align-btn .dot {
+            width: 6px;
+            height: 6px;
+            background: #555;
+            border-radius: 50%;
+            position: absolute;
+        }
+
+        .cw-align-btn:hover .dot,
+        .cw-align-btn.active .dot { background: #93c5fd; }
+
+        .cw-align-btn[data-align="tl"] .dot { top: 4px; left: 4px; }
+        .cw-align-btn[data-align="tc"] .dot { top: 4px; left: 50%; transform: translateX(-50%); }
+        .cw-align-btn[data-align="tr"] .dot { top: 4px; right: 4px; }
+        .cw-align-btn[data-align="ml"] .dot { top: 50%; left: 4px; transform: translateY(-50%); }
+        .cw-align-btn[data-align="mc"] .dot { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+        .cw-align-btn[data-align="mr"] .dot { top: 50%; right: 4px; transform: translateY(-50%); }
+        .cw-align-btn[data-align="bl"] .dot { bottom: 4px; left: 4px; }
+        .cw-align-btn[data-align="bc"] .dot { bottom: 4px; left: 50%; transform: translateX(-50%); }
+        .cw-align-btn[data-align="br"] .dot { bottom: 4px; right: 4px; }
+
+        .cw-info {
+            background: #0f1729;
+            border: 1px solid #1e3a5f;
+            border-radius: 8px;
+            padding: 10px 12px;
+        }
+
+        .cw-info .info-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            padding: 3px 0;
+        }
+
+        .cw-info .info-row .label { color: #6b8ab5; }
+        .cw-info .info-row .value { color: #93c5fd; font-weight: 500; }
+
+        /* ── Venue ── */
+        .venue-clear {
+            margin-top: 10px;
+            width: 100%;
+            padding: 8px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #888;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .venue-clear:hover {
+            border-color: #ef4444;
+            color: #ef4444;
+        }
+
+        /* ── View Toggles ── */
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 0;
+        }
+
+        .toggle-row label { font-size: 14px; color: #ccc; }
+
+        .toggle {
+            position: relative;
+            width: 44px;
+            height: 24px;
+        }
+
+        .toggle input { opacity: 0; width: 0; height: 0; }
+
+        .toggle .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #333;
+            border-radius: 12px;
+            transition: 0.2s;
+        }
+
+        .toggle .slider::before {
+            content: '';
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            left: 3px;
+            bottom: 3px;
+            background: #fff;
+            border-radius: 50%;
+            transition: 0.2s;
+        }
+
+        .toggle input:checked + .slider { background: #3b82f6; }
+        .toggle input:checked + .slider::before { transform: translateX(20px); }
+
+        /* ── Showroom (3D) ── */
+        .showroom {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .venue-bg {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(ellipse at 50% 70%, #1a1a22 0%, #060608 65%);
+            background-size: cover;
+            background-position: center;
+            z-index: 0;
+        }
+
+        .webgl-container,
+        .css3d-container,
+        .controls-overlay {
+            position: absolute;
+            inset: 0;
+        }
+
+        .webgl-container { z-index: 1; }
+
+        .css3d-container {
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        .controls-overlay {
+            z-index: 3;
+            cursor: grab;
+        }
+
+        .controls-overlay:active { cursor: grabbing; }
+
+        .controls-overlay.move-mode { cursor: move; }
+        .controls-overlay.move-mode:active { cursor: move; }
+
+        .view-controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 8px;
+            z-index: 10;
+        }
+
+        .view-btn {
+            padding: 8px 14px;
+            background: rgba(20, 20, 20, 0.85);
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #ccc;
+            font-size: 13px;
+            cursor: pointer;
+            backdrop-filter: blur(8px);
+            transition: all 0.15s;
+        }
+
+        .view-btn:hover {
+            background: rgba(30, 30, 30, 0.95);
+            border-color: #3b82f6;
+            color: #fff;
+        }
+
+        .view-btn.active {
+            background: rgba(30, 58, 95, 0.85);
+            border-color: #3b82f6;
+            color: #93c5fd;
+        }
+
+        .showroom-hint {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 12px;
+            color: #777;
+            background: rgba(10, 10, 10, 0.7);
+            padding: 6px 14px;
+            border-radius: 16px;
+            z-index: 10;
+            pointer-events: none;
+            backdrop-filter: blur(4px);
+            border: 1px solid #1f1f1f;
+        }
+
+        .info-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            background: rgba(15, 23, 41, 0.85);
+            border: 1px solid #1e3a5f;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 12px;
+            color: #93c5fd;
+            backdrop-filter: blur(8px);
+            pointer-events: none;
+        }
+
+        .info-overlay .label { color: #6b8ab5; margin-right: 6px; }
+        .info-overlay div { margin: 2px 0; }
+
+        /* CSS3D content layer styling */
+        .css3d-content-el {
+            position: relative;
+            background: #000;
+            overflow: hidden;
+        }
+
+        .css3d-content-el img,
+        .css3d-content-el video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .css3d-content-el iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+        }
+
+        /* Scrollbar */
+        .sidebar::-webkit-scrollbar { width: 6px; }
+        .sidebar::-webkit-scrollbar-track { background: transparent; }
+        .sidebar::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<aside class="sidebar">
+    <h1><span>LED</span> Wall Showroom</h1>
+
+    <!-- Panel Configuration -->
+    <div class="section">
+        <div class="section-title">Panel Configuration</div>
+        <div class="config-row">
+            <label>Columns</label>
+            <div class="input-group">
+                <button class="btn" data-action="cols-dec">&#8722;</button>
+                <input type="number" id="cols" value="4" min="1" max="50">
+                <button class="btn" data-action="cols-inc">+</button>
+            </div>
+        </div>
+        <div class="config-row">
+            <label>Rows</label>
+            <div class="input-group">
+                <button class="btn" data-action="rows-dec">&#8722;</button>
+                <input type="number" id="rows" value="3" min="1" max="50">
+                <button class="btn" data-action="rows-inc">+</button>
+            </div>
+        </div>
+        <div class="wall-info">
+            <div class="info-row">
+                <span class="label">Total Panels</span>
+                <span class="value" id="totalPanels">12</span>
+            </div>
+            <div class="info-row">
+                <span class="label">Resolution</span>
+                <span class="value" id="totalRes">1376 x 774 px</span>
+            </div>
+            <div class="info-row">
+                <span class="label">Physical Size</span>
+                <span class="value" id="totalSize">100.5" x 56.6"</span>
+            </div>
+            <div class="info-row">
+                <span class="label">Size (ft)</span>
+                <span class="value" id="totalSizeFt">8.4' x 4.7'</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Content Source -->
+    <div class="section">
+        <div class="section-title">Content Source</div>
+        <div class="content-tabs">
+            <div class="content-tab active" data-tab="image">Image</div>
+            <div class="content-tab" data-tab="video">Video</div>
+            <div class="content-tab" data-tab="website">Website</div>
+        </div>
+
+        <div class="content-panel active" id="panel-image">
+            <div class="upload-zone" id="imageDropZone">
+                <div class="icon">&#128444;</div>
+                <div class="text">Drop image or <strong>browse</strong></div>
+                <div class="subtext">JPG, PNG, WebP, GIF, SVG</div>
+            </div>
+            <input type="file" id="imageInput" accept="image/*" style="display:none">
+            <div class="current-content hidden" id="imageInfo">
+                <span class="name" id="imageName"></span>
+                <button class="clear-btn" data-clear="content">Clear</button>
+            </div>
+        </div>
+
+        <div class="content-panel" id="panel-video">
+            <div class="upload-zone" id="videoDropZone">
+                <div class="icon">&#127916;</div>
+                <div class="text">Drop video or <strong>browse</strong></div>
+                <div class="subtext">MP4, WebM, OGG</div>
+            </div>
+            <input type="file" id="videoInput" accept="video/*" style="display:none">
+            <div class="current-content hidden" id="videoInfo">
+                <span class="name" id="videoName"></span>
+                <button class="clear-btn" data-clear="content">Clear</button>
+            </div>
+        </div>
+
+        <div class="content-panel" id="panel-website">
+            <div class="url-input-group">
+                <input type="url" id="urlInput" placeholder="https://example.com">
+                <button id="loadUrlBtn">Load</button>
+            </div>
+            <div style="margin-top:8px;font-size:12px;color:#555;">
+                External sites are loaded via proxy to bypass iframe restrictions.
+            </div>
+            <div class="current-content hidden" id="websiteInfo">
+                <span class="name" id="websiteName"></span>
+                <button class="clear-btn" data-clear="content">Clear</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Content Window -->
+    <div class="section">
+        <div class="section-title">Content Window</div>
+        <div class="cw-mode-tabs">
+            <div class="cw-mode-tab active" data-cwmode="fill">Fill Wall</div>
+            <div class="cw-mode-tab" data-cwmode="custom">Custom Size</div>
+        </div>
+
+        <div class="cw-custom-controls" id="cwCustomControls">
+            <div class="cw-unit-row">
+                <label>Units</label>
+                <div class="cw-unit-toggle">
+                    <button class="cw-unit-btn active" data-unit="px">px</button>
+                    <button class="cw-unit-btn" data-unit="panels">Panels</button>
+                    <button class="cw-unit-btn" data-unit="pct">%</button>
+                </div>
+            </div>
+
+            <div class="cw-field-group">
+                <div class="cw-field">
+                    <span class="cw-label">Width</span>
+                    <input type="number" id="cwWidth" min="1">
+                </div>
+                <div class="cw-field">
+                    <span class="cw-label">Height</span>
+                    <input type="number" id="cwHeight" min="1">
+                </div>
+            </div>
+
+            <div class="cw-field-group">
+                <div class="cw-field">
+                    <span class="cw-label">X Offset</span>
+                    <input type="number" id="cwX" min="0">
+                </div>
+                <div class="cw-field">
+                    <span class="cw-label">Y Offset</span>
+                    <input type="number" id="cwY" min="0">
+                </div>
+            </div>
+
+            <div class="cw-align-label">Quick Align</div>
+            <div class="cw-align-grid">
+                <button class="cw-align-btn" data-align="tl"><span class="dot"></span></button>
+                <button class="cw-align-btn" data-align="tc"><span class="dot"></span></button>
+                <button class="cw-align-btn" data-align="tr"><span class="dot"></span></button>
+                <button class="cw-align-btn" data-align="ml"><span class="dot"></span></button>
+                <button class="cw-align-btn active" data-align="mc"><span class="dot"></span></button>
+                <button class="cw-align-btn" data-align="mr"><span class="dot"></span></button>
+                <button class="cw-align-btn" data-align="bl"><span class="dot"></span></button>
+                <button class="cw-align-btn" data-align="bc"><span class="dot"></span></button>
+                <button class="cw-align-btn" data-align="br"><span class="dot"></span></button>
+            </div>
+
+            <div class="cw-info">
+                <div class="info-row">
+                    <span class="label">Window px</span>
+                    <span class="value" id="cwInfoPx">-</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Physical</span>
+                    <span class="value" id="cwInfoIn">-</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Coverage</span>
+                    <span class="value" id="cwInfoPct">-</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Venue Background -->
+    <div class="section">
+        <div class="section-title">Venue Background</div>
+        <div class="upload-zone" id="venueDropZone">
+            <div class="icon">&#127963;</div>
+            <div class="text">Drop venue photo or <strong>browse</strong></div>
+            <div class="subtext">A photo of where the wall will be placed</div>
+        </div>
+        <input type="file" id="venueInput" accept="image/*" style="display:none">
+        <button class="venue-clear hidden" id="venueClearBtn">Clear Background</button>
+    </div>
+
+    <!-- View Options -->
+    <div class="section">
+        <div class="section-title">View Options</div>
+        <div class="toggle-row">
+            <label>Double-Sided</label>
+            <div class="toggle">
+                <input type="checkbox" id="doubleSidedToggle">
+                <span class="slider"></span>
+            </div>
+        </div>
+        <div class="toggle-row">
+            <label>Panel Bezels</label>
+            <div class="toggle">
+                <input type="checkbox" id="bezelToggle" checked>
+                <span class="slider"></span>
+            </div>
+        </div>
+        <div class="toggle-row">
+            <label>Auto Rotate</label>
+            <div class="toggle">
+                <input type="checkbox" id="rotateToggle">
+                <span class="slider"></span>
+            </div>
+        </div>
+        <div class="toggle-row">
+            <label>Show Info</label>
+            <div class="toggle">
+                <input type="checkbox" id="infoToggle" checked>
+                <span class="slider"></span>
+            </div>
+        </div>
+        <div class="toggle-row">
+            <label>Base &amp; Support</label>
+            <div class="toggle">
+                <input type="checkbox" id="accessoryToggle">
+                <span class="slider"></span>
+            </div>
+        </div>
+    </div>
+</aside>
+
+<main class="showroom" id="showroom">
+    <div class="venue-bg" id="venueBg"></div>
+    <div class="webgl-container" id="webglContainer"></div>
+    <div class="css3d-container" id="css3dContainer"></div>
+    <div class="controls-overlay" id="controlsOverlay"></div>
+
+    <div class="info-overlay" id="infoOverlay">
+        <div><span class="label">Wall:</span><span id="infoWall">-</span></div>
+        <div><span class="label">Window:</span><span id="infoWindow">-</span></div>
+        <div><span class="label">Position:</span><span id="infoPos">0, 0, 0</span></div>
+    </div>
+
+    <div class="view-controls">
+        <button class="view-btn" id="viewFront">Front</button>
+        <button class="view-btn" id="view34">3/4</button>
+        <button class="view-btn" id="viewReset">Reset</button>
+        <button class="view-btn" id="moveToggle">Move</button>
+        <button class="view-btn" id="centerBtn">Center</button>
+    </div>
+
+    <div class="showroom-hint" id="showroomHint">Drag to rotate · Scroll to zoom · Middle/right-click to pan</div>
+</main>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
+
+/* ── Constants ── */
+const PANEL_PX_W = 344;
+const PANEL_PX_H = 258;
+const PANEL_W_IN = 25.125;
+const PANEL_H_IN = 18.875;
+const PANEL_D_IN = 2;
+const IN_PER_PX_W = PANEL_W_IN / PANEL_PX_W;
+const IN_PER_PX_H = PANEL_H_IN / PANEL_PX_H;
+const PANEL_GAP_IN = 0.06;
+
+/* Mounting Base dimensions (from engineering drawing) */
+const BASE_W = 25.080;
+const BASE_H = 9.060;
+const BASE_D = 18.780;
+
+/* Back Support dimensions (from engineering drawing) */
+const SUPPORT_W = 2.000;
+const SUPPORT_THICK = 1.180;
+const SUPPORT_VERT_H = 19.900;
+const SUPPORT_FOOT_D = 6.700;
+const SUPPORT_ANGLE_RAD = 45 * Math.PI / 180;
+
+/* ── State ── */
+const state = {
+    cols: 4,
+    rows: 3,
+    cwMode: 'fill',
+    cwUnit: 'px',
+    cwRect: { x: 0, y: 0, w: 0, h: 0 },
+    showBezels: true,
+    autoRotate: false,
+    doubleSided: false,
+    moveMode: false,
+    showAccessories: false
+};
+
+/* Derived wall dimensions — single source of truth */
+function wallDims() {
+    const { cols, rows, showBezels } = state;
+    const gap = showBezels ? PANEL_GAP_IN : 0;
+    return {
+        cols, rows, gap,
+        totalW: cols * PANEL_W_IN + (cols - 1) * gap,
+        totalH: rows * PANEL_H_IN + (rows - 1) * gap,
+        wallWPx: cols * PANEL_PX_W,
+        wallHPx: rows * PANEL_PX_H,
+    };
+}
+
+/* ── Cached materials (created once, reused across rebuilds) ── */
+const sideMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1f, metalness: 0.65, roughness: 0.35 });
+const frontMat = new THREE.MeshStandardMaterial({ color: 0x080810, emissive: 0x0a0a18, emissiveIntensity: 0.6, metalness: 0.25, roughness: 0.3 });
+const backMat = new THREE.MeshStandardMaterial({ color: 0x111114, metalness: 0.5, roughness: 0.55 });
+const panelMats = [sideMat, sideMat, sideMat, sideMat, frontMat, backMat];
+const metalMat = new THREE.MeshStandardMaterial({ color: 0x303035, metalness: 0.75, roughness: 0.28 });
+
+/* Shared geometry (identical for every panel / accessory piece) */
+const panelGeom = new THREE.BoxGeometry(PANEL_W_IN, PANEL_H_IN, PANEL_D_IN);
+const baseGeom = new THREE.BoxGeometry(BASE_W, BASE_H, BASE_D);
+const vertBarGeom = new THREE.BoxGeometry(SUPPORT_W, SUPPORT_VERT_H, SUPPORT_THICK);
+const footGeom = new THREE.BoxGeometry(SUPPORT_W, SUPPORT_THICK, SUPPORT_FOOT_D);
+const diagGeom = new THREE.BoxGeometry(SUPPORT_W, SUPPORT_FOOT_D * Math.SQRT2, SUPPORT_THICK);
+
+/* ── Three.js objects ── */
+let scene, camera, renderer, cssRenderer, controls;
+let wallGroup;
+let panelMeshes = [];
+let contentLayerEl = null;
+let contentObject = null;
+let backContentLayerEl = null;
+let backContentObject = null;
+let lastContentUrl = null;
+let lastContentType = null;
+let accessoryMeshes = [];
+let venueObjectUrl = null;
+
+/* ── Init ── */
+function init() {
+    const showroom = document.getElementById('showroom');
+    const w = showroom.clientWidth;
+    const h = showroom.clientHeight;
+
+    scene = new THREE.Scene();
+
+    camera = new THREE.PerspectiveCamera(40, w / h, 1, 20000);
+    camera.position.set(0, 0, 300);
+
+    // WebGL renderer
+    renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setClearColor(0x000000, 0);
+    renderer.setSize(w, h);
+    document.getElementById('webglContainer').appendChild(renderer.domElement);
+
+    // CSS3D renderer
+    cssRenderer = new CSS3DRenderer();
+    cssRenderer.setSize(w, h);
+    document.getElementById('css3dContainer').appendChild(cssRenderer.domElement);
+
+    // Lighting
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    const key = new THREE.DirectionalLight(0xffffff, 1.0);
+    key.position.set(80, 120, 200);
+    scene.add(key);
+    const fill = new THREE.DirectionalLight(0x6699ff, 0.45);
+    fill.position.set(-120, -60, 100);
+    scene.add(fill);
+    const back = new THREE.DirectionalLight(0xffffff, 0.25);
+    back.position.set(0, 50, -200);
+    scene.add(back);
+
+    // Wall group
+    wallGroup = new THREE.Group();
+    scene.add(wallGroup);
+
+    // OrbitControls (attached to overlay so it captures all mouse events in showroom)
+    controls = new OrbitControls(camera, document.getElementById('controlsOverlay'));
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.minDistance = 30;
+    controls.maxDistance = 5000;
+    controls.target.set(0, 0, 0);
+    controls.mouseButtons = {
+        LEFT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.PAN,
+        RIGHT: THREE.MOUSE.PAN
+    };
+
+    buildWall();
+
+    window.addEventListener('resize', onResize);
+    animate();
+}
+
+function onResize() {
+    const c = document.getElementById('showroom');
+    if (!c.clientWidth || !c.clientHeight) return;
+    camera.aspect = c.clientWidth / c.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(c.clientWidth, c.clientHeight);
+    cssRenderer.setSize(c.clientWidth, c.clientHeight);
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    if (state.autoRotate) wallGroup.rotation.y += 0.004;
+    controls.update();
+    renderer.render(scene, camera);
+    if (contentObject || backContentObject) cssRenderer.render(scene, camera);
+}
+
+/* ── Wall construction ── */
+function buildWall() {
+    panelMeshes.forEach(m => wallGroup.remove(m));
+    panelMeshes = [];
+
+    const d = wallDims();
+
+    for (let r = 0; r < d.rows; r++) {
+        for (let c = 0; c < d.cols; c++) {
+            const mesh = new THREE.Mesh(panelGeom, panelMats);
+            mesh.position.set(
+                -d.totalW / 2 + PANEL_W_IN / 2 + c * (PANEL_W_IN + d.gap),
+                d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap),
+                0
+            );
+            wallGroup.add(mesh);
+            panelMeshes.push(mesh);
+        }
+    }
+
+    updateSidebarInfo();
+    applyCwRect();
+    fitCameraToWall(d.totalW, d.totalH);
+    buildAccessories();
+}
+
+function buildAccessories() {
+    accessoryMeshes.forEach(m => wallGroup.remove(m));
+    accessoryMeshes = [];
+    if (!state.showAccessories) return;
+
+    const d = wallDims();
+    const panelBottom = -d.totalH / 2;
+    const groundY = panelBottom - BASE_H;
+    const vBackZ = -PANEL_D_IN / 2 - SUPPORT_THICK;
+    const inset = 2.5;
+
+    function addMesh(geom, x, y, z, rx) {
+        const m = new THREE.Mesh(geom, metalMat);
+        m.position.set(x, y, z);
+        if (rx) m.rotation.x = rx;
+        wallGroup.add(m);
+        accessoryMeshes.push(m);
+    }
+
+    for (let c = 0; c < d.cols; c++) {
+        const colX = -d.totalW / 2 + PANEL_W_IN / 2 + c * (PANEL_W_IN + d.gap);
+
+        addMesh(baseGeom, colX, panelBottom - BASE_H / 2, PANEL_D_IN / 2 - BASE_D / 2);
+
+        const supportXs = [
+            colX - PANEL_W_IN / 2 + SUPPORT_W / 2 + inset,
+            colX + PANEL_W_IN / 2 - SUPPORT_W / 2 - inset
+        ];
+
+        for (const sx of supportXs) {
+            addMesh(vertBarGeom, sx, groundY + SUPPORT_VERT_H / 2, -PANEL_D_IN / 2 - SUPPORT_THICK / 2);
+            addMesh(footGeom, sx, groundY + SUPPORT_THICK / 2, vBackZ - SUPPORT_FOOT_D / 2);
+            addMesh(diagGeom, sx, groundY + SUPPORT_FOOT_D / 2, vBackZ - SUPPORT_FOOT_D / 2, SUPPORT_ANGLE_RAD);
+        }
+    }
+}
+
+function fitCameraToWall(w, h) {
+    const fov = camera.fov * Math.PI / 180;
+    const aspect = camera.aspect;
+    const distH = (h / 2) / Math.tan(fov / 2);
+    const distW = (w / 2) / Math.tan(fov / 2) / aspect;
+    const dist = Math.max(distH, distW) * 1.6;
+
+    controls.target.set(0, 0, 0);
+    camera.position.set(0, 0, dist);
+    wallGroup.rotation.set(0, 0, 0);
+    controls.update();
+}
+
+function setCameraView(view) {
+    const d = wallDims();
+    const fov = camera.fov * Math.PI / 180;
+    const aspect = camera.aspect;
+    const distH = (d.totalH / 2) / Math.tan(fov / 2);
+    const distW = (d.totalW / 2) / Math.tan(fov / 2) / aspect;
+    const dist = Math.max(distH, distW) * 1.6;
+
+    controls.target.set(0, 0, 0);
+    wallGroup.rotation.set(0, 0, 0);
+
+    if (view === 'front') {
+        camera.position.set(0, 0, dist);
+    } else if (view === '34') {
+        camera.position.set(dist * 0.55, dist * 0.25, dist * 0.85);
+    } else {
+        camera.position.set(0, 0, dist);
+    }
+    controls.update();
+}
+
+/* ── Content window ── */
+function applyCwRect() {
+    const d = wallDims();
+
+    /* Clamp content window to wall bounds */
+    if (state.cwMode === 'fill') {
+        state.cwRect = { x: 0, y: 0, w: d.wallWPx, h: d.wallHPx };
+    } else {
+        state.cwRect.w = Math.min(state.cwRect.w || d.wallWPx, d.wallWPx);
+        state.cwRect.h = Math.min(state.cwRect.h || d.wallHPx, d.wallHPx);
+        state.cwRect.x = Math.min(state.cwRect.x, d.wallWPx - state.cwRect.w);
+        state.cwRect.y = Math.min(state.cwRect.y, d.wallHPx - state.cwRect.h);
+    }
+
+    const cwInW = state.cwRect.w * IN_PER_PX_W;
+    const cwInH = state.cwRect.h * IN_PER_PX_H;
+
+    const cxIn = -d.totalW / 2 + state.cwRect.x * IN_PER_PX_W + cwInW / 2;
+    const cyIn = d.totalH / 2 - state.cwRect.y * IN_PER_PX_H - cwInH / 2;
+
+    if (contentLayerEl) {
+        contentLayerEl.style.width = state.cwRect.w + 'px';
+        contentLayerEl.style.height = state.cwRect.h + 'px';
+    }
+
+    if (contentObject) {
+        contentObject.position.set(cxIn, cyIn, PANEL_D_IN / 2 + 0.6);
+        contentObject.scale.set(IN_PER_PX_W, IN_PER_PX_H, IN_PER_PX_W);
+    }
+
+    if (backContentObject) {
+        backContentLayerEl.style.width = state.cwRect.w + 'px';
+        backContentLayerEl.style.height = state.cwRect.h + 'px';
+        backContentObject.position.set(cxIn, cyIn, -(PANEL_D_IN / 2 + 0.6));
+        backContentObject.scale.set(IN_PER_PX_W, IN_PER_PX_H, IN_PER_PX_W);
+        backContentObject.rotation.set(0, Math.PI, 0);
+    }
+
+    updateCwInfo();
+}
+
+function updateCwInfo() {
+    const d = wallDims();
+    const physW = (state.cwRect.w * IN_PER_PX_W).toFixed(1);
+    const physH = (state.cwRect.h * IN_PER_PX_H).toFixed(1);
+    const coverage = ((state.cwRect.w * state.cwRect.h) / (d.wallWPx * d.wallHPx) * 100).toFixed(1);
+
+    document.getElementById('cwInfoPx').textContent = state.cwRect.w + ' x ' + state.cwRect.h;
+    document.getElementById('cwInfoIn').textContent = physW + '" x ' + physH + '"';
+    document.getElementById('cwInfoPct').textContent = coverage + '%';
+
+    document.getElementById('infoWindow').textContent = ' ' + state.cwRect.w + 'x' + state.cwRect.h + ' px (' + physW + '" x ' + physH + '")';
+}
+
+function updateSidebarInfo() {
+    const d = wallDims();
+    const totalWIn = d.cols * PANEL_W_IN;
+    const totalHIn = d.rows * PANEL_H_IN;
+
+    document.getElementById('totalPanels').textContent = d.cols * d.rows;
+    document.getElementById('totalRes').textContent = d.wallWPx + ' x ' + d.wallHPx + ' px';
+    document.getElementById('totalSize').textContent =
+        totalWIn.toFixed(1) + '" x ' + totalHIn.toFixed(1) + '"';
+    document.getElementById('totalSizeFt').textContent =
+        (totalWIn / 12).toFixed(1) + "' x " + (totalHIn / 12).toFixed(1) + "'";
+
+    document.getElementById('infoWall').textContent = ' ' + d.cols + 'x' + d.rows + ' panels · ' +
+        totalWIn.toFixed(1) + '" x ' + totalHIn.toFixed(1) + '"';
+}
+
+/* ── Content helpers ── */
+function purgeContentEls(container) {
+    if (!container) return;
+    container.querySelectorAll('img,video,iframe').forEach(el => {
+        if (el.src?.startsWith('blob:')) URL.revokeObjectURL(el.src);
+        el.remove();
+    });
+}
+
+function createContentEl(type, url) {
+    if (type === 'image') {
+        const img = document.createElement('img');
+        img.src = url;
+        return img;
+    }
+    if (type === 'video') {
+        const vid = document.createElement('video');
+        Object.assign(vid, { src: url, autoplay: true, loop: true, muted: true, playsInline: true });
+        return vid;
+    }
+    const ifr = document.createElement('iframe');
+    ifr.src = (url.match(/^https?:\/\//) && !url.includes(location.host))
+        ? '/proxy?url=' + encodeURIComponent(url) : url;
+    return ifr;
+}
+
+function ensureContentLayer() {
+    if (!contentLayerEl) {
+        contentLayerEl = document.createElement('div');
+        contentLayerEl.className = 'css3d-content-el';
+    }
+}
+
+/* ── Content management ── */
+function setContent(type, url, name) {
+    ensureContentLayer();
+
+    if (contentObject) { wallGroup.remove(contentObject); contentObject = null; }
+    purgeContentEls(contentLayerEl);
+
+    document.querySelectorAll('.current-content').forEach(el => el.classList.add('hidden'));
+
+    contentLayerEl.appendChild(createContentEl(type, url));
+
+    const infoMap = { image: 'imageInfo', video: 'videoInfo', website: 'websiteInfo' };
+    const nameMap = { image: 'imageName', video: 'videoName', website: 'websiteName' };
+    document.getElementById(infoMap[type]).classList.remove('hidden');
+    document.getElementById(nameMap[type]).textContent = name;
+
+    lastContentUrl = url;
+    lastContentType = type;
+
+    contentObject = new CSS3DObject(contentLayerEl);
+    wallGroup.add(contentObject);
+
+    syncBackContent(type, url);
+    applyCwRect();
+}
+
+function syncBackContent(type, url) {
+    if (backContentObject) { wallGroup.remove(backContentObject); backContentObject = null; }
+    purgeContentEls(backContentLayerEl);
+
+    if (!state.doubleSided || !type) return;
+
+    if (!backContentLayerEl) {
+        backContentLayerEl = document.createElement('div');
+        backContentLayerEl.className = 'css3d-content-el';
+    }
+
+    backContentLayerEl.appendChild(createContentEl(type, url));
+    backContentObject = new CSS3DObject(backContentLayerEl);
+    wallGroup.add(backContentObject);
+}
+
+function clearContent() {
+    if (contentObject) { wallGroup.remove(contentObject); contentObject = null; }
+    if (backContentObject) { wallGroup.remove(backContentObject); backContentObject = null; }
+    purgeContentEls(contentLayerEl);
+    purgeContentEls(backContentLayerEl);
+    document.querySelectorAll('.current-content').forEach(el => el.classList.add('hidden'));
+    lastContentUrl = null;
+    lastContentType = null;
+    document.getElementById('imageInput').value = '';
+    document.getElementById('videoInput').value = '';
+}
+
+/* ── Sidebar wiring ── */
+function adjustValue(id, delta) {
+    const input = document.getElementById(id);
+    input.value = Math.max(1, Math.min(50, parseInt(input.value) + delta));
+    state[id] = parseInt(input.value);
+    buildWall();
+}
+
+document.querySelectorAll('[data-action]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const a = btn.dataset.action;
+        if (a === 'cols-dec') adjustValue('cols', -1);
+        else if (a === 'cols-inc') adjustValue('cols', 1);
+        else if (a === 'rows-dec') adjustValue('rows', -1);
+        else if (a === 'rows-inc') adjustValue('rows', 1);
+    });
+});
+
+document.getElementById('cols').addEventListener('change', e => {
+    state.cols = parseInt(e.target.value) || 1;
+    buildWall();
+});
+document.getElementById('rows').addEventListener('change', e => {
+    state.rows = parseInt(e.target.value) || 1;
+    buildWall();
+});
+
+/* Content tabs */
+document.querySelectorAll('.content-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        const name = tab.dataset.tab;
+        document.querySelectorAll('.content-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        document.querySelectorAll('.content-panel').forEach(p => p.classList.remove('active'));
+        document.getElementById('panel-' + name).classList.add('active');
+    });
+});
+
+/* Upload handlers */
+function wireUpload(zoneId, inputId, type) {
+    const zone = document.getElementById(zoneId);
+    const input = document.getElementById(inputId);
+    zone.addEventListener('click', () => input.click());
+    input.addEventListener('change', () => {
+        const file = input.files[0];
+        if (file) setContent(type, URL.createObjectURL(file), file.name);
+    });
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+    zone.addEventListener('drop', e => {
+        e.preventDefault();
+        zone.classList.remove('dragover');
+        const file = e.dataTransfer.files[0];
+        if (file) setContent(type, URL.createObjectURL(file), file.name);
+    });
+}
+wireUpload('imageDropZone', 'imageInput', 'image');
+wireUpload('videoDropZone', 'videoInput', 'video');
+
+document.querySelectorAll('[data-clear="content"]').forEach(b => b.addEventListener('click', clearContent));
+
+document.getElementById('loadUrlBtn').addEventListener('click', () => {
+    const raw = document.getElementById('urlInput').value.trim();
+    if (!raw) return;
+    const url = raw.match(/^https?:\/\//) ? raw : 'https://' + raw;
+    setContent('website', url, url);
+});
+document.getElementById('urlInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('loadUrlBtn').click();
+});
+
+/* Content window mode tabs */
+document.querySelectorAll('.cw-mode-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        const mode = tab.dataset.cwmode;
+        state.cwMode = mode;
+        document.querySelectorAll('.cw-mode-tab').forEach(t => t.classList.toggle('active', t.dataset.cwmode === mode));
+        document.getElementById('cwCustomControls').classList.toggle('active', mode === 'custom');
+
+        const { wallWPx, wallHPx } = wallDims();
+
+        if (mode === 'fill') {
+            state.cwRect = { x: 0, y: 0, w: wallWPx, h: wallHPx };
+        } else {
+            if (state.cwRect.w === wallWPx && state.cwRect.h === wallHPx) {
+                state.cwRect = {
+                    w: Math.round(wallWPx * 0.5),
+                    h: Math.round(wallHPx * 0.5),
+                    x: Math.round(wallWPx * 0.25),
+                    y: Math.round(wallHPx * 0.25)
+                };
+            }
+        }
+        applyCwRect();
+        syncCwInputs();
+    });
+});
+
+/* Unit toggle */
+document.querySelectorAll('.cw-unit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        state.cwUnit = btn.dataset.unit;
+        document.querySelectorAll('.cw-unit-btn').forEach(b => b.classList.toggle('active', b.dataset.unit === state.cwUnit));
+        syncCwInputs();
+    });
+});
+
+function pxToUnit(px, axis) {
+    if (state.cwUnit === 'px') return Math.round(px);
+    const { wallWPx, wallHPx } = wallDims();
+    if (state.cwUnit === 'panels') return +(px / (axis === 'x' ? PANEL_PX_W : PANEL_PX_H)).toFixed(2);
+    if (state.cwUnit === 'pct') return +((px / (axis === 'x' ? wallWPx : wallHPx)) * 100).toFixed(1);
+    return px;
+}
+
+function unitToPx(val, axis) {
+    if (state.cwUnit === 'px') return Math.round(val);
+    const { wallWPx, wallHPx } = wallDims();
+    if (state.cwUnit === 'panels') return Math.round(val * (axis === 'x' ? PANEL_PX_W : PANEL_PX_H));
+    if (state.cwUnit === 'pct') return Math.round((val / 100) * (axis === 'x' ? wallWPx : wallHPx));
+    return val;
+}
+
+function syncCwInputs() {
+    document.getElementById('cwWidth').value = pxToUnit(state.cwRect.w, 'x');
+    document.getElementById('cwHeight').value = pxToUnit(state.cwRect.h, 'y');
+    document.getElementById('cwX').value = pxToUnit(state.cwRect.x, 'x');
+    document.getElementById('cwY').value = pxToUnit(state.cwRect.y, 'y');
+
+    const step = state.cwUnit === 'px' ? 1 : state.cwUnit === 'panels' ? 0.25 : 1;
+    ['cwWidth', 'cwHeight', 'cwX', 'cwY'].forEach(id => document.getElementById(id).step = step);
+}
+
+['cwWidth', 'cwHeight', 'cwX', 'cwY'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+        const { wallWPx, wallHPx } = wallDims();
+
+        let nw = unitToPx(parseFloat(document.getElementById('cwWidth').value) || 1, 'x');
+        let nh = unitToPx(parseFloat(document.getElementById('cwHeight').value) || 1, 'y');
+        let nx = unitToPx(parseFloat(document.getElementById('cwX').value) || 0, 'x');
+        let ny = unitToPx(parseFloat(document.getElementById('cwY').value) || 0, 'y');
+
+        nw = Math.max(1, Math.min(nw, wallWPx));
+        nh = Math.max(1, Math.min(nh, wallHPx));
+        nx = Math.max(0, Math.min(nx, wallWPx - nw));
+        ny = Math.max(0, Math.min(ny, wallHPx - nh));
+
+        state.cwRect = { x: nx, y: ny, w: nw, h: nh };
+        applyCwRect();
+        syncCwInputs();
+        highlightActiveAlign();
+    });
+});
+
+document.querySelectorAll('.cw-align-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const pos = btn.dataset.align;
+        const { wallWPx, wallHPx } = wallDims();
+        const cw = state.cwRect.w, ch = state.cwRect.h;
+
+        const xMap = { l: 0, c: Math.round((wallWPx - cw) / 2), r: wallWPx - cw };
+        const yMap = { t: 0, m: Math.round((wallHPx - ch) / 2), b: wallHPx - ch };
+
+        state.cwRect.y = yMap[pos[0]];
+        state.cwRect.x = xMap[pos[1]];
+
+        applyCwRect();
+        syncCwInputs();
+        highlightActiveAlign();
+    });
+});
+
+function highlightActiveAlign() {
+    const { wallWPx, wallHPx } = wallDims();
+    const cx = state.cwRect.x, cy = state.cwRect.y;
+    const cw = state.cwRect.w, ch = state.cwRect.h;
+
+    let col = '', row = '';
+    if (cx === 0) col = 'l';
+    else if (cx === wallWPx - cw) col = 'r';
+    else if (Math.abs(cx - Math.round((wallWPx - cw) / 2)) <= 1) col = 'c';
+
+    if (cy === 0) row = 't';
+    else if (cy === wallHPx - ch) row = 'b';
+    else if (Math.abs(cy - Math.round((wallHPx - ch) / 2)) <= 1) row = 'm';
+
+    const key = row + col;
+    document.querySelectorAll('.cw-align-btn').forEach(b => b.classList.toggle('active', b.dataset.align === key));
+}
+
+/* Venue background */
+const venueZone = document.getElementById('venueDropZone');
+const venueInput = document.getElementById('venueInput');
+const venueBg = document.getElementById('venueBg');
+const venueClearBtn = document.getElementById('venueClearBtn');
+
+function setVenue(file) {
+    if (venueObjectUrl) URL.revokeObjectURL(venueObjectUrl);
+    venueObjectUrl = URL.createObjectURL(file);
+    venueBg.style.backgroundImage = 'url(' + venueObjectUrl + ')';
+    venueClearBtn.classList.remove('hidden');
+}
+
+venueZone.addEventListener('click', () => venueInput.click());
+venueInput.addEventListener('change', () => {
+    if (venueInput.files[0]) setVenue(venueInput.files[0]);
+});
+venueZone.addEventListener('dragover', e => { e.preventDefault(); venueZone.classList.add('dragover'); });
+venueZone.addEventListener('dragleave', () => venueZone.classList.remove('dragover'));
+venueZone.addEventListener('drop', e => {
+    e.preventDefault();
+    venueZone.classList.remove('dragover');
+    if (e.dataTransfer.files[0]) setVenue(e.dataTransfer.files[0]);
+});
+venueClearBtn.addEventListener('click', () => {
+    if (venueObjectUrl) { URL.revokeObjectURL(venueObjectUrl); venueObjectUrl = null; }
+    venueBg.style.backgroundImage = '';
+    venueClearBtn.classList.add('hidden');
+    venueInput.value = '';
+});
+
+/* View options */
+document.getElementById('doubleSidedToggle').addEventListener('change', e => {
+    state.doubleSided = e.target.checked;
+    syncBackContent(state.doubleSided ? lastContentType : null, lastContentUrl);
+    if (state.doubleSided && lastContentType) applyCwRect();
+});
+
+document.getElementById('bezelToggle').addEventListener('change', e => {
+    state.showBezels = e.target.checked;
+    buildWall();
+});
+
+document.getElementById('rotateToggle').addEventListener('change', e => {
+    state.autoRotate = e.target.checked;
+});
+
+document.getElementById('infoToggle').addEventListener('change', e => {
+    document.getElementById('infoOverlay').style.display = e.target.checked ? '' : 'none';
+});
+
+document.getElementById('accessoryToggle').addEventListener('change', e => {
+    state.showAccessories = e.target.checked;
+    buildAccessories();
+});
+
+/* View buttons */
+document.getElementById('viewFront').addEventListener('click', () => setCameraView('front'));
+document.getElementById('view34').addEventListener('click', () => setCameraView('34'));
+document.getElementById('viewReset').addEventListener('click', () => {
+    wallGroup.rotation.set(0, 0, 0);
+    setCameraView('front');
+});
+
+/* ── Move mode ── */
+const overlay = document.getElementById('controlsOverlay');
+const moveToggleBtn = document.getElementById('moveToggle');
+const centerBtn = document.getElementById('centerBtn');
+const hint = document.getElementById('showroomHint');
+
+const dragPlane = new THREE.Plane();
+const dragOffset = new THREE.Vector3();
+const dragIntersect = new THREE.Vector3();
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let isDragging = false;
+
+function setMoveMode(on) {
+    state.moveMode = on;
+    controls.enableRotate = !on;
+    controls.enablePan = !on;
+    overlay.classList.toggle('move-mode', on);
+    moveToggleBtn.classList.toggle('active', on);
+    hint.textContent = on
+        ? 'Drag to position wall \u00b7 Scroll to zoom'
+        : 'Drag to rotate \u00b7 Scroll to zoom \u00b7 Middle/right-click to pan';
+}
+
+function updatePositionInfo() {
+    const p = wallGroup.position;
+    document.getElementById('infoPos').textContent =
+        p.x.toFixed(1) + ', ' + p.y.toFixed(1) + ', ' + p.z.toFixed(1) + ' in';
+}
+
+moveToggleBtn.addEventListener('click', () => setMoveMode(!state.moveMode));
+
+centerBtn.addEventListener('click', () => {
+    wallGroup.position.set(0, 0, 0);
+    controls.target.set(0, 0, 0);
+    controls.update();
+    updatePositionInfo();
+});
+
+function updateMouseNDC(e) {
+    const rect = overlay.getBoundingClientRect();
+    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+}
+
+overlay.addEventListener('mousedown', e => {
+    if (!state.moveMode || e.button !== 0) return;
+    e.stopPropagation();
+    updateMouseNDC(e);
+
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+    dragPlane.setFromNormalAndCoplanarPoint(camDir.clone().negate(), wallGroup.position);
+
+    raycaster.setFromCamera(mouse, camera);
+    if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
+        dragOffset.copy(dragIntersect).sub(wallGroup.position);
+        isDragging = true;
+    }
+});
+
+overlay.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    updateMouseNDC(e);
+
+    raycaster.setFromCamera(mouse, camera);
+    if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
+        wallGroup.position.copy(dragIntersect.sub(dragOffset));
+        controls.target.copy(wallGroup.position);
+        updatePositionInfo();
+    }
+});
+
+overlay.addEventListener('mouseup', () => { isDragging = false; });
+overlay.addEventListener('mouseleave', () => { isDragging = false; });
+
+/* ── Boot ── */
+init();
+</script>
+
+</body>
+</html>
