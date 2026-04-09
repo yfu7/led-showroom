@@ -615,6 +615,8 @@
             position: relative;
             background: #000;
             overflow: hidden;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
         }
 
         .css3d-content-el img,
@@ -638,6 +640,62 @@
         .sidebar::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
 
         .hidden { display: none !important; }
+
+        /* ── Corner entries ── */
+        .corner-entry {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 0;
+            border-bottom: 1px solid #222;
+        }
+
+        .corner-entry:last-child { border-bottom: none; }
+
+        .corner-entry select,
+        .corner-entry input[type="number"] {
+            padding: 5px 6px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 13px;
+        }
+
+        .corner-entry select { width: 58px; text-align: center; }
+        .corner-entry input[type="number"] { width: 64px; text-align: center; }
+        .corner-entry .corner-label { font-size: 12px; color: #888; white-space: nowrap; }
+
+        .corner-entry .remove-corner {
+            background: none;
+            border: none;
+            color: #ef4444;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: auto;
+        }
+
+        .corner-entry .remove-corner:hover { background: rgba(239, 68, 68, 0.1); }
+
+        .add-corner-btn {
+            width: 100%;
+            padding: 8px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #93c5fd;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s;
+            margin-top: 8px;
+        }
+
+        .add-corner-btn:hover {
+            border-color: #3b82f6;
+            background: #111;
+        }
     </style>
 </head>
 <body>
@@ -684,6 +742,13 @@
         </div>
     </div>
 
+    <!-- Corner Configuration -->
+    <div class="section">
+        <div class="section-title">Corners</div>
+        <div id="cornerList"></div>
+        <button class="add-corner-btn" id="addCornerBtn">+ Add Corner</button>
+    </div>
+
     <!-- Content Source -->
     <div class="section">
         <div class="section-title">Content Source</div>
@@ -700,6 +765,13 @@
                 <div class="subtext">JPG, PNG, WebP, GIF, SVG</div>
             </div>
             <input type="file" id="imageInput" accept="image/*" style="display:none">
+            <div style="display:flex;gap:6px;margin-top:10px;">
+                <button class="add-corner-btn" id="loadTestPattern" style="margin:0;flex:1;">Test Pattern</button>
+                <div style="display:flex;align-items:center;gap:6px;flex:1;">
+                    <input type="color" id="solidColorPicker" value="#3b82f6" style="width:36px;height:32px;padding:0;border:1px solid #333;border-radius:6px;background:#0a0a0a;cursor:pointer;">
+                    <button class="add-corner-btn" id="loadSolidColor" style="margin:0;flex:1;">Solid Color</button>
+                </div>
+            </div>
             <div class="current-content hidden" id="imageInfo">
                 <span class="name" id="imageName"></span>
                 <button class="clear-btn" data-clear="content">Clear</button>
@@ -813,6 +885,10 @@
             <div class="subtext">A photo of where the wall will be placed</div>
         </div>
         <input type="file" id="venueInput" accept="image/*" style="display:none">
+        <div class="config-row" style="margin-top:12px">
+            <label>Background Color</label>
+            <input type="color" id="bgColorPicker" value="#0a0a0f" style="width:40px;height:28px;padding:0;border:1px solid #333;border-radius:6px;background:#0a0a0a;cursor:pointer;">
+        </div>
         <button class="venue-clear hidden" id="venueClearBtn">Clear Background</button>
     </div>
 
@@ -918,7 +994,8 @@ const state = {
     autoRotate: false,
     doubleSided: false,
     moveMode: false,
-    showAccessories: false
+    showAccessories: false,
+    corners: []  // { afterCol: number, angle: number (degrees, -270 to +90) }
 };
 
 /* Derived wall dimensions — single source of truth */
@@ -934,12 +1011,77 @@ function wallDims() {
     };
 }
 
+/* Column layout with corners — computes per-column 3D position & rotation */
+function computeColumnLayout() {
+    const d = wallDims();
+    const step = PANEL_W_IN + d.gap;
+
+    // Build corner lookup: afterCol → angle (degrees)
+    const cornerMap = {};
+    state.corners.forEach(c => { cornerMap[c.afterCol] = c.angle; });
+
+    const columns = []; // { x, z, rotY }
+    let x = 0, z = 0, walkAngle = 0;
+
+    for (let c = 0; c < d.cols; c++) {
+        columns.push({ x, z, rotY: walkAngle });
+
+        if (c < d.cols - 1) {
+            const isCorner = cornerMap[c] !== undefined;
+            // At corners use panel half-width (no gap) so edges meet flush
+            const hs = isCorner ? PANEL_W_IN / 2 : step / 2;
+
+            // Advance to column edge
+            x += Math.cos(walkAngle) * hs;
+            z -= Math.sin(walkAngle) * hs;
+
+            // Apply corner rotation if present
+            // +angle = convex (folds toward viewer), -angle = concave (folds away)
+            if (isCorner) {
+                walkAngle += cornerMap[c] * Math.PI / 180;
+            }
+
+            // Advance from edge to next column center
+            x += Math.cos(walkAngle) * hs;
+            z -= Math.sin(walkAngle) * hs;
+        }
+    }
+
+    // Center the layout around the origin
+    let cx = 0, cz = 0;
+    columns.forEach(col => { cx += col.x; cz += col.z; });
+    cx /= d.cols;
+    cz /= d.cols;
+    columns.forEach(col => { col.x -= cx; col.z -= cz; });
+
+    return columns;
+}
+
+/* Compute flat segments (runs of columns between corners) */
+function computeSegments() {
+    const cols = state.cols;
+    const cornerCols = new Set(state.corners.map(c => c.afterCol));
+    const segments = [];
+    let start = 0;
+    for (let c = 0; c < cols - 1; c++) {
+        if (cornerCols.has(c)) {
+            segments.push({ startCol: start, endCol: c });
+            start = c + 1;
+        }
+    }
+    segments.push({ startCol: start, endCol: cols - 1 });
+    return segments;
+}
+
 /* ── Cached materials (created once, reused across rebuilds) ── */
-const sideMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1f, metalness: 0.65, roughness: 0.35 });
-const frontMat = new THREE.MeshStandardMaterial({ color: 0x080810, emissive: 0x0a0a18, emissiveIntensity: 0.6, metalness: 0.25, roughness: 0.3 });
-const backMat = new THREE.MeshStandardMaterial({ color: 0x111114, metalness: 0.5, roughness: 0.55 });
+const sideMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b8, metalness: 0.6, roughness: 0.35 });
+const frontMat = new THREE.MeshStandardMaterial({ color: 0x2a2a30, emissive: 0x101018, emissiveIntensity: 0.5, metalness: 0.2, roughness: 0.3 });
+const backMat = new THREE.MeshStandardMaterial({ color: 0xa0a0a8, metalness: 0.4, roughness: 0.55 });
+/* BoxGeometry face order: +X, -X, +Y, -Y, +Z (front), -Z (back) */
 const panelMats = [sideMat, sideMat, sideMat, sideMat, frontMat, backMat];
-const metalMat = new THREE.MeshStandardMaterial({ color: 0x303035, metalness: 0.75, roughness: 0.28 });
+const metalMat = new THREE.MeshStandardMaterial({ color: 0x404048, metalness: 0.7, roughness: 0.28 });
+const cornerFillMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b8, metalness: 0.6, roughness: 0.35, side: THREE.DoubleSide });
+const bezelLineMat = new THREE.LineBasicMaterial({ color: 0x555560 });
 
 /* Shared geometry (identical for every panel / accessory piece) */
 const panelGeom = new THREE.BoxGeometry(PANEL_W_IN, PANEL_H_IN, PANEL_D_IN);
@@ -948,17 +1090,58 @@ const vertBarGeom = new THREE.BoxGeometry(SUPPORT_W, SUPPORT_VERT_H, SUPPORT_THI
 const footGeom = new THREE.BoxGeometry(SUPPORT_W, SUPPORT_THICK, SUPPORT_FOOT_D);
 const diagGeom = new THREE.BoxGeometry(SUPPORT_W, SUPPORT_FOOT_D * Math.SQRT2, SUPPORT_THICK);
 
+/* Build custom panel geometry with 45-degree miter cuts on corner-adjacent edges.
+   leftCut / rightCut: { front: number, back: number } or null.
+   "front" = amount trimmed from the +Z (screen) edge, "back" = from -Z (cabinet) edge. */
+function buildMiteredPanelGeom(leftCut, rightCut) {
+    const hw = PANEL_W_IN / 2, hh = PANEL_H_IN / 2, hd = PANEL_D_IN / 2;
+    const lf = leftCut ? leftCut.front : 0, lb = leftCut ? leftCut.back : 0;
+    const rf = rightCut ? rightCut.front : 0, rb = rightCut ? rightCut.back : 0;
+
+    // 8 corner vertices (some shifted inward by miter amount)
+    const FTL = [-hw + lf, hh, hd],  FTR = [hw - rf, hh, hd];
+    const FBR = [hw - rf, -hh, hd],  FBL = [-hw + lf, -hh, hd];
+    const BTL = [-hw + lb, hh, -hd], BTR = [hw - rb, hh, -hd];
+    const BBR = [hw - rb, -hh, -hd], BBL = [-hw + lb, -hh, -hd];
+
+    // Two CCW triangles for a quad viewed from outside
+    function quad(a, b, c, d) {
+        return [...a, ...b, ...c, ...a, ...c, ...d];
+    }
+
+    const positions = new Float32Array([
+        ...quad(FTR, FBR, BBR, BTR),  // +X right face
+        ...quad(BTL, BBL, FBL, FTL),  // -X left face
+        ...quad(FTL, FTR, BTR, BTL),  // +Y top face
+        ...quad(FBL, BBL, BBR, FBR),  // -Y bottom face
+        ...quad(FTL, FBL, FBR, FTR),  // +Z front face (screen)
+        ...quad(BTR, BBR, BBL, BTL),  // -Z back face (cabinet)
+    ]);
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geom.computeVertexNormals();
+
+    // 6 material groups matching panelMats order: +X, -X, +Y, -Y, +Z, -Z
+    for (let i = 0; i < 6; i++) geom.addGroup(i * 6, 6, i);
+
+    return geom;
+}
+
 /* ── Three.js objects ── */
 let scene, camera, renderer, cssRenderer, controls;
 let wallGroup;
 let panelMeshes = [];
-let contentLayerEl = null;
-let contentObject = null;
-let backContentLayerEl = null;
-let backContentObject = null;
+let contentObjects = [];      // CSS3DObject per segment
+let contentLayerEls = [];     // container div per segment
+let backContentObjects = [];
+let backContentLayerEls = [];
 let lastContentUrl = null;
 let lastContentType = null;
 let accessoryMeshes = [];
+let cornerFillMeshes = [];
+let bezelLineMeshes = [];
+let customPanelGeoms = [];
 let venueObjectUrl = null;
 
 /* ── Init ── */
@@ -1033,33 +1216,76 @@ function animate() {
     if (state.autoRotate) wallGroup.rotation.y += 0.004;
     controls.update();
     renderer.render(scene, camera);
-    if (contentObject || backContentObject) cssRenderer.render(scene, camera);
+    cssRenderer.render(scene, camera);
 }
 
 /* ── Wall construction ── */
 function buildWall() {
     panelMeshes.forEach(m => wallGroup.remove(m));
+    customPanelGeoms.forEach(g => g.dispose());
     panelMeshes = [];
+    customPanelGeoms = [];
 
     const d = wallDims();
+    const layout = computeColumnLayout();
 
-    for (let r = 0; r < d.rows; r++) {
-        for (let c = 0; c < d.cols; c++) {
-            const mesh = new THREE.Mesh(panelGeom, panelMats);
-            mesh.position.set(
-                -d.totalW / 2 + PANEL_W_IN / 2 + c * (PANEL_W_IN + d.gap),
-                d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap),
-                0
+    // Build miter cut info per column from corner definitions
+    const cornerMap = {};
+    state.corners.forEach(cn => { cornerMap[cn.afterCol] = cn.angle; });
+
+    const miterCuts = [];
+    for (let c = 0; c < d.cols; c++) {
+        const cut = { left: null, right: null };
+        // Corner to the left of this column (afterCol = c-1)
+        if (cornerMap[c - 1] !== undefined) {
+            const angle = cornerMap[c - 1];
+            // Extend front edge outward and trim back edge inward by equal amount
+            // so the 45° miter face passes through the original panel edge centerline
+            const halfCut = Math.min(
+                (PANEL_D_IN / 2) * Math.tan(Math.abs(angle) / 2 * Math.PI / 180),
+                PANEL_W_IN / 2
             );
+            cut.left = angle > 0
+                ? { front: -halfCut, back: halfCut }   // convex: extend front, trim back
+                : { front: halfCut, back: -halfCut };   // concave: trim front, extend back
+        }
+        // Corner to the right of this column (afterCol = c)
+        if (cornerMap[c] !== undefined) {
+            const angle = cornerMap[c];
+            const halfCut = Math.min(
+                (PANEL_D_IN / 2) * Math.tan(Math.abs(angle) / 2 * Math.PI / 180),
+                PANEL_W_IN / 2
+            );
+            cut.right = angle > 0
+                ? { front: -halfCut, back: halfCut }
+                : { front: halfCut, back: -halfCut };
+        }
+        miterCuts.push(cut);
+    }
+
+    for (let c = 0; c < d.cols; c++) {
+        const col = layout[c];
+        const cut = miterCuts[c];
+        const hasMiter = cut.left || cut.right;
+        const geom = hasMiter ? buildMiteredPanelGeom(cut.left, cut.right) : panelGeom;
+        if (hasMiter) customPanelGeoms.push(geom);
+
+        for (let r = 0; r < d.rows; r++) {
+            const mesh = new THREE.Mesh(geom, panelMats);
+            const y = d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap);
+            mesh.position.set(col.x, y, col.z);
+            mesh.rotation.y = col.rotY;
             wallGroup.add(mesh);
             panelMeshes.push(mesh);
         }
     }
 
+    buildBezelLines(layout, d, miterCuts);
     updateSidebarInfo();
     applyCwRect();
-    fitCameraToWall(d.totalW, d.totalH);
+    fitCameraToWall();
     buildAccessories();
+    // Corner fill wedges no longer needed — miter faces meet seamlessly
 }
 
 function buildAccessories() {
@@ -1068,42 +1294,222 @@ function buildAccessories() {
     if (!state.showAccessories) return;
 
     const d = wallDims();
+    const layout = computeColumnLayout();
     const panelBottom = -d.totalH / 2;
     const groundY = panelBottom - BASE_H;
-    const vBackZ = -PANEL_D_IN / 2 - SUPPORT_THICK;
     const inset = 2.5;
 
-    function addMesh(geom, x, y, z, rx) {
-        const m = new THREE.Mesh(geom, metalMat);
-        m.position.set(x, y, z);
-        if (rx) m.rotation.x = rx;
-        wallGroup.add(m);
-        accessoryMeshes.push(m);
-    }
-
     for (let c = 0; c < d.cols; c++) {
-        const colX = -d.totalW / 2 + PANEL_W_IN / 2 + c * (PANEL_W_IN + d.gap);
+        const col = layout[c];
 
-        addMesh(baseGeom, colX, panelBottom - BASE_H / 2, PANEL_D_IN / 2 - BASE_D / 2);
+        // Each accessory is placed in the column's local coordinate frame,
+        // then rotated to match the column's orientation.
+        function addLocal(geom, lx, ly, lz, rx) {
+            const m = new THREE.Mesh(geom, metalMat);
+            // Rotate local offset by column's Y rotation
+            const cos = Math.cos(col.rotY), sin = Math.sin(col.rotY);
+            m.position.set(
+                col.x + lx * cos - lz * sin,
+                ly,
+                col.z - lx * sin - lz * cos
+            );
+            m.rotation.y = col.rotY;
+            if (rx) m.rotation.x = rx;
+            wallGroup.add(m);
+            accessoryMeshes.push(m);
+        }
 
-        const supportXs = [
-            colX - PANEL_W_IN / 2 + SUPPORT_W / 2 + inset,
-            colX + PANEL_W_IN / 2 - SUPPORT_W / 2 - inset
+        addLocal(baseGeom, 0, panelBottom - BASE_H / 2, -(PANEL_D_IN / 2 - BASE_D / 2));
+
+        const offsets = [
+            -PANEL_W_IN / 2 + SUPPORT_W / 2 + inset,
+             PANEL_W_IN / 2 - SUPPORT_W / 2 - inset
         ];
+        const vBackZ = -PANEL_D_IN / 2 - SUPPORT_THICK;
 
-        for (const sx of supportXs) {
-            addMesh(vertBarGeom, sx, groundY + SUPPORT_VERT_H / 2, -PANEL_D_IN / 2 - SUPPORT_THICK / 2);
-            addMesh(footGeom, sx, groundY + SUPPORT_THICK / 2, vBackZ - SUPPORT_FOOT_D / 2);
-            addMesh(diagGeom, sx, groundY + SUPPORT_FOOT_D / 2, vBackZ - SUPPORT_FOOT_D / 2, SUPPORT_ANGLE_RAD);
+        for (const lx of offsets) {
+            addLocal(vertBarGeom, lx, groundY + SUPPORT_VERT_H / 2, PANEL_D_IN / 2 + SUPPORT_THICK / 2);
+            addLocal(footGeom, lx, groundY + SUPPORT_THICK / 2, -vBackZ + SUPPORT_FOOT_D / 2);
+            addLocal(diagGeom, lx, groundY + SUPPORT_FOOT_D / 2, -vBackZ + SUPPORT_FOOT_D / 2, SUPPORT_ANGLE_RAD);
         }
     }
 }
 
-function fitCameraToWall(w, h) {
+/* ── Corner miter fills ── */
+function buildCornerFills() {
+    cornerFillMeshes.forEach(m => { m.geometry.dispose(); wallGroup.remove(m); });
+    cornerFillMeshes = [];
+
+    if (state.corners.length === 0) return;
+
+    const d = wallDims();
+    const layout = computeColumnLayout();
+    const hd = PANEL_D_IN / 2;   // half-depth
+    const hw = PANEL_W_IN / 2;   // half-width
+
+    for (const corner of state.corners) {
+        const c = corner.afterCol;
+        if (c + 1 >= layout.length) continue;
+        if (Math.abs(corner.angle) < 0.5) continue;
+
+        const colA = layout[c];
+        const colB = layout[c + 1];
+
+        // Helper: local offset to world XZ for a column
+        function toWorld(col, lx, lz) {
+            const cos = Math.cos(col.rotY), sin = Math.sin(col.rotY);
+            return {
+                x: col.x + lx * cos - lz * sin,
+                z: col.z - lx * sin - lz * cos
+            };
+        }
+
+        // Right edge of panel A: front and back corners
+        const aRF = toWorld(colA, hw, hd);    // A right-front
+        const aRB = toWorld(colA, hw, -hd);   // A right-back
+
+        // Left edge of panel B: front and back corners
+        const bLF = toWorld(colB, -hw, hd);   // B left-front
+        const bLB = toWorld(colB, -hw, -hd);  // B left-back
+
+        // For convex corners (+angle), the front edges meet and there's a wedge
+        // gap at the back. For concave (-angle), back edges meet, gap at front.
+        // Build a triangular prism to fill the wedge.
+        // The three XZ vertices of the triangle cross-section:
+        //   - The meeting point (where edges touch)
+        //   - The two separated corners from each panel
+
+        // The miter point (where the two panel edges converge)
+        // For convex: front edges meet → miter at front
+        // For concave: back edges meet → miter at back
+        const convex = corner.angle > 0;
+        const miterPt = convex ? aRF : aRB;  // these coincide at the meeting point
+        const gapA = convex ? aRB : aRF;      // panel A's open corner
+        const gapB = convex ? bLB : bLF;      // panel B's open corner
+
+        // Skip degenerate triangle
+        const dx1 = gapA.x - miterPt.x, dz1 = gapA.z - miterPt.z;
+        const dx2 = gapB.x - miterPt.x, dz2 = gapB.z - miterPt.z;
+        const triArea = Math.abs(dx1 * dz2 - dx2 * dz1);
+        if (triArea < 0.001) continue;
+
+        for (let r = 0; r < d.rows; r++) {
+            const y = d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap);
+            const yBot = y - PANEL_H_IN / 2;
+            const yTop = y + PANEL_H_IN / 2;
+
+            // 6 vertices: triangle at bottom (0,1,2) + triangle at top (3,4,5)
+            const positions = new Float32Array([
+                miterPt.x, yBot, miterPt.z,   // 0 miter bottom
+                gapA.x,    yBot, gapA.z,       // 1 gapA bottom
+                gapB.x,    yBot, gapB.z,       // 2 gapB bottom
+                miterPt.x, yTop, miterPt.z,   // 3 miter top
+                gapA.x,    yTop, gapA.z,       // 4 gapA top
+                gapB.x,    yTop, gapB.z,       // 5 gapB top
+            ]);
+
+            // Wind faces outward
+            const indices = convex ? [
+                // Bottom cap
+                0, 2, 1,
+                // Top cap
+                3, 4, 5,
+                // Miter face (diagonal cut — the visible 45° face)
+                1, 2, 5,   1, 5, 4,
+                // Side A (panel A's back face plane)
+                0, 1, 4,   0, 4, 3,
+                // Side B (panel B's back face plane)
+                2, 0, 3,   2, 3, 5,
+            ] : [
+                // Bottom cap
+                0, 1, 2,
+                // Top cap
+                3, 5, 4,
+                // Miter face (diagonal cut — the visible 45° face)
+                1, 5, 2,   1, 4, 5,
+                // Side A (panel A's front face plane)
+                0, 4, 1,   0, 3, 4,
+                // Side B (panel B's front face plane)
+                2, 3, 0,   2, 5, 3,
+            ];
+
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geom.setIndex(indices);
+            geom.computeVertexNormals();
+
+            const mesh = new THREE.Mesh(geom, cornerFillMat);
+            wallGroup.add(mesh);
+            cornerFillMeshes.push(mesh);
+        }
+    }
+}
+
+/* Build panel edge delineating lines on the front face of each panel */
+function buildBezelLines(layout, d, miterCuts) {
+    bezelLineMeshes.forEach(m => { m.geometry.dispose(); wallGroup.remove(m); });
+    bezelLineMeshes = [];
+
+    const hw = PANEL_W_IN / 2, hh = PANEL_H_IN / 2;
+    const lineZ = PANEL_D_IN / 2 + 0.03; // just in front of screen face
+
+    for (let c = 0; c < d.cols; c++) {
+        const col = layout[c];
+        const cut = miterCuts[c];
+        const lfCut = cut.left ? cut.left.front : 0;
+        const rfCut = cut.right ? cut.right.front : 0;
+        const pts = [];
+
+        for (let r = 0; r < d.rows; r++) {
+            const y = d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap);
+            const lx = -hw + lfCut, rx = hw - rfCut;
+            const yt = y + hh, yb = y - hh;
+
+            // 4 line segments per panel (pairs of vertices for LineSegments)
+            pts.push(lx, yt, lineZ,  rx, yt, lineZ);   // top edge
+            pts.push(rx, yt, lineZ,  rx, yb, lineZ);   // right edge
+            pts.push(rx, yb, lineZ,  lx, yb, lineZ);   // bottom edge
+            pts.push(lx, yb, lineZ,  lx, yt, lineZ);   // left edge
+        }
+
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+        const lines = new THREE.LineSegments(geom, bezelLineMat);
+        lines.position.set(col.x, 0, col.z);
+        lines.rotation.y = col.rotY;
+        wallGroup.add(lines);
+        bezelLineMeshes.push(lines);
+    }
+}
+
+/* Bounding box that accounts for corners */
+function wallBounds() {
+    const layout = computeColumnLayout();
+    const d = wallDims();
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    const hw = PANEL_W_IN / 2;
+    for (const col of layout) {
+        const cos = Math.cos(col.rotY), sin = Math.sin(col.rotY);
+        // Panel corners in world XZ at this column
+        for (const lx of [-hw, hw]) {
+            for (const lz of [-PANEL_D_IN / 2, PANEL_D_IN / 2]) {
+                const wx = col.x + lx * cos - lz * sin;
+                const wz = col.z - lx * sin - lz * cos;
+                minX = Math.min(minX, wx); maxX = Math.max(maxX, wx);
+                minZ = Math.min(minZ, wz); maxZ = Math.max(maxZ, wz);
+            }
+        }
+    }
+    return { w: maxX - minX, h: d.totalH, depth: maxZ - minZ };
+}
+
+function fitCameraToWall() {
+    const b = wallBounds();
     const fov = camera.fov * Math.PI / 180;
     const aspect = camera.aspect;
-    const distH = (h / 2) / Math.tan(fov / 2);
-    const distW = (w / 2) / Math.tan(fov / 2) / aspect;
+    const span = Math.max(b.w, b.depth);
+    const distH = (b.h / 2) / Math.tan(fov / 2);
+    const distW = (span / 2) / Math.tan(fov / 2) / aspect;
     const dist = Math.max(distH, distW) * 1.6;
 
     controls.target.set(0, 0, 0);
@@ -1113,11 +1519,12 @@ function fitCameraToWall(w, h) {
 }
 
 function setCameraView(view) {
-    const d = wallDims();
+    const b = wallBounds();
     const fov = camera.fov * Math.PI / 180;
     const aspect = camera.aspect;
-    const distH = (d.totalH / 2) / Math.tan(fov / 2);
-    const distW = (d.totalW / 2) / Math.tan(fov / 2) / aspect;
+    const span = Math.max(b.w, b.depth);
+    const distH = (b.h / 2) / Math.tan(fov / 2);
+    const distW = (span / 2) / Math.tan(fov / 2) / aspect;
     const dist = Math.max(distH, distW) * 1.6;
 
     controls.target.set(0, 0, 0);
@@ -1147,28 +1554,96 @@ function applyCwRect() {
         state.cwRect.y = Math.min(state.cwRect.y, d.wallHPx - state.cwRect.h);
     }
 
-    const cwInW = state.cwRect.w * IN_PER_PX_W;
-    const cwInH = state.cwRect.h * IN_PER_PX_H;
+    const segments = computeSegments();
+    const layout = computeColumnLayout();
+    const cyIn = d.totalH / 2 - state.cwRect.y * IN_PER_PX_H - state.cwRect.h * IN_PER_PX_H / 2;
 
-    const cxIn = -d.totalW / 2 + state.cwRect.x * IN_PER_PX_W + cwInW / 2;
-    const cyIn = d.totalH / 2 - state.cwRect.y * IN_PER_PX_H - cwInH / 2;
+    // Build corner map for content extension at miter edges
+    const cMap = {};
+    state.corners.forEach(cn => { cMap[cn.afterCol] = cn.angle; });
 
-    if (contentLayerEl) {
-        contentLayerEl.style.width = state.cwRect.w + 'px';
-        contentLayerEl.style.height = state.cwRect.h + 'px';
+    function positionSegmentObjects(objects, layerEls, zOff, flipY) {
+        objects.forEach((obj, i) => {
+            if (i >= segments.length) return;
+            const seg = segments[i];
+            const segCols = seg.endCol - seg.startCol + 1;
+
+            // Physical width and scale (standard, before miter extension)
+            const segInW = segCols * PANEL_W_IN + (segCols - 1) * d.gap;
+            const segIppx = segInW / (segCols * PANEL_PX_W);
+
+            // Compute extra pixels at corner-adjacent edges to cover miter extension
+            let extLeftPx = 0, extRightPx = 0;
+            if (cMap[seg.startCol - 1] !== undefined) {
+                const hc = Math.min((PANEL_D_IN / 2) * Math.tan(Math.abs(cMap[seg.startCol - 1]) / 2 * Math.PI / 180), PANEL_W_IN / 2);
+                extLeftPx = Math.ceil(hc / segIppx);
+            }
+            if (cMap[seg.endCol] !== undefined) {
+                const hc = Math.min((PANEL_D_IN / 2) * Math.tan(Math.abs(cMap[seg.endCol]) / 2 * Math.PI / 180), PANEL_W_IN / 2);
+                extRightPx = Math.ceil(hc / segIppx);
+            }
+
+            // Clip: overlap with content window, using extended pixel range at corners
+            const segStartPx = seg.startCol * PANEL_PX_W - extLeftPx;
+            const segEndPx = (seg.endCol + 1) * PANEL_PX_W + extRightPx;
+            const cwLeft = state.cwRect.x;
+            const cwRight = state.cwRect.x + state.cwRect.w;
+
+            const overlapLeft = Math.max(segStartPx, cwLeft);
+            const overlapRight = Math.min(segEndPx, cwRight);
+
+            if (overlapRight <= overlapLeft) {
+                obj.visible = false;
+                return;
+            }
+            obj.visible = true;
+
+            const clipW = overlapRight - overlapLeft;
+            const clipH = state.cwRect.h;
+
+            layerEls[i].style.width = clipW + 'px';
+            layerEls[i].style.height = clipH + 'px';
+
+            // Offset the inner content element so correct portion shows
+            const innerEl = layerEls[i].firstChild;
+            if (innerEl) {
+                innerEl.style.position = 'absolute';
+                innerEl.style.width = state.cwRect.w + 'px';
+                innerEl.style.height = state.cwRect.h + 'px';
+                innerEl.style.left = -(overlapLeft - cwLeft) + 'px';
+                innerEl.style.top = '0px';
+                innerEl.style.objectFit = 'cover';
+            }
+
+            // Compute segment center in 3D from actual column layout positions
+            const firstCol = layout[seg.startCol];
+            const lastCol = layout[seg.endCol];
+            const segCx = (firstCol.x + lastCol.x) / 2;
+            const segCz = (firstCol.z + lastCol.z) / 2;
+            const rotY = firstCol.rotY;  // all columns in segment share rotation
+            const cos = Math.cos(rotY), sin = Math.sin(rotY);
+
+            // Clip center relative to original segment center (in pixels)
+            const clipCenterPx = overlapLeft + clipW / 2;
+            const segCenterPx = seg.startCol * PANEL_PX_W + (segCols * PANEL_PX_W) / 2;
+            const offsetIn = (clipCenterPx - segCenterPx) * segIppx;
+
+            // Local X offset along the segment, local Z from panel face
+            const wx = segCx + offsetIn * cos - zOff * sin;
+            const wz = segCz - offsetIn * sin - zOff * cos;
+
+            obj.position.set(wx, cyIn, wz);
+            obj.scale.set(segIppx, IN_PER_PX_H, segIppx);
+            obj.rotation.set(0, rotY + (flipY ? Math.PI : 0), 0);
+        });
     }
 
-    if (contentObject) {
-        contentObject.position.set(cxIn, cyIn, PANEL_D_IN / 2 + 0.6);
-        contentObject.scale.set(IN_PER_PX_W, IN_PER_PX_H, IN_PER_PX_W);
+    if (contentObjects.length) {
+        // Negative zOff → front face (+Z local), just barely in front of panel surface
+        positionSegmentObjects(contentObjects, contentLayerEls, -(PANEL_D_IN / 2 + 0.01), false);
     }
-
-    if (backContentObject) {
-        backContentLayerEl.style.width = state.cwRect.w + 'px';
-        backContentLayerEl.style.height = state.cwRect.h + 'px';
-        backContentObject.position.set(cxIn, cyIn, -(PANEL_D_IN / 2 + 0.6));
-        backContentObject.scale.set(IN_PER_PX_W, IN_PER_PX_H, IN_PER_PX_W);
-        backContentObject.rotation.set(0, Math.PI, 0);
+    if (backContentObjects.length) {
+        positionSegmentObjects(backContentObjects, backContentLayerEls, PANEL_D_IN / 2 + 0.01, true);
     }
 
     updateCwInfo();
@@ -1229,23 +1704,47 @@ function createContentEl(type, url) {
     return ifr;
 }
 
-function ensureContentLayer() {
-    if (!contentLayerEl) {
-        contentLayerEl = document.createElement('div');
-        contentLayerEl.className = 'css3d-content-el';
-    }
+/* ── Content management (multi-segment) ── */
+function removeContentObjects() {
+    contentObjects.forEach(o => wallGroup.remove(o));
+    contentLayerEls.forEach(el => purgeContentEls(el));
+    contentObjects = [];
+    contentLayerEls = [];
 }
 
-/* ── Content management ── */
+function removeBackContentObjects() {
+    backContentObjects.forEach(o => wallGroup.remove(o));
+    backContentLayerEls.forEach(el => purgeContentEls(el));
+    backContentObjects = [];
+    backContentLayerEls = [];
+}
+
+function buildContentSegments(type, url) {
+    const segments = computeSegments();
+    const objects = [];
+    const els = [];
+
+    for (let i = 0; i < segments.length; i++) {
+        const container = document.createElement('div');
+        container.className = 'css3d-content-el';
+        container.style.overflow = 'hidden';
+        container.appendChild(createContentEl(type, url));
+
+        const obj = new CSS3DObject(container);
+        wallGroup.add(obj);
+        objects.push(obj);
+        els.push(container);
+    }
+    return { objects, els };
+}
+
 function setContent(type, url, name) {
-    ensureContentLayer();
-
-    if (contentObject) { wallGroup.remove(contentObject); contentObject = null; }
-    purgeContentEls(contentLayerEl);
-
+    removeContentObjects();
     document.querySelectorAll('.current-content').forEach(el => el.classList.add('hidden'));
 
-    contentLayerEl.appendChild(createContentEl(type, url));
+    const result = buildContentSegments(type, url);
+    contentObjects = result.objects;
+    contentLayerEls = result.els;
 
     const infoMap = { image: 'imageInfo', video: 'videoInfo', website: 'websiteInfo' };
     const nameMap = { image: 'imageName', video: 'videoName', website: 'websiteName' };
@@ -1255,34 +1754,22 @@ function setContent(type, url, name) {
     lastContentUrl = url;
     lastContentType = type;
 
-    contentObject = new CSS3DObject(contentLayerEl);
-    wallGroup.add(contentObject);
-
     syncBackContent(type, url);
     applyCwRect();
 }
 
 function syncBackContent(type, url) {
-    if (backContentObject) { wallGroup.remove(backContentObject); backContentObject = null; }
-    purgeContentEls(backContentLayerEl);
-
+    removeBackContentObjects();
     if (!state.doubleSided || !type) return;
 
-    if (!backContentLayerEl) {
-        backContentLayerEl = document.createElement('div');
-        backContentLayerEl.className = 'css3d-content-el';
-    }
-
-    backContentLayerEl.appendChild(createContentEl(type, url));
-    backContentObject = new CSS3DObject(backContentLayerEl);
-    wallGroup.add(backContentObject);
+    const result = buildContentSegments(type, url);
+    backContentObjects = result.objects;
+    backContentLayerEls = result.els;
 }
 
 function clearContent() {
-    if (contentObject) { wallGroup.remove(contentObject); contentObject = null; }
-    if (backContentObject) { wallGroup.remove(backContentObject); backContentObject = null; }
-    purgeContentEls(contentLayerEl);
-    purgeContentEls(backContentLayerEl);
+    removeContentObjects();
+    removeBackContentObjects();
     document.querySelectorAll('.current-content').forEach(el => el.classList.add('hidden'));
     lastContentUrl = null;
     lastContentType = null;
@@ -1295,6 +1782,7 @@ function adjustValue(id, delta) {
     const input = document.getElementById(id);
     input.value = Math.max(1, Math.min(50, parseInt(input.value) + delta));
     state[id] = parseInt(input.value);
+    if (id === 'cols') pruneCorners();
     buildWall();
 }
 
@@ -1310,11 +1798,98 @@ document.querySelectorAll('[data-action]').forEach(btn => {
 
 document.getElementById('cols').addEventListener('change', e => {
     state.cols = parseInt(e.target.value) || 1;
+    pruneCorners();
     buildWall();
 });
 document.getElementById('rows').addEventListener('change', e => {
     state.rows = parseInt(e.target.value) || 1;
     buildWall();
+});
+
+/* ── Corner management ── */
+function pruneCorners() {
+    state.corners = state.corners.filter(c => c.afterCol < state.cols - 1);
+    renderCornerList();
+}
+
+function renderCornerList() {
+    const list = document.getElementById('cornerList');
+    list.innerHTML = '';
+    state.corners.forEach((corner, idx) => {
+        const entry = document.createElement('div');
+        entry.className = 'corner-entry';
+
+        const label = document.createElement('span');
+        label.className = 'corner-label';
+        label.textContent = 'After col';
+
+        const sel = document.createElement('select');
+        for (let c = 0; c < state.cols - 1; c++) {
+            const opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = c + 1;
+            if (c === corner.afterCol) opt.selected = true;
+            sel.appendChild(opt);
+        }
+        sel.addEventListener('change', () => {
+            const newCol = parseInt(sel.value);
+            // Prevent duplicate corners at same column
+            if (state.corners.some((cn, i) => i !== idx && cn.afterCol === newCol)) {
+                sel.value = corner.afterCol;
+                return;
+            }
+            corner.afterCol = newCol;
+            rebuildForCorners();
+        });
+
+        const angleInput = document.createElement('input');
+        angleInput.type = 'number';
+        angleInput.min = -270;
+        angleInput.max = 90;
+        angleInput.step = 5;
+        angleInput.value = corner.angle;
+        angleInput.addEventListener('change', () => {
+            corner.angle = Math.max(-270, Math.min(90, parseFloat(angleInput.value) || 0));
+            angleInput.value = corner.angle;
+            rebuildForCorners();
+        });
+
+        const degLabel = document.createElement('span');
+        degLabel.className = 'corner-label';
+        degLabel.textContent = '°';
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'remove-corner';
+        removeBtn.textContent = '✕';
+        removeBtn.addEventListener('click', () => {
+            state.corners.splice(idx, 1);
+            renderCornerList();
+            rebuildForCorners();
+        });
+
+        entry.append(label, sel, angleInput, degLabel, removeBtn);
+        list.appendChild(entry);
+    });
+}
+
+function rebuildForCorners() {
+    buildWall();
+    if (lastContentType && lastContentUrl) {
+        setContent(lastContentType, lastContentUrl,
+            document.querySelector('.current-content:not(.hidden) .name')?.textContent || '');
+    }
+}
+
+document.getElementById('addCornerBtn').addEventListener('click', () => {
+    // Find first available column position
+    const usedCols = new Set(state.corners.map(c => c.afterCol));
+    let newCol = 0;
+    while (usedCols.has(newCol) && newCol < state.cols - 1) newCol++;
+    if (newCol >= state.cols - 1) return; // all slots used
+
+    state.corners.push({ afterCol: newCol, angle: 90 });
+    renderCornerList();
+    rebuildForCorners();
 });
 
 /* Content tabs */
@@ -1348,6 +1923,84 @@ function wireUpload(zoneId, inputId, type) {
 }
 wireUpload('imageDropZone', 'imageInput', 'image');
 wireUpload('videoDropZone', 'videoInput', 'video');
+
+/* Built-in content generators */
+function generateTestPattern() {
+    const d = wallDims();
+    const w = d.wallWPx, h = d.wallHPx;
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+
+    // Rainbow gradient background
+    const grad = ctx.createLinearGradient(0, 0, w, 0);
+    grad.addColorStop(0, '#ff0000'); grad.addColorStop(0.17, '#ff8800');
+    grad.addColorStop(0.33, '#ffff00'); grad.addColorStop(0.5, '#00cc00');
+    grad.addColorStop(0.67, '#0066ff'); grad.addColorStop(0.83, '#8800ff');
+    grad.addColorStop(1, '#ff00ff');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    // Panel grid lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= w; x += PANEL_PX_W) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+    }
+    for (let y = 0; y <= h; y += PANEL_PX_H) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+
+    // Center crosshair
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath(); ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Label
+    const fontSize = Math.max(24, Math.min(60, Math.round(h * 0.08)));
+    ctx.font = 'bold ' + fontSize + 'px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillText('LED WALL TEST', w / 2 + 2, h / 2 + 2);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('LED WALL TEST', w / 2, h / 2);
+
+    // Resolution label
+    ctx.font = Math.round(fontSize * 0.4) + 'px sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText(w + ' x ' + h + ' px  (' + d.cols + 'x' + d.rows + ')', w / 2, h / 2 + fontSize * 0.7);
+
+    return canvas;
+}
+
+function loadTestPattern() {
+    const canvas = generateTestPattern();
+    canvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        setContent('image', url, 'Test Pattern');
+    });
+}
+
+function loadSolidColor(hex) {
+    const d = wallDims();
+    const canvas = document.createElement('canvas');
+    canvas.width = d.wallWPx; canvas.height = d.wallHPx;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = hex;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    canvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        setContent('image', url, 'Solid ' + hex);
+    });
+}
+
+document.getElementById('loadTestPattern').addEventListener('click', loadTestPattern);
+document.getElementById('loadSolidColor').addEventListener('click', () => {
+    loadSolidColor(document.getElementById('solidColorPicker').value);
+});
 
 document.querySelectorAll('[data-clear="content"]').forEach(b => b.addEventListener('click', clearContent));
 
@@ -1509,6 +2162,10 @@ venueClearBtn.addEventListener('click', () => {
     venueBg.style.backgroundImage = '';
     venueClearBtn.classList.add('hidden');
     venueInput.value = '';
+});
+
+document.getElementById('bgColorPicker').addEventListener('input', e => {
+    venueBg.style.background = e.target.value;
 });
 
 /* View options */
