@@ -641,6 +641,48 @@
 
         .hidden { display: none !important; }
 
+        /* ── Loading bar ── */
+        .content-loading {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: #1a1a2e;
+            overflow: hidden;
+            z-index: 10;
+            display: none;
+        }
+        .content-loading.active { display: block; }
+        .content-loading::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -40%;
+            width: 40%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, #3b82f6, transparent);
+            animation: loadSlide 1s ease-in-out infinite;
+        }
+        @keyframes loadSlide {
+            0% { left: -40%; }
+            100% { left: 100%; }
+        }
+
+        /* ── Dimension labels (CSS3D) ── */
+        .dim-label {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            color: #00ccff;
+            background: rgba(0, 0, 0, 0.75);
+            padding: 3px 8px;
+            border-radius: 3px;
+            white-space: nowrap;
+            pointer-events: none;
+            text-align: center;
+            backface-visibility: hidden;
+        }
+
         /* ── Corner entries ── */
         .corner-entry {
             display: flex;
@@ -810,7 +852,8 @@
     <div class="section">
         <div class="section-title">Content Window</div>
         <div class="cw-mode-tabs">
-            <div class="cw-mode-tab active" data-cwmode="fill">Fill Wall</div>
+            <div class="cw-mode-tab active" data-cwmode="fill">Stretch Fill</div>
+            <div class="cw-mode-tab" data-cwmode="scaled">Scaled Fill</div>
             <div class="cw-mode-tab" data-cwmode="custom">Custom Size</div>
         </div>
 
@@ -930,6 +973,13 @@
                 <span class="slider"></span>
             </div>
         </div>
+        <div class="toggle-row">
+            <label>Dimensions</label>
+            <div class="toggle">
+                <input type="checkbox" id="dimensionToggle">
+                <span class="slider"></span>
+            </div>
+        </div>
     </div>
 </aside>
 
@@ -937,6 +987,7 @@
     <div class="venue-bg" id="venueBg"></div>
     <div class="webgl-container" id="webglContainer"></div>
     <div class="css3d-container" id="css3dContainer"></div>
+    <div class="content-loading" id="contentLoading"></div>
     <div class="controls-overlay" id="controlsOverlay"></div>
 
     <div class="info-overlay" id="infoOverlay">
@@ -995,6 +1046,7 @@ const state = {
     doubleSided: false,
     moveMode: false,
     showAccessories: false,
+    showDimensions: false,
     corners: []  // { afterCol: number, angle: number (degrees, -270 to +90) }
 };
 
@@ -1082,6 +1134,7 @@ const panelMats = [sideMat, sideMat, sideMat, sideMat, frontMat, backMat];
 const metalMat = new THREE.MeshStandardMaterial({ color: 0x404048, metalness: 0.7, roughness: 0.28 });
 const cornerFillMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b8, metalness: 0.6, roughness: 0.35, side: THREE.DoubleSide });
 const bezelLineMat = new THREE.LineBasicMaterial({ color: 0x555560 });
+const dimLineMat = new THREE.LineBasicMaterial({ color: 0x00bbff });
 
 /* Shared geometry (identical for every panel / accessory piece) */
 const panelGeom = new THREE.BoxGeometry(PANEL_W_IN, PANEL_H_IN, PANEL_D_IN);
@@ -1142,6 +1195,7 @@ let accessoryMeshes = [];
 let cornerFillMeshes = [];
 let bezelLineMeshes = [];
 let customPanelGeoms = [];
+let dimensionObjects = [];   // Lines + CSS3D labels for dimension annotations
 let venueObjectUrl = null;
 
 /* ── Init ── */
@@ -1285,6 +1339,7 @@ function buildWall() {
     applyCwRect();
     fitCameraToWall();
     buildAccessories();
+    buildDimensions();
     // Corner fill wedges no longer needed — miter faces meet seamlessly
 }
 
@@ -1482,6 +1537,141 @@ function buildBezelLines(layout, d, miterCuts) {
     }
 }
 
+/* ── Dimension annotations (engineering-drawing style) ── */
+function buildDimensions() {
+    dimensionObjects.forEach(o => {
+        if (o.geometry) o.geometry.dispose();
+        wallGroup.remove(o);
+    });
+    dimensionObjects = [];
+    if (!state.showDimensions) return;
+
+    const d = wallDims();
+    const layout = computeColumnLayout();
+    const segments = computeSegments();
+    const dimMat = dimLineMat;
+
+    const wallTop = d.totalH / 2;
+    const wallBottom = -d.totalH / 2;
+    const zFront = PANEL_D_IN / 2 + 0.15;
+
+    const dimDrop = 4;
+    const dimLineY = wallBottom - dimDrop;
+    const extGap = 1;
+    const extOvershoot = 1.5;
+    const tickHalf = 0.8;
+
+    // ── Width dimension per segment/face ──
+    for (let si = 0; si < segments.length; si++) {
+        const seg = segments[si];
+        const segCols = seg.endCol - seg.startCol + 1;
+        const segW = segCols * PANEL_W_IN + (segCols - 1) * d.gap;
+        const segWPx = segCols * PANEL_PX_W;
+
+        const firstCol = layout[seg.startCol];
+        const lastCol = layout[seg.endCol];
+        const cx = (firstCol.x + lastCol.x) / 2;
+        const cz = (firstCol.z + lastCol.z) / 2;
+        const rotY = firstCol.rotY;
+        const cos = Math.cos(rotY), sin = Math.sin(rotY);
+
+        const halfW = segW / 2;
+        const pts = [];
+
+        // Extension lines (vertical drops from wall bottom)
+        pts.push(-halfW, wallBottom - extGap, zFront,
+                 -halfW, dimLineY - extOvershoot, zFront);
+        pts.push( halfW, wallBottom - extGap, zFront,
+                  halfW, dimLineY - extOvershoot, zFront);
+
+        // Horizontal dimension line
+        pts.push(-halfW, dimLineY, zFront,
+                  halfW, dimLineY, zFront);
+
+        // Serif ticks at endpoints
+        pts.push(-halfW, dimLineY - tickHalf, zFront,
+                 -halfW, dimLineY + tickHalf, zFront);
+        pts.push( halfW, dimLineY - tickHalf, zFront,
+                  halfW, dimLineY + tickHalf, zFront);
+
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+        const lines = new THREE.LineSegments(geom, dimMat);
+        lines.position.set(cx, 0, cz);
+        lines.rotation.y = rotY;
+        wallGroup.add(lines);
+        dimensionObjects.push(lines);
+
+        // Width label (CSS3D)
+        const wDiv = document.createElement('div');
+        wDiv.className = 'dim-label';
+        wDiv.textContent = segW.toFixed(1) + '" (' + segWPx + ' px)';
+        const wObj = new CSS3DObject(wDiv);
+        const labelY = dimLineY - 2.5;
+        wObj.position.set(cx - zFront * sin, labelY, cz - zFront * cos);
+        wObj.rotation.y = rotY;
+        wObj.scale.set(0.10, 0.10, 0.10);
+        wallGroup.add(wObj);
+        dimensionObjects.push(wObj);
+    }
+
+    // ── Height dimension (left side of first segment) ──
+    const firstSeg = segments[0];
+    const fCols = firstSeg.endCol - firstSeg.startCol + 1;
+    const fSegW = fCols * PANEL_W_IN + (fCols - 1) * d.gap;
+    const fFirstCol = layout[firstSeg.startCol];
+    const fLastCol = layout[firstSeg.endCol];
+    const fCx = (fFirstCol.x + fLastCol.x) / 2;
+    const fCz = (fFirstCol.z + fLastCol.z) / 2;
+    const fRotY = fFirstCol.rotY;
+    const fCos = Math.cos(fRotY), fSin = Math.sin(fRotY);
+
+    const hOffset = 4;
+    const hDimX = -fSegW / 2 - hOffset;
+    const totalHPx = d.rows * PANEL_PX_H;
+
+    const hPts = [];
+    // Extension lines (horizontal from wall edge outward)
+    hPts.push(-fSegW / 2 - extGap, wallTop, zFront,
+               hDimX - extOvershoot, wallTop, zFront);
+    hPts.push(-fSegW / 2 - extGap, wallBottom, zFront,
+               hDimX - extOvershoot, wallBottom, zFront);
+
+    // Vertical dimension line
+    hPts.push(hDimX, wallTop, zFront,
+              hDimX, wallBottom, zFront);
+
+    // Serif ticks at endpoints
+    hPts.push(hDimX - tickHalf, wallTop, zFront,
+              hDimX + tickHalf, wallTop, zFront);
+    hPts.push(hDimX - tickHalf, wallBottom, zFront,
+              hDimX + tickHalf, wallBottom, zFront);
+
+    const hGeom = new THREE.BufferGeometry();
+    hGeom.setAttribute('position', new THREE.Float32BufferAttribute(hPts, 3));
+    const hLines = new THREE.LineSegments(hGeom, dimMat);
+    hLines.position.set(fCx, 0, fCz);
+    hLines.rotation.y = fRotY;
+    wallGroup.add(hLines);
+    dimensionObjects.push(hLines);
+
+    // Height label (CSS3D)
+    const hDiv = document.createElement('div');
+    hDiv.className = 'dim-label';
+    hDiv.textContent = d.totalH.toFixed(1) + '" (' + totalHPx + ' px)';
+    const hObj = new CSS3DObject(hDiv);
+    const hLabelX = hDimX - 2.5;
+    hObj.position.set(
+        fCx + hLabelX * fCos - zFront * fSin,
+        0,
+        fCz - hLabelX * fSin - zFront * fCos
+    );
+    hObj.rotation.y = fRotY;
+    hObj.scale.set(0.10, 0.10, 0.10);
+    wallGroup.add(hObj);
+    dimensionObjects.push(hObj);
+}
+
 /* Bounding box that accounts for corners */
 function wallBounds() {
     const layout = computeColumnLayout();
@@ -1545,7 +1735,7 @@ function applyCwRect() {
     const d = wallDims();
 
     /* Clamp content window to wall bounds */
-    if (state.cwMode === 'fill') {
+    if (state.cwMode === 'fill' || state.cwMode === 'scaled') {
         state.cwRect = { x: 0, y: 0, w: d.wallWPx, h: d.wallHPx };
     } else {
         state.cwRect.w = Math.min(state.cwRect.w || d.wallWPx, d.wallWPx);
@@ -1611,7 +1801,7 @@ function applyCwRect() {
                 innerEl.style.height = state.cwRect.h + 'px';
                 innerEl.style.left = -(overlapLeft - cwLeft) + 'px';
                 innerEl.style.top = '0px';
-                innerEl.style.objectFit = 'fill';
+                innerEl.style.objectFit = state.cwMode === 'scaled' ? 'contain' : 'fill';
             }
 
             // Compute segment center in 3D from actual column layout positions
@@ -1679,6 +1869,17 @@ function updateSidebarInfo() {
 }
 
 /* ── Content helpers ── */
+let loadingCount = 0;
+const contentLoadingEl = document.getElementById('contentLoading');
+function showLoading() {
+    loadingCount++;
+    contentLoadingEl.classList.add('active');
+}
+function hideLoading() {
+    loadingCount = Math.max(0, loadingCount - 1);
+    if (loadingCount === 0) contentLoadingEl.classList.remove('active');
+}
+
 function purgeContentEls(container) {
     if (!container) return;
     container.querySelectorAll('img,video,iframe').forEach(el => {
@@ -1690,15 +1891,24 @@ function purgeContentEls(container) {
 function createContentEl(type, url) {
     if (type === 'image') {
         const img = document.createElement('img');
+        showLoading();
+        img.onload = hideLoading;
+        img.onerror = hideLoading;
         img.src = url;
         return img;
     }
     if (type === 'video') {
         const vid = document.createElement('video');
+        showLoading();
+        vid.oncanplay = function() { this.oncanplay = null; hideLoading(); };
+        vid.onerror = hideLoading;
         Object.assign(vid, { src: url, autoplay: true, loop: true, muted: true, playsInline: true });
         return vid;
     }
     const ifr = document.createElement('iframe');
+    showLoading();
+    ifr.onload = hideLoading;
+    ifr.onerror = hideLoading;
     ifr.src = (url.match(/^https?:\/\//) && !url.includes(location.host))
         ? '/proxy?url=' + encodeURIComponent(url) : url;
     return ifr;
@@ -1873,10 +2083,34 @@ function renderCornerList() {
 }
 
 function rebuildForCorners() {
+    // Preserve video playback position across corner edits
+    let savedVideoTime = null;
+    if (lastContentType === 'video') {
+        for (const el of contentLayerEls) {
+            const vid = el.querySelector('video');
+            if (vid && vid.currentTime > 0) {
+                savedVideoTime = vid.currentTime;
+                break;
+            }
+        }
+    }
+
     buildWall();
     if (lastContentType && lastContentUrl) {
         setContent(lastContentType, lastContentUrl,
             document.querySelector('.current-content:not(.hidden) .name')?.textContent || '');
+
+        // Restore video playback position after new segments are created
+        if (savedVideoTime !== null) {
+            contentLayerEls.forEach(el => {
+                const vid = el.querySelector('video');
+                if (vid) {
+                    const restore = () => { vid.currentTime = savedVideoTime; };
+                    if (vid.readyState >= 1) restore();
+                    else vid.addEventListener('loadedmetadata', restore, { once: true });
+                }
+            });
+        }
     }
 }
 
@@ -2024,7 +2258,7 @@ document.querySelectorAll('.cw-mode-tab').forEach(tab => {
 
         const { wallWPx, wallHPx } = wallDims();
 
-        if (mode === 'fill') {
+        if (mode === 'fill' || mode === 'scaled') {
             state.cwRect = { x: 0, y: 0, w: wallWPx, h: wallHPx };
         } else {
             if (state.cwRect.w === wallWPx && state.cwRect.h === wallHPx) {
@@ -2191,6 +2425,11 @@ document.getElementById('infoToggle').addEventListener('change', e => {
 document.getElementById('accessoryToggle').addEventListener('change', e => {
     state.showAccessories = e.target.checked;
     buildAccessories();
+});
+
+document.getElementById('dimensionToggle').addEventListener('change', e => {
+    state.showDimensions = e.target.checked;
+    buildDimensions();
 });
 
 /* View buttons */
