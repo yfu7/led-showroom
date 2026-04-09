@@ -623,7 +623,7 @@
         .css3d-content-el video {
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: fill;
             display: block;
         }
 
@@ -1612,7 +1612,7 @@ function applyCwRect() {
                 innerEl.style.height = state.cwRect.h + 'px';
                 innerEl.style.left = -(overlapLeft - cwLeft) + 'px';
                 innerEl.style.top = '0px';
-                innerEl.style.objectFit = 'cover';
+                innerEl.style.objectFit = 'fill';
             }
 
             // Compute segment center in 3D from actual column layout positions
