@@ -1202,29 +1202,39 @@ const state = {
     corners: []  // { afterCol: number, angle: number (degrees, -270 to +90) }
 };
 
-/* Derived wall dimensions — single source of truth */
+/* Derived wall dimensions — memoized, invalidated by invalidateLayout() */
+let _cachedDims = null, _cachedLayout = null, _cachedSegments = null;
+
+function invalidateLayout() {
+    _cachedDims = null;
+    _cachedLayout = null;
+    _cachedSegments = null;
+}
+
 function wallDims() {
+    if (_cachedDims) return _cachedDims;
     const { cols, rows, showBezels } = state;
     const gap = showBezels ? PANEL_GAP_IN : 0;
-    return {
+    _cachedDims = {
         cols, rows, gap,
         totalW: cols * PANEL_W_IN + (cols - 1) * gap,
         totalH: rows * PANEL_H_IN + (rows - 1) * gap,
         wallWPx: cols * PANEL_PX_W,
         wallHPx: rows * PANEL_PX_H,
     };
+    return _cachedDims;
 }
 
-/* Column layout with corners — computes per-column 3D position & rotation */
+/* Column layout with corners — memoized */
 function computeColumnLayout() {
+    if (_cachedLayout) return _cachedLayout;
     const d = wallDims();
     const step = PANEL_W_IN + d.gap;
 
-    // Build corner lookup: afterCol → angle (degrees)
     const cornerMap = {};
     state.corners.forEach(c => { cornerMap[c.afterCol] = c.angle; });
 
-    const columns = []; // { x, z, rotY }
+    const columns = [];
     let x = 0, z = 0, walkAngle = 0;
 
     for (let c = 0; c < d.cols; c++) {
@@ -1232,37 +1242,33 @@ function computeColumnLayout() {
 
         if (c < d.cols - 1) {
             const isCorner = cornerMap[c] !== undefined;
-            // At corners use panel half-width (no gap) so edges meet flush
             const hs = isCorner ? PANEL_W_IN / 2 : step / 2;
 
-            // Advance to column edge
             x += Math.cos(walkAngle) * hs;
             z -= Math.sin(walkAngle) * hs;
 
-            // Apply corner rotation if present
-            // +angle = convex (folds toward viewer), -angle = concave (folds away)
             if (isCorner) {
                 walkAngle += cornerMap[c] * Math.PI / 180;
             }
 
-            // Advance from edge to next column center
             x += Math.cos(walkAngle) * hs;
             z -= Math.sin(walkAngle) * hs;
         }
     }
 
-    // Center the layout around the origin
     let cx = 0, cz = 0;
     columns.forEach(col => { cx += col.x; cz += col.z; });
     cx /= d.cols;
     cz /= d.cols;
     columns.forEach(col => { col.x -= cx; col.z -= cz; });
 
-    return columns;
+    _cachedLayout = columns;
+    return _cachedLayout;
 }
 
-/* Compute flat segments (runs of columns between corners) */
+/* Compute flat segments (runs of columns between corners) — memoized */
 function computeSegments() {
+    if (_cachedSegments) return _cachedSegments;
     const cols = state.cols;
     const cornerCols = new Set(state.corners.map(c => c.afterCol));
     const segments = [];
@@ -1274,7 +1280,8 @@ function computeSegments() {
         }
     }
     segments.push({ startCol: start, endCol: cols - 1 });
-    return segments;
+    _cachedSegments = segments;
+    return _cachedSegments;
 }
 
 /* ── Cached materials (created once, reused across rebuilds) ── */
@@ -1411,12 +1418,16 @@ function init() {
         MIDDLE: THREE.MOUSE.PAN,
         RIGHT: THREE.MOUSE.PAN
     };
+    controls.addEventListener('change', markDirty);
 
     buildWall();
 
     window.addEventListener('resize', onResize);
     animate();
 }
+
+let sceneDirty = true;
+function markDirty() { sceneDirty = true; }
 
 function onResize() {
     const c = document.getElementById('showroom');
@@ -1426,12 +1437,15 @@ function onResize() {
     renderer.setSize(c.clientWidth, c.clientHeight);
     cssRenderer.setSize(c.clientWidth, c.clientHeight);
     dimRenderer.setSize(c.clientWidth, c.clientHeight);
+    markDirty();
 }
 
 function animate() {
     requestAnimationFrame(animate);
-    if (state.autoRotate) wallGroup.rotation.y += 0.004;
+    if (state.autoRotate) { wallGroup.rotation.y += 0.004; sceneDirty = true; }
     controls.update();
+    if (!sceneDirty) return;
+    sceneDirty = false;
     renderer.render(scene, camera);
     cssRenderer.render(scene, camera);
     dimGroup.position.copy(wallGroup.position);
@@ -1441,6 +1455,8 @@ function animate() {
 
 /* ── Wall construction ── */
 function buildWall() {
+    invalidateLayout();
+    markDirty();
     panelMeshes.forEach(m => wallGroup.remove(m));
     customPanelGeoms.forEach(g => g.dispose());
     panelMeshes = [];
@@ -1509,10 +1525,15 @@ function buildWall() {
     // Corner fill wedges no longer needed — miter faces meet seamlessly
 }
 
+function setAccessoryVisibility(visible) {
+    markDirty();
+    accessoryMeshes.forEach(m => { m.visible = visible; });
+}
+
 function buildAccessories() {
+    markDirty();
     accessoryMeshes.forEach(m => wallGroup.remove(m));
     accessoryMeshes = [];
-    if (!state.showAccessories) return;
 
     const d = wallDims();
     const layout = computeColumnLayout();
@@ -1554,6 +1575,7 @@ function buildAccessories() {
             addLocal(diagGeom, lx, groundY + SUPPORT_FOOT_D / 2, -vBackZ + SUPPORT_FOOT_D / 2, SUPPORT_ANGLE_RAD);
         }
     }
+    setAccessoryVisibility(state.showAccessories);
 }
 
 /* ── Corner miter fills ── */
@@ -1738,6 +1760,7 @@ function createDimSprite(text) {
 }
 
 function buildDimensions() {
+    markDirty();
     dimensionObjects.forEach(o => {
         dimGroup.remove(o);
         if (o.isLineSegments) o.geometry.dispose();
@@ -1901,6 +1924,7 @@ function fitCameraToWall() {
 }
 
 function setCameraView(view) {
+    markDirty();
     const b = wallBounds();
     const fov = camera.fov * Math.PI / 180;
     const aspect = camera.aspect;
@@ -1924,6 +1948,7 @@ function setCameraView(view) {
 
 /* ── Content window ── */
 function applyCwRect() {
+    markDirty();
     const d = wallDims();
 
     /* Clamp content window to wall bounds */
@@ -2031,17 +2056,29 @@ function applyCwRect() {
     updateCwInfo();
 }
 
+/* ── Cached DOM elements (avoid repeated getElementById in hot paths) ── */
+const elCwInfoPx = document.getElementById('cwInfoPx');
+const elCwInfoIn = document.getElementById('cwInfoIn');
+const elCwInfoPct = document.getElementById('cwInfoPct');
+const elInfoWindow = document.getElementById('infoWindow');
+const elInfoWall = document.getElementById('infoWall');
+const elInfoPos = document.getElementById('infoPos');
+const elTotalPanels = document.getElementById('totalPanels');
+const elTotalRes = document.getElementById('totalRes');
+const elTotalSize = document.getElementById('totalSize');
+const elTotalSizeFt = document.getElementById('totalSizeFt');
+const elCornerList = document.getElementById('cornerList');
+
 function updateCwInfo() {
     const d = wallDims();
     const physW = (state.cwRect.w * IN_PER_PX_W).toFixed(1);
     const physH = (state.cwRect.h * IN_PER_PX_H).toFixed(1);
     const coverage = ((state.cwRect.w * state.cwRect.h) / (d.wallWPx * d.wallHPx) * 100).toFixed(1);
 
-    document.getElementById('cwInfoPx').textContent = state.cwRect.w + ' x ' + state.cwRect.h;
-    document.getElementById('cwInfoIn').textContent = physW + '" x ' + physH + '"';
-    document.getElementById('cwInfoPct').textContent = coverage + '%';
-
-    document.getElementById('infoWindow').textContent = ' ' + state.cwRect.w + 'x' + state.cwRect.h + ' px (' + physW + '" x ' + physH + '")';
+    elCwInfoPx.textContent = state.cwRect.w + ' x ' + state.cwRect.h;
+    elCwInfoIn.textContent = physW + '" x ' + physH + '"';
+    elCwInfoPct.textContent = coverage + '%';
+    elInfoWindow.textContent = ' ' + state.cwRect.w + 'x' + state.cwRect.h + ' px (' + physW + '" x ' + physH + '")';
 }
 
 function updateSidebarInfo() {
@@ -2049,14 +2086,11 @@ function updateSidebarInfo() {
     const totalWIn = d.cols * PANEL_W_IN;
     const totalHIn = d.rows * PANEL_H_IN;
 
-    document.getElementById('totalPanels').textContent = d.cols * d.rows;
-    document.getElementById('totalRes').textContent = d.wallWPx + ' x ' + d.wallHPx + ' px';
-    document.getElementById('totalSize').textContent =
-        totalWIn.toFixed(1) + '" x ' + totalHIn.toFixed(1) + '"';
-    document.getElementById('totalSizeFt').textContent =
-        (totalWIn / 12).toFixed(1) + "' x " + (totalHIn / 12).toFixed(1) + "'";
-
-    document.getElementById('infoWall').textContent = ' ' + d.cols + 'x' + d.rows + ' panels · ' +
+    elTotalPanels.textContent = d.cols * d.rows;
+    elTotalRes.textContent = d.wallWPx + ' x ' + d.wallHPx + ' px';
+    elTotalSize.textContent = totalWIn.toFixed(1) + '" x ' + totalHIn.toFixed(1) + '"';
+    elTotalSizeFt.textContent = (totalWIn / 12).toFixed(1) + "' x " + (totalHIn / 12).toFixed(1) + "'";
+    elInfoWall.textContent = ' ' + d.cols + 'x' + d.rows + ' panels · ' +
         totalWIn.toFixed(1) + '" x ' + totalHIn.toFixed(1) + '"';
 }
 
@@ -2215,17 +2249,18 @@ function pruneCorners() {
 }
 
 function renderCornerList() {
-    const list = document.getElementById('cornerList');
-    list.innerHTML = '';
+    elCornerList.innerHTML = '';
     state.corners.forEach((corner, idx) => {
         const entry = document.createElement('div');
         entry.className = 'corner-entry';
+        entry.dataset.idx = idx;
 
         const label = document.createElement('span');
         label.className = 'corner-label';
         label.textContent = 'After col';
 
         const sel = document.createElement('select');
+        sel.dataset.role = 'col';
         for (let c = 0; c < state.cols - 1; c++) {
             const opt = document.createElement('option');
             opt.value = c;
@@ -2233,16 +2268,6 @@ function renderCornerList() {
             if (c === corner.afterCol) opt.selected = true;
             sel.appendChild(opt);
         }
-        sel.addEventListener('change', () => {
-            const newCol = parseInt(sel.value);
-            // Prevent duplicate corners at same column
-            if (state.corners.some((cn, i) => i !== idx && cn.afterCol === newCol)) {
-                sel.value = corner.afterCol;
-                return;
-            }
-            corner.afterCol = newCol;
-            rebuildForCorners();
-        });
 
         const angleInput = document.createElement('input');
         angleInput.type = 'number';
@@ -2250,11 +2275,7 @@ function renderCornerList() {
         angleInput.max = 90;
         angleInput.step = 5;
         angleInput.value = corner.angle;
-        angleInput.addEventListener('change', () => {
-            corner.angle = Math.max(-270, Math.min(90, parseFloat(angleInput.value) || 0));
-            angleInput.value = corner.angle;
-            rebuildForCorners();
-        });
+        angleInput.dataset.role = 'angle';
 
         const degLabel = document.createElement('span');
         degLabel.className = 'corner-label';
@@ -2263,16 +2284,44 @@ function renderCornerList() {
         const removeBtn = document.createElement('button');
         removeBtn.className = 'remove-corner';
         removeBtn.textContent = '✕';
-        removeBtn.addEventListener('click', () => {
-            state.corners.splice(idx, 1);
-            renderCornerList();
-            rebuildForCorners();
-        });
+        removeBtn.dataset.role = 'remove';
 
         entry.append(label, sel, angleInput, degLabel, removeBtn);
-        list.appendChild(entry);
+        elCornerList.appendChild(entry);
     });
 }
+
+// Single delegated listener for all corner controls
+elCornerList.addEventListener('change', e => {
+    const entry = e.target.closest('.corner-entry');
+    if (!entry) return;
+    const idx = parseInt(entry.dataset.idx);
+    const corner = state.corners[idx];
+    if (!corner) return;
+
+    if (e.target.dataset.role === 'col') {
+        const newCol = parseInt(e.target.value);
+        if (state.corners.some((cn, i) => i !== idx && cn.afterCol === newCol)) {
+            e.target.value = corner.afterCol;
+            return;
+        }
+        corner.afterCol = newCol;
+    } else if (e.target.dataset.role === 'angle') {
+        corner.angle = Math.max(-270, Math.min(90, parseFloat(e.target.value) || 0));
+        e.target.value = corner.angle;
+    }
+    rebuildForCorners();
+});
+
+elCornerList.addEventListener('click', e => {
+    if (e.target.dataset.role !== 'remove') return;
+    const entry = e.target.closest('.corner-entry');
+    if (!entry) return;
+    const idx = parseInt(entry.dataset.idx);
+    state.corners.splice(idx, 1);
+    renderCornerList();
+    rebuildForCorners();
+});
 
 function rebuildForCorners() {
     // Preserve video playback position across corner edits
@@ -2616,7 +2665,7 @@ document.getElementById('infoToggle').addEventListener('change', e => {
 
 document.getElementById('accessoryToggle').addEventListener('change', e => {
     state.showAccessories = e.target.checked;
-    buildAccessories();
+    setAccessoryVisibility(state.showAccessories);
 });
 
 document.getElementById('dimensionToggle').addEventListener('change', e => {
@@ -2658,8 +2707,7 @@ function setMoveMode(on) {
 
 function updatePositionInfo() {
     const p = wallGroup.position;
-    document.getElementById('infoPos').textContent =
-        p.x.toFixed(1) + ', ' + p.y.toFixed(1) + ', ' + p.z.toFixed(1) + ' in';
+    elInfoPos.textContent = p.x.toFixed(1) + ', ' + p.y.toFixed(1) + ', ' + p.z.toFixed(1) + ' in';
 }
 
 moveToggleBtn.addEventListener('click', () => setMoveMode(!state.moveMode));
@@ -2734,6 +2782,7 @@ let recordStartTime = 0;
 let recordTimer = null;
 let recordInterval = null;
 let mediaRecorder = null;
+let mediaStream = null;
 let mp4Muxer = null;
 let videoEncoder = null;
 let usingMP4 = false;
@@ -2794,10 +2843,10 @@ function startRecording() {
     }
 
     if (!usingMP4) {
-        const stream = canvas.captureStream(30);
+        mediaStream = canvas.captureStream(30);
         const mt = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
             ? 'video/webm;codecs=vp9' : 'video/webm';
-        mediaRecorder = new MediaRecorder(stream, { mimeType: mt, videoBitsPerSecond: 8_000_000 });
+        mediaRecorder = new MediaRecorder(mediaStream, { mimeType: mt, videoBitsPerSecond: 8_000_000 });
         mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
         mediaRecorder.onstop = () => {
             downloadVideo(new Blob(recordedChunks, { type: mt }), '.webm');
@@ -2833,6 +2882,10 @@ async function stopRecording() {
         mp4Muxer = null;
     } else if (mediaRecorder && mediaRecorder.state !== 'inactive') {
         mediaRecorder.stop();
+    }
+    if (mediaStream) {
+        mediaStream.getTracks().forEach(t => t.stop());
+        mediaStream = null;
     }
 }
 
@@ -2910,8 +2963,6 @@ function applyPreset(preset) {
     syncUIFromState();
     pruneCorners();
     rebuildForCorners();
-    buildAccessories();
-    buildDimensions();
     syncBackContent(state.doubleSided ? lastContentType : null, lastContentUrl);
 }
 
