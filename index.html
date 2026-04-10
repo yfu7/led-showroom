@@ -992,136 +992,137 @@
         <button class="add-corner-btn" id="addCornerBtn">+ Add Corner</button>
     </div>
 
-    <!-- Content Windows -->
-    <div class="section">
-        <div class="section-title">Content Windows</div>
+    <!-- Content -->
+    <div class="section" id="contentSection">
+        <div class="section-title">Content<span class="selected-window-label" id="selectedWindowLabel"></span></div>
+
+        <!-- Window list + add button -->
         <div class="cw-list" id="windowList"></div>
-        <button class="add-corner-btn" id="addWindowBtn">+ Add Content Window</button>
-    </div>
+        <button class="add-corner-btn" id="addWindowBtn" style="margin-bottom:16px;">+ Add Content Window</button>
 
-    <!-- Content Source -->
-    <div class="section disabled-section" id="contentSourceSection">
-        <div class="section-title">Content Source<span class="selected-window-label" id="selectedWindowLabel"></span></div>
-        <div class="content-tabs">
-            <div class="content-tab active" data-tab="image">Image</div>
-            <div class="content-tab" data-tab="video">Video</div>
-            <div class="content-tab" data-tab="website">Website</div>
-        </div>
-
-        <div class="content-panel active" id="panel-image">
-            <div class="upload-zone" id="imageDropZone">
-                <div class="icon">&#128444;</div>
-                <div class="text">Drop image or <strong>browse</strong></div>
-                <div class="subtext">JPG, PNG, WebP, GIF, SVG</div>
+        <!-- Source controls (disabled when no window selected) -->
+        <div class="disabled-section" id="contentSourceSection">
+            <div class="content-tabs">
+                <div class="content-tab active" data-tab="image">Image</div>
+                <div class="content-tab" data-tab="video">Video</div>
+                <div class="content-tab" data-tab="website">Website</div>
             </div>
-            <input type="file" id="imageInput" accept="image/*" style="display:none">
-            <div style="display:flex;gap:6px;margin-top:10px;">
-                <button class="add-corner-btn" id="loadTestPattern" style="margin:0;flex:1;">Test Pattern</button>
-                <div style="display:flex;align-items:center;gap:6px;flex:1;">
-                    <input type="color" id="solidColorPicker" value="#3b82f6" style="width:36px;height:32px;padding:0;border:1px solid #333;border-radius:6px;background:#0a0a0a;cursor:pointer;">
-                    <button class="add-corner-btn" id="loadSolidColor" style="margin:0;flex:1;">Solid Color</button>
+
+            <div class="content-panel active" id="panel-image">
+                <div class="upload-zone" id="imageDropZone">
+                    <div class="icon">&#128444;</div>
+                    <div class="text">Drop image or <strong>browse</strong></div>
+                    <div class="subtext">JPG, PNG, WebP, GIF, SVG</div>
                 </div>
-            </div>
-            <div class="current-content hidden" id="imageInfo">
-                <span class="name" id="imageName"></span>
-                <button class="clear-btn" data-clear="content">Clear</button>
-            </div>
-        </div>
-
-        <div class="content-panel" id="panel-video">
-            <div class="upload-zone" id="videoDropZone">
-                <div class="icon">&#127916;</div>
-                <div class="text">Drop video or <strong>browse</strong></div>
-                <div class="subtext">MP4, WebM, OGG</div>
-            </div>
-            <input type="file" id="videoInput" accept="video/*" style="display:none">
-            <div class="current-content hidden" id="videoInfo">
-                <span class="name" id="videoName"></span>
-                <button class="clear-btn" data-clear="content">Clear</button>
-            </div>
-        </div>
-
-        <div class="content-panel" id="panel-website">
-            <div class="url-input-group">
-                <input type="url" id="urlInput" placeholder="https://example.com">
-                <button id="loadUrlBtn">Load</button>
-            </div>
-            <div style="margin-top:8px;font-size:12px;color:#555;">
-                External sites are loaded via proxy to bypass iframe restrictions.
-            </div>
-            <div class="current-content hidden" id="websiteInfo">
-                <span class="name" id="websiteName"></span>
-                <button class="clear-btn" data-clear="content">Clear</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Content Window -->
-    <div class="section disabled-section" id="contentWindowSection">
-        <div class="section-title">Content Window</div>
-        <div class="cw-mode-tabs">
-            <div class="cw-mode-tab active" data-cwmode="fill">Stretch Fill</div>
-            <div class="cw-mode-tab" data-cwmode="scaled">Scaled Fill</div>
-            <div class="cw-mode-tab" data-cwmode="custom">Custom Size</div>
-        </div>
-
-        <div class="cw-custom-controls" id="cwCustomControls">
-            <div class="cw-unit-row">
-                <label>Units</label>
-                <div class="cw-unit-toggle">
-                    <button class="cw-unit-btn active" data-unit="px">px</button>
-                    <button class="cw-unit-btn" data-unit="panels">Panels</button>
-                    <button class="cw-unit-btn" data-unit="pct">%</button>
+                <input type="file" id="imageInput" accept="image/*" style="display:none">
+                <div style="display:flex;gap:6px;margin-top:10px;">
+                    <button class="add-corner-btn" id="loadTestPattern" style="margin:0;flex:1;">Test Pattern</button>
+                    <div style="display:flex;align-items:center;gap:6px;flex:1;">
+                        <input type="color" id="solidColorPicker" value="#3b82f6" style="width:36px;height:32px;padding:0;border:1px solid #333;border-radius:6px;background:#0a0a0a;cursor:pointer;">
+                        <button class="add-corner-btn" id="loadSolidColor" style="margin:0;flex:1;">Solid Color</button>
+                    </div>
+                </div>
+                <div class="current-content hidden" id="imageInfo">
+                    <span class="name" id="imageName"></span>
+                    <button class="clear-btn" data-clear="content">Clear</button>
                 </div>
             </div>
 
-            <div class="cw-field-group">
-                <div class="cw-field">
-                    <span class="cw-label">Width</span>
-                    <input type="number" id="cwWidth" min="1">
+            <div class="content-panel" id="panel-video">
+                <div class="upload-zone" id="videoDropZone">
+                    <div class="icon">&#127916;</div>
+                    <div class="text">Drop video or <strong>browse</strong></div>
+                    <div class="subtext">MP4, WebM, OGG</div>
                 </div>
-                <div class="cw-field">
-                    <span class="cw-label">Height</span>
-                    <input type="number" id="cwHeight" min="1">
-                </div>
-            </div>
-
-            <div class="cw-field-group">
-                <div class="cw-field">
-                    <span class="cw-label">X Offset</span>
-                    <input type="number" id="cwX" min="0">
-                </div>
-                <div class="cw-field">
-                    <span class="cw-label">Y Offset</span>
-                    <input type="number" id="cwY" min="0">
+                <input type="file" id="videoInput" accept="video/*" style="display:none">
+                <div class="current-content hidden" id="videoInfo">
+                    <span class="name" id="videoName"></span>
+                    <button class="clear-btn" data-clear="content">Clear</button>
                 </div>
             </div>
 
-            <div class="cw-align-label">Quick Align</div>
-            <div class="cw-align-grid">
-                <button class="cw-align-btn" data-align="tl"><span class="dot"></span></button>
-                <button class="cw-align-btn" data-align="tc"><span class="dot"></span></button>
-                <button class="cw-align-btn" data-align="tr"><span class="dot"></span></button>
-                <button class="cw-align-btn" data-align="ml"><span class="dot"></span></button>
-                <button class="cw-align-btn active" data-align="mc"><span class="dot"></span></button>
-                <button class="cw-align-btn" data-align="mr"><span class="dot"></span></button>
-                <button class="cw-align-btn" data-align="bl"><span class="dot"></span></button>
-                <button class="cw-align-btn" data-align="bc"><span class="dot"></span></button>
-                <button class="cw-align-btn" data-align="br"><span class="dot"></span></button>
+            <div class="content-panel" id="panel-website">
+                <div class="url-input-group">
+                    <input type="url" id="urlInput" placeholder="https://example.com">
+                    <button id="loadUrlBtn">Load</button>
+                </div>
+                <div style="margin-top:8px;font-size:12px;color:#555;">
+                    External sites are loaded via proxy to bypass iframe restrictions.
+                </div>
+                <div class="current-content hidden" id="websiteInfo">
+                    <span class="name" id="websiteName"></span>
+                    <button class="clear-btn" data-clear="content">Clear</button>
+                </div>
             </div>
 
-            <div class="cw-info">
-                <div class="info-row">
-                    <span class="label">Window px</span>
-                    <span class="value" id="cwInfoPx">-</span>
+            <!-- Layout controls -->
+            <div id="contentWindowSection" style="margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2a;">
+                <div class="section-title" style="margin-bottom:12px;">Layout</div>
+                <div class="cw-mode-tabs">
+                    <div class="cw-mode-tab active" data-cwmode="fill">Stretch Fill</div>
+                    <div class="cw-mode-tab" data-cwmode="scaled">Scaled Fill</div>
+                    <div class="cw-mode-tab" data-cwmode="custom">Custom Size</div>
                 </div>
-                <div class="info-row">
-                    <span class="label">Physical</span>
-                    <span class="value" id="cwInfoIn">-</span>
-                </div>
-                <div class="info-row">
-                    <span class="label">Coverage</span>
-                    <span class="value" id="cwInfoPct">-</span>
+
+                <div class="cw-custom-controls" id="cwCustomControls">
+                    <div class="cw-unit-row">
+                        <label>Units</label>
+                        <div class="cw-unit-toggle">
+                            <button class="cw-unit-btn active" data-unit="px">px</button>
+                            <button class="cw-unit-btn" data-unit="panels">Panels</button>
+                            <button class="cw-unit-btn" data-unit="pct">%</button>
+                        </div>
+                    </div>
+
+                    <div class="cw-field-group">
+                        <div class="cw-field">
+                            <span class="cw-label">Width</span>
+                            <input type="number" id="cwWidth" min="1">
+                        </div>
+                        <div class="cw-field">
+                            <span class="cw-label">Height</span>
+                            <input type="number" id="cwHeight" min="1">
+                        </div>
+                    </div>
+
+                    <div class="cw-field-group">
+                        <div class="cw-field">
+                            <span class="cw-label">X Offset</span>
+                            <input type="number" id="cwX" min="0">
+                        </div>
+                        <div class="cw-field">
+                            <span class="cw-label">Y Offset</span>
+                            <input type="number" id="cwY" min="0">
+                        </div>
+                    </div>
+
+                    <div class="cw-align-label">Quick Align</div>
+                    <div class="cw-align-grid">
+                        <button class="cw-align-btn" data-align="tl"><span class="dot"></span></button>
+                        <button class="cw-align-btn" data-align="tc"><span class="dot"></span></button>
+                        <button class="cw-align-btn" data-align="tr"><span class="dot"></span></button>
+                        <button class="cw-align-btn" data-align="ml"><span class="dot"></span></button>
+                        <button class="cw-align-btn active" data-align="mc"><span class="dot"></span></button>
+                        <button class="cw-align-btn" data-align="mr"><span class="dot"></span></button>
+                        <button class="cw-align-btn" data-align="bl"><span class="dot"></span></button>
+                        <button class="cw-align-btn" data-align="bc"><span class="dot"></span></button>
+                        <button class="cw-align-btn" data-align="br"><span class="dot"></span></button>
+                    </div>
+
+                    <div class="cw-info">
+                        <div class="info-row">
+                            <span class="label">Window px</span>
+                            <span class="value" id="cwInfoPx">-</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Physical</span>
+                            <span class="value" id="cwInfoIn">-</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Coverage</span>
+                            <span class="value" id="cwInfoPct">-</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2351,7 +2352,6 @@ function ensureActiveWindow() {
 /* ── Window list UI ── */
 const elWindowList = document.getElementById('windowList');
 const elContentSourceSection = document.getElementById('contentSourceSection');
-const elContentWindowSection = document.getElementById('contentWindowSection');
 const elSelectedWindowLabel = document.getElementById('selectedWindowLabel');
 
 function renderWindowList() {
@@ -2392,7 +2392,6 @@ function syncCwControlsToWindow() {
     const hasWindow = !!win;
 
     elContentSourceSection.classList.toggle('disabled-section', !hasWindow);
-    elContentWindowSection.classList.toggle('disabled-section', !hasWindow);
     elSelectedWindowLabel.textContent = hasWindow ? win.name : '';
 
     // Sync CW mode tabs
