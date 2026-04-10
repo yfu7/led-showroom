@@ -723,6 +723,75 @@
             backface-visibility: hidden;
         }
 
+        /* ── Content Window List ── */
+        .cw-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-bottom: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .cw-entry {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .cw-entry:hover { background: #1a1a1a; border-color: #555; }
+        .cw-entry.selected { background: #1e3a5f; border-color: #3b82f6; }
+
+        .cw-entry-icon { font-size: 14px; flex-shrink: 0; }
+        .cw-entry-name {
+            flex: 1;
+            font-size: 13px;
+            color: #ccc;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .cw-entry.selected .cw-entry-name { color: #93c5fd; }
+        .cw-entry-size { font-size: 11px; color: #666; flex-shrink: 0; }
+        .cw-entry-delete {
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 2px 4px;
+            border-radius: 3px;
+            flex-shrink: 0;
+        }
+        .cw-entry-delete:hover { color: #ef4444; background: rgba(239, 68, 68, 0.1); }
+
+        .no-windows-msg {
+            font-size: 13px;
+            color: #555;
+            text-align: center;
+            padding: 12px;
+        }
+
+        .selected-window-label {
+            font-weight: 400;
+            color: #3b82f6;
+            font-size: 11px;
+            text-transform: none;
+            letter-spacing: 0;
+            margin-left: 4px;
+        }
+
+        .section.disabled-section {
+            opacity: 0.35;
+            pointer-events: none;
+        }
+
         /* ── Corner entries ── */
         .corner-entry {
             display: flex;
@@ -923,9 +992,16 @@
         <button class="add-corner-btn" id="addCornerBtn">+ Add Corner</button>
     </div>
 
-    <!-- Content Source -->
+    <!-- Content Windows -->
     <div class="section">
-        <div class="section-title">Content Source</div>
+        <div class="section-title">Content Windows</div>
+        <div class="cw-list" id="windowList"></div>
+        <button class="add-corner-btn" id="addWindowBtn">+ Add Content Window</button>
+    </div>
+
+    <!-- Content Source -->
+    <div class="section disabled-section" id="contentSourceSection">
+        <div class="section-title">Content Source<span class="selected-window-label" id="selectedWindowLabel"></span></div>
         <div class="content-tabs">
             <div class="content-tab active" data-tab="image">Image</div>
             <div class="content-tab" data-tab="video">Video</div>
@@ -981,7 +1057,7 @@
     </div>
 
     <!-- Content Window -->
-    <div class="section">
+    <div class="section disabled-section" id="contentWindowSection">
         <div class="section-title">Content Window</div>
         <div class="cw-mode-tabs">
             <div class="cw-mode-tab active" data-cwmode="fill">Stretch Fill</div>
@@ -1143,6 +1219,7 @@
         <button class="view-btn" id="view34">3/4</button>
         <button class="view-btn" id="viewReset">Reset</button>
         <button class="view-btn" id="moveToggle" disabled>Move</button>
+        <button class="view-btn" id="dragContentToggle">Drag Content</button>
         <button class="view-btn" id="centerBtn">Center</button>
         <button class="view-btn" id="saveImageBtn">Save Image</button>
         <button class="view-btn" id="recordBtn">Record</button>
@@ -1167,6 +1244,7 @@ const IN_PER_PX_W = PANEL_W_IN / PANEL_PX_W;
 const IN_PER_PX_H = PANEL_H_IN / PANEL_PX_H;
 const PANEL_GAP_IN = 0.06;
 const DIMENSION_RENDER_ORDER = 999;
+const MAX_CONTENT_WINDOWS = 8;
 
 /* Mounting Base dimensions (from engineering drawing) */
 const BASE_W = 25.080;
@@ -1184,17 +1262,33 @@ const SUPPORT_ANGLE_RAD = 45 * Math.PI / 180;
 const state = {
     cols: 4,
     rows: 3,
-    cwMode: 'fill',
     cwUnit: 'px',
-    cwRect: { x: 0, y: 0, w: 0, h: 0 },
     showBezels: true,
     autoRotate: false,
     doubleSided: false,
     moveMode: false,
+    contentDragMode: false,
     showAccessories: false,
     showDimensions: false,
-    corners: []  // { afterCol: number, angle: number (degrees, -270 to +90) }
+    corners: [],  // { afterCol: number, angle: number (degrees, -270 to +90) }
+    contentWindows: [],  // { id, type, url, name, rect:{x,y,w,h}, mode }
+    selectedWindowId: null,
 };
+
+let nextWindowId = 1;
+
+/* ── Active window accessors ── */
+function activeWindow() {
+    return state.contentWindows.find(w => w.id === state.selectedWindowId) || null;
+}
+function activeRect() {
+    const w = activeWindow();
+    return w ? w.rect : { x: 0, y: 0, w: 0, h: 0 };
+}
+function activeMode() {
+    const w = activeWindow();
+    return w ? w.mode : 'fill';
+}
 
 /* Derived wall dimensions — memoized, invalidated by invalidateLayout() */
 let _cachedDims = null, _cachedLayout = null, _cachedSegments = null;
@@ -1338,12 +1432,8 @@ function buildMiteredPanelGeom(leftCut, rightCut) {
 let scene, camera, renderer, cssRenderer, controls;
 let wallGroup;
 let panelMeshes = [];
-let contentObjects = [];      // CSS3DObject per segment
-let contentLayerEls = [];     // container div per segment
-let backContentObjects = [];
-let backContentLayerEls = [];
-let lastContentUrl = null;
-let lastContentType = null;
+/* Per-window render data: Map<windowId, { frontObjects, frontEls, backObjects, backEls }> */
+let windowRenderData = new Map();
 let accessoryMeshes = [];
 let cornerFillMeshes = [];
 let bezelLineMeshes = [];
@@ -1498,7 +1588,7 @@ function buildWall() {
 
     buildBezelLines(layout, d, miterCuts);
     updateSidebarInfo();
-    applyCwRect();
+    applyAllWindowRects();
     fitCameraToWall();
     buildAccessories();
     buildDimensions();
@@ -1926,26 +2016,33 @@ function setCameraView(view) {
     controls.update();
 }
 
-/* ── Content window ── */
-function applyCwRect() {
-    markDirty();
+/* ── Content window (per-window positioning) ── */
+function clampWindowRect(win) {
     const d = wallDims();
-
-    /* Clamp content window to wall bounds */
-    if (state.cwMode === 'fill' || state.cwMode === 'scaled') {
-        state.cwRect = { x: 0, y: 0, w: d.wallWPx, h: d.wallHPx };
+    if (win.mode === 'fill' || win.mode === 'scaled') {
+        win.rect = { x: 0, y: 0, w: d.wallWPx, h: d.wallHPx };
     } else {
-        state.cwRect.w = Math.min(state.cwRect.w || d.wallWPx, d.wallWPx);
-        state.cwRect.h = Math.min(state.cwRect.h || d.wallHPx, d.wallHPx);
-        state.cwRect.x = Math.min(state.cwRect.x, d.wallWPx - state.cwRect.w);
-        state.cwRect.y = Math.min(state.cwRect.y, d.wallHPx - state.cwRect.h);
+        win.rect.w = Math.min(win.rect.w || d.wallWPx, d.wallWPx);
+        win.rect.h = Math.min(win.rect.h || d.wallHPx, d.wallHPx);
+        win.rect.x = Math.max(0, Math.min(win.rect.x, d.wallWPx - win.rect.w));
+        win.rect.y = Math.max(0, Math.min(win.rect.y, d.wallHPx - win.rect.h));
     }
+}
 
+function applyWindowRect(win) {
+    const rd = windowRenderData.get(win.id);
+    if (!rd) return;
+
+    clampWindowRect(win);
+
+    const d = wallDims();
     const segments = computeSegments();
     const layout = computeColumnLayout();
-    const cyIn = d.totalH / 2 - state.cwRect.y * IN_PER_PX_H - state.cwRect.h * IN_PER_PX_H / 2;
+    const rect = win.rect;
+    const cyIn = d.totalH / 2 - rect.y * IN_PER_PX_H - rect.h * IN_PER_PX_H / 2;
+    const winIdx = state.contentWindows.indexOf(win);
+    const zStep = 0.005;
 
-    // Build corner map for content extension at miter edges
     const cMap = {};
     state.corners.forEach(cn => { cMap[cn.afterCol] = cn.angle; });
 
@@ -1955,7 +2052,6 @@ function applyCwRect() {
             const seg = segments[i];
             const segCols = seg.endCol - seg.startCol + 1;
 
-            // Miter extension in inches at each edge of this segment
             let extLeftIn = 0, extRightIn = 0;
             if (cMap[seg.startCol - 1] !== undefined) {
                 extLeftIn = Math.min((PANEL_D_IN / 2) * Math.tan(Math.abs(cMap[seg.startCol - 1]) / 2 * Math.PI / 180), PANEL_W_IN / 2);
@@ -1964,16 +2060,14 @@ function applyCwRect() {
                 extRightIn = Math.min((PANEL_D_IN / 2) * Math.tan(Math.abs(cMap[seg.endCol]) / 2 * Math.PI / 180), PANEL_W_IN / 2);
             }
 
-            // Physical width stretched to cover miter extensions
             const segInW = segCols * PANEL_W_IN + (segCols - 1) * d.gap;
             const extSegInW = segInW + extLeftIn + extRightIn;
             const segIppx = extSegInW / (segCols * PANEL_PX_W);
 
-            // Standard pixel range (segment's own columns only — no adjacent pixels)
             const segStartPx = seg.startCol * PANEL_PX_W;
             const segEndPx = (seg.endCol + 1) * PANEL_PX_W;
-            const cwLeft = state.cwRect.x;
-            const cwRight = state.cwRect.x + state.cwRect.w;
+            const cwLeft = rect.x;
+            const cwRight = rect.x + rect.w;
 
             const overlapLeft = Math.max(segStartPx, cwLeft);
             const overlapRight = Math.min(segEndPx, cwRight);
@@ -1985,37 +2079,33 @@ function applyCwRect() {
             obj.visible = true;
 
             const clipW = overlapRight - overlapLeft;
-            const clipH = state.cwRect.h;
+            const clipH = rect.h;
 
             layerEls[i].style.width = clipW + 'px';
             layerEls[i].style.height = clipH + 'px';
 
-            // Offset the inner content element so correct portion shows
             const innerEl = layerEls[i].firstChild;
             if (innerEl) {
                 innerEl.style.position = 'absolute';
-                innerEl.style.width = state.cwRect.w + 'px';
-                innerEl.style.height = state.cwRect.h + 'px';
+                innerEl.style.width = rect.w + 'px';
+                innerEl.style.height = rect.h + 'px';
                 innerEl.style.left = -(overlapLeft - cwLeft) + 'px';
                 innerEl.style.top = '0px';
-                innerEl.style.objectFit = state.cwMode === 'scaled' ? 'contain' : 'fill';
+                innerEl.style.objectFit = win.mode === 'scaled' ? 'contain' : 'fill';
             }
 
-            // Compute segment center in 3D from actual column layout positions
             const firstCol = layout[seg.startCol];
             const lastCol = layout[seg.endCol];
             const segCx = (firstCol.x + lastCol.x) / 2;
             const segCz = (firstCol.z + lastCol.z) / 2;
-            const rotY = firstCol.rotY;  // all columns in segment share rotation
+            const rotY = firstCol.rotY;
             const cos = Math.cos(rotY), sin = Math.sin(rotY);
 
-            // Position: pixel offset + physical shift for asymmetric miter extension
             const clipCenterPx = overlapLeft + clipW / 2;
             const segCenterPx = segStartPx + (segCols * PANEL_PX_W) / 2;
             const miterShift = (extRightIn - extLeftIn) / 2;
             const offsetIn = (clipCenterPx - segCenterPx) * segIppx + miterShift;
 
-            // Local X offset along the segment, local Z from panel face
             const wx = segCx + offsetIn * cos - zOff * sin;
             const wz = segCz - offsetIn * sin - zOff * cos;
 
@@ -2025,14 +2115,17 @@ function applyCwRect() {
         });
     }
 
-    if (contentObjects.length) {
-        // Negative zOff → front face (+Z local), just barely in front of panel surface
-        positionSegmentObjects(contentObjects, contentLayerEls, -(PANEL_D_IN / 2 + 0.01), false);
+    if (rd.frontObjects.length) {
+        positionSegmentObjects(rd.frontObjects, rd.frontEls, -(PANEL_D_IN / 2 + 0.01 + winIdx * zStep), false);
     }
-    if (backContentObjects.length) {
-        positionSegmentObjects(backContentObjects, backContentLayerEls, PANEL_D_IN / 2 + 0.01, true);
+    if (rd.backObjects.length) {
+        positionSegmentObjects(rd.backObjects, rd.backEls, PANEL_D_IN / 2 + 0.01 + winIdx * zStep, true);
     }
+}
 
+function applyAllWindowRects() {
+    markDirty();
+    state.contentWindows.forEach(win => applyWindowRect(win));
     updateCwInfo();
 }
 
@@ -2051,14 +2144,24 @@ const elCornerList = document.getElementById('cornerList');
 
 function updateCwInfo() {
     const d = wallDims();
-    const physW = (state.cwRect.w * IN_PER_PX_W).toFixed(1);
-    const physH = (state.cwRect.h * IN_PER_PX_H).toFixed(1);
-    const coverage = ((state.cwRect.w * state.cwRect.h) / (d.wallWPx * d.wallHPx) * 100).toFixed(1);
+    const win = activeWindow();
+    if (!win) {
+        elCwInfoPx.textContent = '-';
+        elCwInfoIn.textContent = '-';
+        elCwInfoPct.textContent = '-';
+        const n = state.contentWindows.length;
+        elInfoWindow.textContent = n > 0 ? ' ' + n + ' window(s)' : ' none';
+        return;
+    }
+    const rect = win.rect;
+    const physW = (rect.w * IN_PER_PX_W).toFixed(1);
+    const physH = (rect.h * IN_PER_PX_H).toFixed(1);
+    const coverage = ((rect.w * rect.h) / (d.wallWPx * d.wallHPx) * 100).toFixed(1);
 
-    elCwInfoPx.textContent = state.cwRect.w + ' x ' + state.cwRect.h;
+    elCwInfoPx.textContent = rect.w + ' x ' + rect.h;
     elCwInfoIn.textContent = physW + '" x ' + physH + '"';
     elCwInfoPct.textContent = coverage + '%';
-    elInfoWindow.textContent = ' ' + state.cwRect.w + 'x' + state.cwRect.h + ' px (' + physW + '" x ' + physH + '")';
+    elInfoWindow.textContent = ' ' + rect.w + 'x' + rect.h + ' px (' + physW + '" x ' + physH + '")';
 }
 
 function updateSidebarInfo() {
@@ -2120,21 +2223,7 @@ function createContentEl(type, url) {
     return ifr;
 }
 
-/* ── Content management (multi-segment) ── */
-function removeContentObjects() {
-    contentObjects.forEach(o => wallGroup.remove(o));
-    contentLayerEls.forEach(el => purgeContentEls(el));
-    contentObjects = [];
-    contentLayerEls = [];
-}
-
-function removeBackContentObjects() {
-    backContentObjects.forEach(o => wallGroup.remove(o));
-    backContentLayerEls.forEach(el => purgeContentEls(el));
-    backContentObjects = [];
-    backContentLayerEls = [];
-}
-
+/* ── Content management (multi-window, multi-segment) ── */
 function buildContentSegments(type, url) {
     const segments = computeSegments();
     const objects = [];
@@ -2154,43 +2243,229 @@ function buildContentSegments(type, url) {
     return { objects, els };
 }
 
-function setContent(type, url, name) {
-    removeContentObjects();
-    document.querySelectorAll('.current-content').forEach(el => el.classList.add('hidden'));
+function removeWindowRenderObjects(winId) {
+    const rd = windowRenderData.get(winId);
+    if (!rd) return;
+    rd.frontObjects.forEach(o => wallGroup.remove(o));
+    rd.frontEls.forEach(el => purgeContentEls(el));
+    rd.backObjects.forEach(o => wallGroup.remove(o));
+    rd.backEls.forEach(el => purgeContentEls(el));
+    windowRenderData.set(winId, { frontObjects: [], frontEls: [], backObjects: [], backEls: [] });
+}
 
-    const result = buildContentSegments(type, url);
-    contentObjects = result.objects;
-    contentLayerEls = result.els;
+function syncWindowBackContent(win) {
+    const rd = windowRenderData.get(win.id);
+    if (rd) {
+        rd.backObjects.forEach(o => wallGroup.remove(o));
+        rd.backEls.forEach(el => purgeContentEls(el));
+        rd.backObjects = [];
+        rd.backEls = [];
+    }
+    if (!state.doubleSided || !win.type || !win.url) return;
+    const result = buildContentSegments(win.type, win.url);
+    if (rd) {
+        rd.backObjects = result.objects;
+        rd.backEls = result.els;
+    }
+}
+
+function setWindowContent(winId, type, url, name) {
+    const win = state.contentWindows.find(w => w.id === winId);
+    if (!win) return;
+
+    removeWindowRenderObjects(winId);
+    win.type = type;
+    win.url = url;
+    win.name = name;
+
+    const front = buildContentSegments(type, url);
+    const rd = windowRenderData.get(winId) || { frontObjects: [], frontEls: [], backObjects: [], backEls: [] };
+    rd.frontObjects = front.objects;
+    rd.frontEls = front.els;
+    windowRenderData.set(winId, rd);
+
+    syncWindowBackContent(win);
+    applyAllWindowRects();
+    renderWindowList();
+    updateContentSourceUI();
+}
+
+function clearWindowContent(winId) {
+    const win = state.contentWindows.find(w => w.id === winId);
+    if (!win) return;
+    removeWindowRenderObjects(winId);
+    win.type = null;
+    win.url = null;
+    win.name = 'Window ' + win.id;
+    renderWindowList();
+    updateContentSourceUI();
+    markDirty();
+}
+
+/* ── Window lifecycle ── */
+function addContentWindow() {
+    if (state.contentWindows.length >= MAX_CONTENT_WINDOWS) return null;
+    const d = wallDims();
+    const isFirst = state.contentWindows.length === 0;
+    const id = nextWindowId++;
+    const win = {
+        id,
+        type: null,
+        url: null,
+        name: 'Window ' + id,
+        mode: isFirst ? 'fill' : 'custom',
+        rect: isFirst
+            ? { x: 0, y: 0, w: d.wallWPx, h: d.wallHPx }
+            : { x: Math.round(d.wallWPx * 0.25), y: Math.round(d.wallHPx * 0.25),
+                w: Math.round(d.wallWPx * 0.5), h: Math.round(d.wallHPx * 0.5) }
+    };
+    state.contentWindows.push(win);
+    windowRenderData.set(id, { frontObjects: [], frontEls: [], backObjects: [], backEls: [] });
+    selectContentWindow(id);
+    return win;
+}
+
+function removeContentWindow(id) {
+    removeWindowRenderObjects(id);
+    windowRenderData.delete(id);
+    state.contentWindows = state.contentWindows.filter(w => w.id !== id);
+    if (state.selectedWindowId === id) {
+        state.selectedWindowId = state.contentWindows.length > 0 ? state.contentWindows[0].id : null;
+    }
+    renderWindowList();
+    syncCwControlsToWindow();
+    applyAllWindowRects();
+}
+
+function selectContentWindow(id) {
+    state.selectedWindowId = id;
+    renderWindowList();
+    syncCwControlsToWindow();
+}
+
+function ensureActiveWindow() {
+    if (!activeWindow()) addContentWindow();
+    return activeWindow();
+}
+
+/* ── Window list UI ── */
+const elWindowList = document.getElementById('windowList');
+const elContentSourceSection = document.getElementById('contentSourceSection');
+const elContentWindowSection = document.getElementById('contentWindowSection');
+const elSelectedWindowLabel = document.getElementById('selectedWindowLabel');
+
+function renderWindowList() {
+    elWindowList.innerHTML = '';
+    if (state.contentWindows.length === 0) {
+        elWindowList.innerHTML = '<div class="no-windows-msg">No content windows</div>';
+        return;
+    }
+    state.contentWindows.forEach(win => {
+        const entry = document.createElement('div');
+        entry.className = 'cw-entry' + (win.id === state.selectedWindowId ? ' selected' : '');
+        entry.dataset.id = win.id;
+
+        const iconMap = { image: '\u{1F5BC}', video: '\u{1F3AC}', website: '\u{1F310}' };
+        const icon = iconMap[win.type] || '\u{1F532}';
+        const sizeText = win.rect.w + '\u00d7' + win.rect.h;
+
+        entry.innerHTML =
+            '<span class="cw-entry-icon">' + icon + '</span>' +
+            '<span class="cw-entry-name">' + escHtml(win.name) + '</span>' +
+            '<span class="cw-entry-size">' + sizeText + '</span>' +
+            '<button class="cw-entry-delete" title="Remove">\u2715</button>';
+
+        entry.addEventListener('click', e => {
+            if (e.target.closest('.cw-entry-delete')) return;
+            selectContentWindow(win.id);
+        });
+        entry.querySelector('.cw-entry-delete').addEventListener('click', e => {
+            e.stopPropagation();
+            removeContentWindow(win.id);
+        });
+        elWindowList.appendChild(entry);
+    });
+}
+
+function syncCwControlsToWindow() {
+    const win = activeWindow();
+    const hasWindow = !!win;
+
+    elContentSourceSection.classList.toggle('disabled-section', !hasWindow);
+    elContentWindowSection.classList.toggle('disabled-section', !hasWindow);
+    elSelectedWindowLabel.textContent = hasWindow ? win.name : '';
+
+    // Sync CW mode tabs
+    const mode = hasWindow ? win.mode : 'fill';
+    document.querySelectorAll('.cw-mode-tab').forEach(t =>
+        t.classList.toggle('active', t.dataset.cwmode === mode));
+    const cwCustom = document.getElementById('cwCustomControls');
+    if (cwCustom) cwCustom.classList.toggle('active', mode === 'custom');
+
+    syncCwInputs();
+    updateContentSourceUI();
+    updateCwInfo();
+}
+
+function updateContentSourceUI() {
+    const win = activeWindow();
+    document.querySelectorAll('.current-content').forEach(el => el.classList.add('hidden'));
+    if (!win || !win.type) return;
 
     const infoMap = { image: 'imageInfo', video: 'videoInfo', website: 'websiteInfo' };
     const nameMap = { image: 'imageName', video: 'videoName', website: 'websiteName' };
-    document.getElementById(infoMap[type]).classList.remove('hidden');
-    document.getElementById(nameMap[type]).textContent = name;
-
-    lastContentUrl = url;
-    lastContentType = type;
-
-    syncBackContent(type, url);
-    applyCwRect();
+    if (infoMap[win.type]) {
+        document.getElementById(infoMap[win.type]).classList.remove('hidden');
+        document.getElementById(nameMap[win.type]).textContent = win.name;
+    }
 }
 
-function syncBackContent(type, url) {
-    removeBackContentObjects();
-    if (!state.doubleSided || !type) return;
-
-    const result = buildContentSegments(type, url);
-    backContentObjects = result.objects;
-    backContentLayerEls = result.els;
+/* ── Rebuild all windows (after corner/size changes) ── */
+function rebuildAllWindowContent() {
+    for (const win of state.contentWindows) {
+        if (!win.type || !win.url) continue;
+        removeWindowRenderObjects(win.id);
+        const front = buildContentSegments(win.type, win.url);
+        const rd = { frontObjects: front.objects, frontEls: front.els, backObjects: [], backEls: [] };
+        windowRenderData.set(win.id, rd);
+        syncWindowBackContent(win);
+    }
+    applyAllWindowRects();
 }
 
-function clearContent() {
-    removeContentObjects();
-    removeBackContentObjects();
-    document.querySelectorAll('.current-content').forEach(el => el.classList.add('hidden'));
-    lastContentUrl = null;
-    lastContentType = null;
-    document.getElementById('imageInput').value = '';
-    document.getElementById('videoInput').value = '';
+/* ── Pixel coordinate from 3D hit on wall surface ── */
+function worldToWallPixel(worldPoint) {
+    const d = wallDims();
+    const layout = computeColumnLayout();
+
+    for (let c = 0; c < d.cols; c++) {
+        const col = layout[c];
+        // Transform world point to column-local space
+        const dx = worldPoint.x - col.x;
+        const dz = worldPoint.z - col.z;
+        const cosNeg = Math.cos(-col.rotY), sinNeg = Math.sin(-col.rotY);
+        const localX = dx * cosNeg - dz * sinNeg;
+
+        // Check if within this column's width
+        if (Math.abs(localX) <= PANEL_W_IN / 2 + 0.5) {
+            const fracX = (localX + PANEL_W_IN / 2) / PANEL_W_IN;
+            const px = c * PANEL_PX_W + Math.round(fracX * PANEL_PX_W);
+            const py = Math.round((d.totalH / 2 - worldPoint.y) / IN_PER_PX_H);
+            return { x: Math.max(0, Math.min(px, d.wallWPx - 1)), y: Math.max(0, Math.min(py, d.wallHPx - 1)) };
+        }
+    }
+    return null;
+}
+
+function windowAtPixel(px, py) {
+    for (let i = state.contentWindows.length - 1; i >= 0; i--) {
+        const w = state.contentWindows[i];
+        if (px >= w.rect.x && px < w.rect.x + w.rect.w &&
+            py >= w.rect.y && py < w.rect.y + w.rect.h) {
+            return w;
+        }
+    }
+    return null;
 }
 
 /* ── Sidebar wiring ── */
@@ -2304,34 +2579,36 @@ elCornerList.addEventListener('click', e => {
 });
 
 function rebuildForCorners() {
-    // Preserve video playback position across corner edits
-    let savedVideoTime = null;
-    if (lastContentType === 'video') {
-        for (const el of contentLayerEls) {
+    // Preserve video playback positions across all windows
+    const savedVideoTimes = new Map();
+    for (const win of state.contentWindows) {
+        if (win.type !== 'video') continue;
+        const rd = windowRenderData.get(win.id);
+        if (!rd) continue;
+        for (const el of rd.frontEls) {
             const vid = el.querySelector('video');
             if (vid && vid.currentTime > 0) {
-                savedVideoTime = vid.currentTime;
+                savedVideoTimes.set(win.id, vid.currentTime);
                 break;
             }
         }
     }
 
     buildWall();
-    if (lastContentType && lastContentUrl) {
-        setContent(lastContentType, lastContentUrl,
-            document.querySelector('.current-content:not(.hidden) .name')?.textContent || '');
+    rebuildAllWindowContent();
 
-        // Restore video playback position after new segments are created
-        if (savedVideoTime !== null) {
-            contentLayerEls.forEach(el => {
-                const vid = el.querySelector('video');
-                if (vid) {
-                    const restore = () => { vid.currentTime = savedVideoTime; };
-                    if (vid.readyState >= 1) restore();
-                    else vid.addEventListener('loadedmetadata', restore, { once: true });
-                }
-            });
-        }
+    // Restore video playback positions
+    for (const [winId, time] of savedVideoTimes) {
+        const rd = windowRenderData.get(winId);
+        if (!rd) continue;
+        rd.frontEls.forEach(el => {
+            const vid = el.querySelector('video');
+            if (vid) {
+                const restore = () => { vid.currentTime = time; };
+                if (vid.readyState >= 1) restore();
+                else vid.addEventListener('loadedmetadata', restore, { once: true });
+            }
+        });
     }
 }
 
@@ -2358,14 +2635,17 @@ document.querySelectorAll('.content-tab').forEach(tab => {
     });
 });
 
-/* Upload handlers */
+/* Upload handlers — auto-create window if none active */
 function wireUpload(zoneId, inputId, type) {
     const zone = document.getElementById(zoneId);
     const input = document.getElementById(inputId);
     zone.addEventListener('click', () => input.click());
     input.addEventListener('change', () => {
         const file = input.files[0];
-        if (file) setContent(type, URL.createObjectURL(file), file.name);
+        if (file) {
+            const win = ensureActiveWindow();
+            setWindowContent(win.id, type, URL.createObjectURL(file), file.name);
+        }
     });
     zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
     zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
@@ -2373,7 +2653,10 @@ function wireUpload(zoneId, inputId, type) {
         e.preventDefault();
         zone.classList.remove('dragover');
         const file = e.dataTransfer.files[0];
-        if (file) setContent(type, URL.createObjectURL(file), file.name);
+        if (file) {
+            const win = ensureActiveWindow();
+            setWindowContent(win.id, type, URL.createObjectURL(file), file.name);
+        }
     });
 }
 wireUpload('imageDropZone', 'imageInput', 'image');
@@ -2435,7 +2718,8 @@ function loadTestPattern() {
     const canvas = generateTestPattern();
     canvas.toBlob(blob => {
         const url = URL.createObjectURL(blob);
-        setContent('image', url, 'Test Pattern');
+        const win = ensureActiveWindow();
+        setWindowContent(win.id, 'image', url, 'Test Pattern');
     });
 }
 
@@ -2448,7 +2732,8 @@ function loadSolidColor(hex) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     canvas.toBlob(blob => {
         const url = URL.createObjectURL(blob);
-        setContent('image', url, 'Solid ' + hex);
+        const win = ensureActiveWindow();
+        setWindowContent(win.id, 'image', url, 'Solid ' + hex);
     });
 }
 
@@ -2457,13 +2742,17 @@ document.getElementById('loadSolidColor').addEventListener('click', () => {
     loadSolidColor(document.getElementById('solidColorPicker').value);
 });
 
-document.querySelectorAll('[data-clear="content"]').forEach(b => b.addEventListener('click', clearContent));
+document.querySelectorAll('[data-clear="content"]').forEach(b => b.addEventListener('click', () => {
+    const win = activeWindow();
+    if (win) clearWindowContent(win.id);
+}));
 
 document.getElementById('loadUrlBtn').addEventListener('click', () => {
     const raw = document.getElementById('urlInput').value.trim();
     if (!raw) return;
     const url = raw.match(/^https?:\/\//) ? raw : 'https://' + raw;
-    setContent('website', url, url);
+    const win = ensureActiveWindow();
+    setWindowContent(win.id, 'website', url, url);
 });
 document.getElementById('urlInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') document.getElementById('loadUrlBtn').click();
@@ -2472,18 +2761,20 @@ document.getElementById('urlInput').addEventListener('keydown', e => {
 /* Content window mode tabs */
 document.querySelectorAll('.cw-mode-tab').forEach(tab => {
     tab.addEventListener('click', () => {
+        const win = activeWindow();
+        if (!win) return;
         const mode = tab.dataset.cwmode;
-        state.cwMode = mode;
+        win.mode = mode;
         document.querySelectorAll('.cw-mode-tab').forEach(t => t.classList.toggle('active', t.dataset.cwmode === mode));
         document.getElementById('cwCustomControls').classList.toggle('active', mode === 'custom');
 
         const { wallWPx, wallHPx } = wallDims();
 
         if (mode === 'fill' || mode === 'scaled') {
-            state.cwRect = { x: 0, y: 0, w: wallWPx, h: wallHPx };
+            win.rect = { x: 0, y: 0, w: wallWPx, h: wallHPx };
         } else {
-            if (state.cwRect.w === wallWPx && state.cwRect.h === wallHPx) {
-                state.cwRect = {
+            if (win.rect.w === wallWPx && win.rect.h === wallHPx) {
+                win.rect = {
                     w: Math.round(wallWPx * 0.5),
                     h: Math.round(wallHPx * 0.5),
                     x: Math.round(wallWPx * 0.25),
@@ -2491,8 +2782,9 @@ document.querySelectorAll('.cw-mode-tab').forEach(tab => {
                 };
             }
         }
-        applyCwRect();
+        applyAllWindowRects();
         syncCwInputs();
+        renderWindowList();
     });
 });
 
@@ -2522,10 +2814,11 @@ function unitToPx(val, axis) {
 }
 
 function syncCwInputs() {
-    document.getElementById('cwWidth').value = pxToUnit(state.cwRect.w, 'x');
-    document.getElementById('cwHeight').value = pxToUnit(state.cwRect.h, 'y');
-    document.getElementById('cwX').value = pxToUnit(state.cwRect.x, 'x');
-    document.getElementById('cwY').value = pxToUnit(state.cwRect.y, 'y');
+    const rect = activeRect();
+    document.getElementById('cwWidth').value = pxToUnit(rect.w, 'x');
+    document.getElementById('cwHeight').value = pxToUnit(rect.h, 'y');
+    document.getElementById('cwX').value = pxToUnit(rect.x, 'x');
+    document.getElementById('cwY').value = pxToUnit(rect.y, 'y');
 
     const step = state.cwUnit === 'px' ? 1 : state.cwUnit === 'panels' ? 0.25 : 1;
     ['cwWidth', 'cwHeight', 'cwX', 'cwY'].forEach(id => document.getElementById(id).step = step);
@@ -2533,6 +2826,8 @@ function syncCwInputs() {
 
 ['cwWidth', 'cwHeight', 'cwX', 'cwY'].forEach(id => {
     document.getElementById(id).addEventListener('change', () => {
+        const win = activeWindow();
+        if (!win) return;
         const { wallWPx, wallHPx } = wallDims();
 
         let nw = unitToPx(parseFloat(document.getElementById('cwWidth').value) || 1, 'x');
@@ -2545,35 +2840,41 @@ function syncCwInputs() {
         nx = Math.max(0, Math.min(nx, wallWPx - nw));
         ny = Math.max(0, Math.min(ny, wallHPx - nh));
 
-        state.cwRect = { x: nx, y: ny, w: nw, h: nh };
-        applyCwRect();
+        win.rect = { x: nx, y: ny, w: nw, h: nh };
+        applyAllWindowRects();
         syncCwInputs();
         highlightActiveAlign();
+        renderWindowList();
     });
 });
 
 document.querySelectorAll('.cw-align-btn').forEach(btn => {
     btn.addEventListener('click', () => {
+        const win = activeWindow();
+        if (!win) return;
         const pos = btn.dataset.align;
         const { wallWPx, wallHPx } = wallDims();
-        const cw = state.cwRect.w, ch = state.cwRect.h;
+        const cw = win.rect.w, ch = win.rect.h;
 
         const xMap = { l: 0, c: Math.round((wallWPx - cw) / 2), r: wallWPx - cw };
         const yMap = { t: 0, m: Math.round((wallHPx - ch) / 2), b: wallHPx - ch };
 
-        state.cwRect.y = yMap[pos[0]];
-        state.cwRect.x = xMap[pos[1]];
+        win.rect.y = yMap[pos[0]];
+        win.rect.x = xMap[pos[1]];
 
-        applyCwRect();
+        applyAllWindowRects();
         syncCwInputs();
         highlightActiveAlign();
+        renderWindowList();
     });
 });
 
 function highlightActiveAlign() {
+    const win = activeWindow();
+    if (!win) { document.querySelectorAll('.cw-align-btn').forEach(b => b.classList.remove('active')); return; }
     const { wallWPx, wallHPx } = wallDims();
-    const cx = state.cwRect.x, cy = state.cwRect.y;
-    const cw = state.cwRect.w, ch = state.cwRect.h;
+    const cx = win.rect.x, cy = win.rect.y;
+    const cw = win.rect.w, ch = win.rect.h;
 
     let col = '', row = '';
     if (cx === 0) col = 'l';
@@ -2626,8 +2927,8 @@ document.getElementById('bgColorPicker').addEventListener('input', e => {
 /* View options */
 document.getElementById('doubleSidedToggle').addEventListener('change', e => {
     state.doubleSided = e.target.checked;
-    syncBackContent(state.doubleSided ? lastContentType : null, lastContentUrl);
-    if (state.doubleSided && lastContentType) applyCwRect();
+    state.contentWindows.forEach(win => syncWindowBackContent(win));
+    if (state.doubleSided) applyAllWindowRects();
 });
 
 document.getElementById('bezelToggle').addEventListener('change', e => {
@@ -2733,8 +3034,81 @@ overlay.addEventListener('mousemove', e => {
     }
 });
 
-overlay.addEventListener('mouseup', () => { isDragging = false; });
-overlay.addEventListener('mouseleave', () => { isDragging = false; });
+overlay.addEventListener('mouseup', () => { isDragging = false; isDraggingContent = false; });
+overlay.addEventListener('mouseleave', () => { isDragging = false; isDraggingContent = false; });
+
+/* ── Content drag mode ── */
+const dragContentBtn = document.getElementById('dragContentToggle');
+let isDraggingContent = false;
+let contentDragOffset = { x: 0, y: 0 };
+
+function setContentDragMode(on) {
+    state.contentDragMode = on;
+    // Turn off wall move mode if enabling content drag
+    if (on && state.moveMode) setMoveMode(false);
+    controls.enableRotate = !on;
+    controls.enablePan = !on;
+    overlay.classList.toggle('move-mode', on);
+    dragContentBtn.classList.toggle('active', on);
+    hint.textContent = on
+        ? 'Click & drag to move selected content window on wall surface'
+        : 'Drag to rotate \u00b7 Scroll to zoom \u00b7 Middle/right-click to pan';
+}
+
+dragContentBtn.addEventListener('click', () => setContentDragMode(!state.contentDragMode));
+
+overlay.addEventListener('mousedown', e => {
+    if (!state.contentDragMode || e.button !== 0) return;
+    e.stopPropagation();
+    updateMouseNDC(e);
+
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(panelMeshes);
+    if (hits.length === 0) return;
+
+    const hitPoint = hits[0].point;
+    const pixel = worldToWallPixel(hitPoint);
+    if (!pixel) return;
+
+    // Check if we clicked on an existing window — select it
+    const hitWin = windowAtPixel(pixel.x, pixel.y);
+    if (hitWin) {
+        selectContentWindow(hitWin.id);
+    }
+
+    const win = activeWindow();
+    if (!win || win.mode !== 'custom') return;
+
+    contentDragOffset.x = pixel.x - win.rect.x;
+    contentDragOffset.y = pixel.y - win.rect.y;
+    isDraggingContent = true;
+});
+
+overlay.addEventListener('mousemove', e => {
+    if (!isDraggingContent) return;
+    const win = activeWindow();
+    if (!win) { isDraggingContent = false; return; }
+
+    updateMouseNDC(e);
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(panelMeshes);
+    if (hits.length === 0) return;
+
+    const pixel = worldToWallPixel(hits[0].point);
+    if (!pixel) return;
+
+    const d = wallDims();
+    let nx = pixel.x - contentDragOffset.x;
+    let ny = pixel.y - contentDragOffset.y;
+    nx = Math.max(0, Math.min(nx, d.wallWPx - win.rect.w));
+    ny = Math.max(0, Math.min(ny, d.wallHPx - win.rect.h));
+
+    win.rect.x = Math.round(nx);
+    win.rect.y = Math.round(ny);
+    applyAllWindowRects();
+    syncCwInputs();
+    renderWindowList();
+});
 
 /* ── Save image ── */
 document.getElementById('saveImageBtn').addEventListener('click', () => {
@@ -2893,9 +3267,11 @@ function capturePreset(name) {
         cols: state.cols,
         rows: state.rows,
         corners: JSON.parse(JSON.stringify(state.corners)),
-        cwMode: state.cwMode,
         cwUnit: state.cwUnit,
-        cwRect: { ...state.cwRect },
+        contentWindows: state.contentWindows.map(w => ({
+            rect: { ...w.rect },
+            mode: w.mode,
+        })),
         showBezels: state.showBezels,
         autoRotate: state.autoRotate,
         doubleSided: state.doubleSided,
@@ -2912,10 +3288,8 @@ function syncUIFromState() {
     document.getElementById('doubleSidedToggle').checked = state.doubleSided;
     document.getElementById('accessoryToggle').checked = state.showAccessories;
     document.getElementById('dimensionToggle').checked = state.showDimensions;
-    document.querySelectorAll('.cw-mode-tab').forEach(t =>
-        t.classList.toggle('active', t.dataset.cwmode === state.cwMode));
-    const cwCustom = document.getElementById('cwCustomControls');
-    if (cwCustom) cwCustom.classList.toggle('active', state.cwMode === 'custom');
+    renderWindowList();
+    syncCwControlsToWindow();
 }
 
 function applyPreset(preset) {
@@ -2927,14 +3301,34 @@ function applyPreset(preset) {
     state.doubleSided = preset.doubleSided;
     state.showAccessories = preset.showAccessories;
     state.showDimensions = preset.showDimensions;
-    if (preset.cwMode) state.cwMode = preset.cwMode;
     if (preset.cwUnit) state.cwUnit = preset.cwUnit;
-    if (preset.cwRect) state.cwRect = { ...preset.cwRect };
+
+    // Handle multi-window presets (new format)
+    if (preset.contentWindows && preset.contentWindows.length > 0) {
+        // Remove all existing windows
+        [...state.contentWindows].forEach(w => removeContentWindow(w.id));
+        // Create windows from preset layout (without content)
+        preset.contentWindows.forEach(pw => {
+            const win = addContentWindow();
+            if (win) {
+                win.mode = pw.mode || 'fill';
+                win.rect = { ...pw.rect };
+            }
+        });
+    } else if (preset.cwRect) {
+        // Backward compat: single-window preset
+        if (state.contentWindows.length === 0) addContentWindow();
+        const win = activeWindow();
+        if (win) {
+            win.mode = preset.cwMode || 'fill';
+            win.rect = { ...preset.cwRect };
+        }
+    }
 
     syncUIFromState();
     pruneCorners();
     rebuildForCorners();
-    syncBackContent(state.doubleSided ? lastContentType : null, lastContentUrl);
+    state.contentWindows.forEach(win => syncWindowBackContent(win));
 }
 
 function escHtml(s) {
@@ -2989,7 +3383,11 @@ presetNameInput.addEventListener('keydown', e => {
 
 renderPresetList();
 
+/* ── Content window management wiring ── */
+document.getElementById('addWindowBtn').addEventListener('click', () => addContentWindow());
+
 /* ── Boot ── */
+renderWindowList();
 init();
 </script>
 
