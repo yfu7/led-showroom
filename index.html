@@ -771,6 +771,18 @@
         }
         .cw-entry-delete:hover { color: #ef4444; background: rgba(239, 68, 68, 0.1); }
 
+        .cw-entry-rename {
+            flex: 1;
+            font-size: 13px;
+            color: #fff;
+            background: #0a0a0a;
+            border: 1px solid #3b82f6;
+            border-radius: 4px;
+            padding: 2px 6px;
+            outline: none;
+            min-width: 0;
+        }
+
         .no-windows-msg {
             font-size: 13px;
             color: #555;
@@ -2375,9 +2387,46 @@ function renderWindowList() {
             '<span class="cw-entry-size">' + sizeText + '</span>' +
             '<button class="cw-entry-delete" title="Remove">\u2715</button>';
 
+        function startRename(nameSpan) {
+            if (document.querySelector('.cw-entry-rename')) return; // already renaming
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'cw-entry-rename';
+            input.value = win.name;
+            input.maxLength = 30;
+            nameSpan.replaceWith(input);
+            input.focus();
+            input.select();
+
+            const commit = () => {
+                const val = input.value.trim();
+                if (val) win.name = val;
+                renderWindowList();
+                syncCwControlsToWindow();
+            };
+            input.addEventListener('blur', commit);
+            input.addEventListener('keydown', ev => {
+                if (ev.key === 'Enter') input.blur();
+                if (ev.key === 'Escape') { input.value = win.name; input.blur(); }
+            });
+        }
+
+        let renameTimer = null;
         entry.addEventListener('click', e => {
-            if (e.target.closest('.cw-entry-delete')) return;
-            selectContentWindow(win.id);
+            if (e.target.closest('.cw-entry-delete') || e.target.closest('.cw-entry-rename')) return;
+            clearTimeout(renameTimer);
+            if (win.id !== state.selectedWindowId) {
+                selectContentWindow(win.id);
+            } else {
+                // Already selected — slow click on name starts rename
+                const nameSpan = e.target.closest('.cw-entry-name');
+                if (nameSpan) renameTimer = setTimeout(() => startRename(nameSpan), 300);
+            }
+        });
+        entry.querySelector('.cw-entry-name').addEventListener('dblclick', e => {
+            e.stopPropagation();
+            clearTimeout(renameTimer);
+            startRename(e.currentTarget);
         });
         entry.querySelector('.cw-entry-delete').addEventListener('click', e => {
             e.stopPropagation();
