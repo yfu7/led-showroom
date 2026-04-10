@@ -576,6 +576,17 @@
             color: #93c5fd;
         }
 
+        .view-btn.recording {
+            background: rgba(160, 25, 25, 0.9);
+            border-color: #ef4444;
+            color: #fca5a5;
+            animation: recPulse 1.5s ease-in-out infinite;
+        }
+        @keyframes recPulse {
+            0%, 100% { border-color: #ef4444; }
+            50% { border-color: #991b1b; }
+        }
+
         .showroom-hint {
             position: absolute;
             bottom: 20px;
@@ -940,45 +951,45 @@
         <div class="section-title">View Options</div>
         <div class="toggle-row">
             <label>Double-Sided</label>
-            <div class="toggle">
+            <label class="toggle">
                 <input type="checkbox" id="doubleSidedToggle">
                 <span class="slider"></span>
-            </div>
+            </label>
         </div>
         <div class="toggle-row">
             <label>Panel Bezels</label>
-            <div class="toggle">
+            <label class="toggle">
                 <input type="checkbox" id="bezelToggle" checked>
                 <span class="slider"></span>
-            </div>
+            </label>
         </div>
         <div class="toggle-row">
             <label>Auto Rotate</label>
-            <div class="toggle">
+            <label class="toggle">
                 <input type="checkbox" id="rotateToggle">
                 <span class="slider"></span>
-            </div>
+            </label>
         </div>
         <div class="toggle-row">
             <label>Show Info</label>
-            <div class="toggle">
+            <label class="toggle">
                 <input type="checkbox" id="infoToggle" checked>
                 <span class="slider"></span>
-            </div>
+            </label>
         </div>
         <div class="toggle-row">
             <label>Base &amp; Support</label>
-            <div class="toggle">
+            <label class="toggle">
                 <input type="checkbox" id="accessoryToggle">
                 <span class="slider"></span>
-            </div>
+            </label>
         </div>
         <div class="toggle-row">
             <label>Dimensions</label>
-            <div class="toggle">
+            <label class="toggle">
                 <input type="checkbox" id="dimensionToggle">
                 <span class="slider"></span>
-            </div>
+            </label>
         </div>
     </div>
 </aside>
@@ -1002,6 +1013,8 @@
         <button class="view-btn" id="viewReset">Reset</button>
         <button class="view-btn" id="moveToggle">Move</button>
         <button class="view-btn" id="centerBtn">Center</button>
+        <button class="view-btn" id="saveImageBtn">Save Image</button>
+        <button class="view-btn" id="recordBtn">Record</button>
     </div>
 
     <div class="showroom-hint" id="showroomHint">Drag to rotate · Scroll to zoom · Middle/right-click to pan</div>
@@ -1210,7 +1223,7 @@ function init() {
     camera.position.set(0, 0, 300);
 
     // WebGL renderer
-    renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setClearColor(0x000000, 0);
     renderer.setSize(w, h);
@@ -1538,10 +1551,43 @@ function buildBezelLines(layout, d, miterCuts) {
 }
 
 /* ── Dimension annotations (engineering-drawing style) ── */
+function createDimSprite(text) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const fontSize = 40;
+    const font = 'bold ' + fontSize + 'px "Courier New", monospace';
+    const pad = 16;
+
+    ctx.font = font;
+    const tw = ctx.measureText(text).width;
+    canvas.width = Math.ceil(tw + pad * 2);
+    canvas.height = Math.ceil(fontSize * 1.4 + pad * 2);
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(0, 0, canvas.width, canvas.height, 8); ctx.fill(); }
+    else ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.font = font;
+    ctx.fillStyle = '#00ccff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+    const sprite = new THREE.Sprite(material);
+
+    const targetH = 4.5;
+    sprite.scale.set(targetH * canvas.width / canvas.height, targetH, 1);
+    return sprite;
+}
+
 function buildDimensions() {
     dimensionObjects.forEach(o => {
-        if (o.geometry) o.geometry.dispose();
         wallGroup.remove(o);
+        if (o.isLineSegments) o.geometry.dispose();
+        else if (o.isSprite) { o.material.map.dispose(); o.material.dispose(); }
     });
     dimensionObjects = [];
     if (!state.showDimensions) return;
@@ -1602,17 +1648,12 @@ function buildDimensions() {
         wallGroup.add(lines);
         dimensionObjects.push(lines);
 
-        // Width label (CSS3D)
-        const wDiv = document.createElement('div');
-        wDiv.className = 'dim-label';
-        wDiv.textContent = segW.toFixed(1) + '" (' + segWPx + ' px)';
-        const wObj = new CSS3DObject(wDiv);
+        // Width label (Sprite — always faces camera)
+        const wSprite = createDimSprite(segW.toFixed(1) + '" (' + segWPx + ' px)');
         const labelY = dimLineY - 2.5;
-        wObj.position.set(cx - zFront * sin, labelY, cz - zFront * cos);
-        wObj.rotation.y = rotY;
-        wObj.scale.set(0.10, 0.10, 0.10);
-        wallGroup.add(wObj);
-        dimensionObjects.push(wObj);
+        wSprite.position.set(cx - zFront * sin, labelY, cz - zFront * cos);
+        wallGroup.add(wSprite);
+        dimensionObjects.push(wSprite);
     }
 
     // ── Height dimension (left side of first segment) ──
@@ -1655,21 +1696,16 @@ function buildDimensions() {
     wallGroup.add(hLines);
     dimensionObjects.push(hLines);
 
-    // Height label (CSS3D)
-    const hDiv = document.createElement('div');
-    hDiv.className = 'dim-label';
-    hDiv.textContent = d.totalH.toFixed(1) + '" (' + totalHPx + ' px)';
-    const hObj = new CSS3DObject(hDiv);
+    // Height label (Sprite — always faces camera)
+    const hSprite = createDimSprite(d.totalH.toFixed(1) + '" (' + totalHPx + ' px)');
     const hLabelX = hDimX - 2.5;
-    hObj.position.set(
+    hSprite.position.set(
         fCx + hLabelX * fCos - zFront * fSin,
         0,
         fCz - hLabelX * fSin - zFront * fCos
     );
-    hObj.rotation.y = fRotY;
-    hObj.scale.set(0.10, 0.10, 0.10);
-    wallGroup.add(hObj);
-    dimensionObjects.push(hObj);
+    wallGroup.add(hSprite);
+    dimensionObjects.push(hSprite);
 }
 
 /* Bounding box that accounts for corners */
@@ -2515,6 +2551,69 @@ overlay.addEventListener('mousemove', e => {
 
 overlay.addEventListener('mouseup', () => { isDragging = false; });
 overlay.addEventListener('mouseleave', () => { isDragging = false; });
+
+/* ── Save image ── */
+document.getElementById('saveImageBtn').addEventListener('click', () => {
+    renderer.render(scene, camera);
+    renderer.domElement.toBlob(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'led-showroom-' + Date.now() + '.png';
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }, 'image/png');
+});
+
+/* ── Video recording ── */
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordStartTime = 0;
+let recordTimer = null;
+const recordBtn = document.getElementById('recordBtn');
+
+function startRecording() {
+    const stream = renderer.domElement.captureStream(30);
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? 'video/webm;codecs=vp9' : 'video/webm';
+    mediaRecorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 });
+    recordedChunks = [];
+
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunks, { type: mimeType });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'led-showroom-' + Date.now() + '.webm';
+        a.click();
+        URL.revokeObjectURL(a.href);
+        recordedChunks = [];
+    };
+
+    mediaRecorder.start(1000);
+    recordStartTime = Date.now();
+    recordBtn.classList.add('recording');
+    recordBtn.textContent = 'Stop 00:00';
+
+    recordTimer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - recordStartTime) / 1000);
+        const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        const ss = String(elapsed % 60).padStart(2, '0');
+        recordBtn.textContent = 'Stop ' + mm + ':' + ss;
+        if (elapsed >= 600) stopRecording();
+    }, 1000);
+}
+
+function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    clearInterval(recordTimer);
+    recordBtn.textContent = 'Record';
+    recordBtn.classList.remove('recording');
+}
+
+recordBtn.addEventListener('click', () => {
+    if (mediaRecorder && mediaRecorder.state === 'recording') stopRecording();
+    else startRecording();
+});
 
 /* ── Boot ── */
 init();
