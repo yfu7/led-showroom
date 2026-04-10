@@ -763,6 +763,92 @@
             border-color: #3b82f6;
             background: #111;
         }
+
+        /* Presets */
+        .preset-save-row {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+        .preset-save-row input {
+            flex: 1;
+            padding: 6px 10px;
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #e5e5e5;
+            font-size: 13px;
+            outline: none;
+        }
+        .preset-save-row input::placeholder { color: #555; }
+        .preset-save-row input:focus { border-color: #3b82f6; }
+        .preset-save-btn {
+            padding: 6px 14px;
+            background: #1d4ed8;
+            border: none;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.15s;
+        }
+        .preset-save-btn:hover { background: #2563eb; }
+        .preset-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .preset-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 10px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .preset-item:hover {
+            border-color: #3b82f6;
+            background: #111;
+        }
+        .preset-item .preset-name {
+            flex: 1;
+            font-size: 13px;
+            color: #e5e5e5;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .preset-item .preset-info {
+            font-size: 11px;
+            color: #666;
+            white-space: nowrap;
+        }
+        .preset-item .preset-delete {
+            background: none;
+            border: none;
+            color: #ef4444;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        .preset-item:hover .preset-delete { opacity: 1; }
+        .preset-item .preset-delete:hover { background: rgba(239, 68, 68, 0.1); }
+        .preset-empty {
+            color: #555;
+            font-size: 12px;
+            text-align: center;
+            padding: 12px 0;
+        }
     </style>
 </head>
 <body>
@@ -1006,6 +1092,16 @@
             </label>
         </div>
     </div>
+
+    <!-- Presets -->
+    <div class="section">
+        <div class="section-title">Presets</div>
+        <div class="preset-save-row">
+            <input type="text" id="presetNameInput" placeholder="Preset name…" maxlength="40">
+            <button class="preset-save-btn" id="presetSaveBtn">Save</button>
+        </div>
+        <div class="preset-list" id="presetList"></div>
+    </div>
 </aside>
 
 <main class="showroom" id="showroom">
@@ -1049,6 +1145,7 @@ const PANEL_D_IN = 2;
 const IN_PER_PX_W = PANEL_W_IN / PANEL_PX_W;
 const IN_PER_PX_H = PANEL_H_IN / PANEL_PX_H;
 const PANEL_GAP_IN = 0.06;
+const DIMENSION_RENDER_ORDER = 999;
 
 /* Mounting Base dimensions (from engineering drawing) */
 const BASE_W = 25.080;
@@ -1162,7 +1259,7 @@ const panelMats = [sideMat, sideMat, sideMat, sideMat, frontMat, backMat];
 const metalMat = new THREE.MeshStandardMaterial({ color: 0x404048, metalness: 0.7, roughness: 0.28 });
 const cornerFillMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b8, metalness: 0.6, roughness: 0.35, side: THREE.DoubleSide });
 const bezelLineMat = new THREE.LineBasicMaterial({ color: 0x555560 });
-const dimLineMat = new THREE.LineBasicMaterial({ color: 0x00bbff });
+const dimLineMat = new THREE.LineBasicMaterial({ color: 0x00bbff, depthTest: false });
 
 /* Shared geometry (identical for every panel / accessory piece) */
 const panelGeom = new THREE.BoxGeometry(PANEL_W_IN, PANEL_H_IN, PANEL_D_IN);
@@ -1590,8 +1687,9 @@ function createDimSprite(text) {
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.minFilter = THREE.LinearFilter;
-    const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+    const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
     const sprite = new THREE.Sprite(material);
+    sprite.renderOrder = DIMENSION_RENDER_ORDER;
 
     const targetH = 4.5;
     sprite.scale.set(targetH * canvas.width / canvas.height, targetH, 1);
@@ -1658,6 +1756,7 @@ function buildDimensions() {
         const geom = new THREE.BufferGeometry();
         geom.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
         const lines = new THREE.LineSegments(geom, dimMat);
+        lines.renderOrder = DIMENSION_RENDER_ORDER;
         lines.position.set(cx, 0, cz);
         lines.rotation.y = rotY;
         wallGroup.add(lines);
@@ -1706,6 +1805,7 @@ function buildDimensions() {
     const hGeom = new THREE.BufferGeometry();
     hGeom.setAttribute('position', new THREE.Float32BufferAttribute(hPts, 3));
     const hLines = new THREE.LineSegments(hGeom, dimMat);
+    hLines.renderOrder = DIMENSION_RENDER_ORDER;
     hLines.position.set(fCx, 0, fCz);
     hLines.rotation.y = fRotY;
     wallGroup.add(hLines);
@@ -2690,6 +2790,132 @@ recordBtn.addEventListener('click', () => {
     if (isRecording) stopRecording();
     else startRecording();
 });
+
+/* ── Presets ── */
+const PRESETS_KEY = 'led-showroom-presets';
+const MAX_PRESETS = 50;
+const presetNameInput = document.getElementById('presetNameInput');
+const presetSaveBtn = document.getElementById('presetSaveBtn');
+const presetListEl = document.getElementById('presetList');
+
+let presetsCache = null;
+
+function loadPresets() {
+    if (presetsCache) return presetsCache;
+    try { presetsCache = JSON.parse(localStorage.getItem(PRESETS_KEY)) || []; }
+    catch { presetsCache = []; }
+    return presetsCache;
+}
+
+function savePresetsToStorage(presets) {
+    presetsCache = presets;
+    localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+}
+
+function capturePreset(name) {
+    return {
+        name,
+        ts: Date.now(),
+        cols: state.cols,
+        rows: state.rows,
+        corners: JSON.parse(JSON.stringify(state.corners)),
+        cwMode: state.cwMode,
+        cwUnit: state.cwUnit,
+        cwRect: { ...state.cwRect },
+        showBezels: state.showBezels,
+        autoRotate: state.autoRotate,
+        doubleSided: state.doubleSided,
+        showAccessories: state.showAccessories,
+        showDimensions: state.showDimensions,
+    };
+}
+
+function syncUIFromState() {
+    document.getElementById('cols').value = state.cols;
+    document.getElementById('rows').value = state.rows;
+    document.getElementById('bezelToggle').checked = state.showBezels;
+    document.getElementById('rotateToggle').checked = state.autoRotate;
+    document.getElementById('doubleSidedToggle').checked = state.doubleSided;
+    document.getElementById('accessoryToggle').checked = state.showAccessories;
+    document.getElementById('dimensionToggle').checked = state.showDimensions;
+    document.querySelectorAll('.cw-mode-tab').forEach(t =>
+        t.classList.toggle('active', t.dataset.cwmode === state.cwMode));
+    const cwCustom = document.getElementById('cwCustomControls');
+    if (cwCustom) cwCustom.classList.toggle('active', state.cwMode === 'custom');
+}
+
+function applyPreset(preset) {
+    state.cols = preset.cols;
+    state.rows = preset.rows;
+    state.corners = JSON.parse(JSON.stringify(preset.corners || []));
+    state.showBezels = preset.showBezels;
+    state.autoRotate = preset.autoRotate;
+    state.doubleSided = preset.doubleSided;
+    state.showAccessories = preset.showAccessories;
+    state.showDimensions = preset.showDimensions;
+    if (preset.cwMode) state.cwMode = preset.cwMode;
+    if (preset.cwUnit) state.cwUnit = preset.cwUnit;
+    if (preset.cwRect) state.cwRect = { ...preset.cwRect };
+
+    syncUIFromState();
+    pruneCorners();
+    rebuildForCorners();
+    buildAccessories();
+    buildDimensions();
+    syncBackContent(state.doubleSided ? lastContentType : null, lastContentUrl);
+}
+
+function escHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderPresetList() {
+    const presets = loadPresets();
+    if (presets.length === 0) {
+        presetListEl.innerHTML = '<div class="preset-empty">No saved presets</div>';
+        return;
+    }
+    presetListEl.innerHTML = '';
+    presets.forEach((p, i) => {
+        const item = document.createElement('div');
+        item.className = 'preset-item';
+        const cornerCount = (p.corners || []).length;
+        const info = p.cols + '\u00d7' + p.rows + (cornerCount ? ' \u00b7 ' + cornerCount + ' corner' + (cornerCount > 1 ? 's' : '') : '');
+        item.innerHTML =
+            '<span class="preset-name">' + escHtml(p.name) + '</span>' +
+            '<span class="preset-info">' + info + '</span>' +
+            '<button class="preset-delete" title="Delete">\u2715</button>';
+
+        item.querySelector('.preset-name').addEventListener('click', () => applyPreset(p));
+        item.querySelector('.preset-delete').addEventListener('click', e => {
+            e.stopPropagation();
+            const presets = loadPresets();
+            presets.splice(i, 1);
+            savePresetsToStorage(presets);
+            renderPresetList();
+        });
+        presetListEl.appendChild(item);
+    });
+}
+
+presetSaveBtn.addEventListener('click', () => {
+    const name = presetNameInput.value.trim();
+    if (!name) { presetNameInput.focus(); return; }
+    const presets = loadPresets();
+    if (presets.length >= MAX_PRESETS) {
+        presets.shift();
+    }
+    presets.push(capturePreset(name));
+    savePresetsToStorage(presets);
+    presetNameInput.value = '';
+    renderPresetList();
+});
+
+presetNameInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') presetSaveBtn.click();
+});
+
+renderPresetList();
 
 /* ── Boot ── */
 init();
