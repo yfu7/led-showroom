@@ -681,32 +681,63 @@
 
         .hidden { display: none !important; }
 
-        /* ── Loading bar ── */
+        /* ── Loading overlay ── */
         .content-loading {
             position: absolute;
             bottom: 0;
             left: 0;
             right: 0;
-            height: 3px;
-            background: #1a1a2e;
-            overflow: hidden;
             z-index: 10;
             display: none;
+            flex-direction: column;
+            align-items: center;
         }
-        .content-loading.active { display: block; }
-        .content-loading::after {
+        .content-loading.active { display: flex; }
+
+        .content-loading-bar {
+            width: 100%;
+            height: 4px;
+            background: #1a1a2e;
+            overflow: hidden;
+        }
+        .content-loading-bar::after {
             content: '';
-            position: absolute;
-            top: 0;
-            left: -40%;
+            display: block;
             width: 40%;
             height: 100%;
-            background: linear-gradient(90deg, transparent, #3b82f6, transparent);
-            animation: loadSlide 1s ease-in-out infinite;
+            background: linear-gradient(90deg, transparent, #3b82f6, #60a5fa, #3b82f6, transparent);
+            animation: loadSlide 1.2s ease-in-out infinite;
         }
         @keyframes loadSlide {
-            0% { left: -40%; }
-            100% { left: 100%; }
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(350%); }
+        }
+
+        .content-loading-label {
+            position: absolute;
+            bottom: 12px;
+            background: rgba(10, 10, 10, 0.85);
+            border: 1px solid #1e3a5f;
+            border-radius: 6px;
+            padding: 6px 16px;
+            font-size: 12px;
+            color: #93c5fd;
+            backdrop-filter: blur(6px);
+            pointer-events: none;
+        }
+
+        .cw-entry-loading {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid #333;
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: cwSpin 0.8s linear infinite;
+            flex-shrink: 0;
+        }
+        @keyframes cwSpin {
+            to { transform: rotate(360deg); }
         }
 
         /* ── Dimension labels (CSS3D) ── */
@@ -1218,7 +1249,10 @@
     <div class="venue-bg" id="venueBg"></div>
     <div class="webgl-container" id="webglContainer"></div>
     <div class="css3d-container" id="css3dContainer"></div>
-    <div class="content-loading" id="contentLoading"></div>
+    <div class="content-loading" id="contentLoading">
+        <div class="content-loading-bar"></div>
+        <span class="content-loading-label">Loading content…</span>
+    </div>
     <div class="controls-overlay" id="controlsOverlay"></div>
 
     <div class="info-overlay" id="infoOverlay">
@@ -2193,13 +2227,28 @@ function updateSidebarInfo() {
 /* ── Content helpers ── */
 let loadingCount = 0;
 const contentLoadingEl = document.getElementById('contentLoading');
-function showLoading() {
+const contentLoadingLabel = contentLoadingEl.querySelector('.content-loading-label');
+const windowLoadingSet = new Set(); // track which windowIds are loading
+
+function showLoading(label) {
     loadingCount++;
+    if (label && contentLoadingLabel) contentLoadingLabel.textContent = label;
     contentLoadingEl.classList.add('active');
 }
 function hideLoading() {
     loadingCount = Math.max(0, loadingCount - 1);
-    if (loadingCount === 0) contentLoadingEl.classList.remove('active');
+    if (loadingCount === 0) {
+        contentLoadingEl.classList.remove('active');
+        if (contentLoadingLabel) contentLoadingLabel.textContent = 'Loading content\u2026';
+    }
+}
+function markWindowLoading(winId) {
+    windowLoadingSet.add(winId);
+    renderWindowList();
+}
+function clearWindowLoading(winId) {
+    windowLoadingSet.delete(winId);
+    renderWindowList();
 }
 
 function purgeContentEls(container) {
@@ -2210,34 +2259,36 @@ function purgeContentEls(container) {
     });
 }
 
-function createContentEl(type, url) {
+function createContentEl(type, url, winId) {
     if (type === 'image') {
         const img = document.createElement('img');
-        showLoading();
-        img.onload = hideLoading;
-        img.onerror = hideLoading;
+        showLoading('Loading image\u2026');
+        img.onload = () => { hideLoading(); if (winId != null) clearWindowLoading(winId); };
+        img.onerror = () => { hideLoading(); if (winId != null) clearWindowLoading(winId); };
         img.src = url;
         return img;
     }
     if (type === 'video') {
         const vid = document.createElement('video');
-        showLoading();
-        vid.oncanplay = function() { this.oncanplay = null; hideLoading(); };
-        vid.onerror = hideLoading;
+        vid.preload = 'auto';
+        showLoading('Loading video\u2026');
+        vid.addEventListener('loadeddata', () => { hideLoading(); if (winId != null) clearWindowLoading(winId); }, { once: true });
+        vid.onerror = () => { hideLoading(); if (winId != null) clearWindowLoading(winId); };
         Object.assign(vid, { src: url, autoplay: true, loop: true, muted: true, playsInline: true });
+        vid.play().catch(() => {});
         return vid;
     }
     const ifr = document.createElement('iframe');
-    showLoading();
-    ifr.onload = hideLoading;
-    ifr.onerror = hideLoading;
+    showLoading('Loading website\u2026');
+    ifr.onload = () => { hideLoading(); if (winId != null) clearWindowLoading(winId); };
+    ifr.onerror = () => { hideLoading(); if (winId != null) clearWindowLoading(winId); };
     ifr.src = (url.match(/^https?:\/\//) && !url.includes(location.host))
         ? '/proxy?url=' + encodeURIComponent(url) : url;
     return ifr;
 }
 
 /* ── Content management (multi-window, multi-segment) ── */
-function buildContentSegments(type, url) {
+function buildContentSegments(type, url, winId) {
     const segments = computeSegments();
     const objects = [];
     const els = [];
@@ -2246,7 +2297,7 @@ function buildContentSegments(type, url) {
         const container = document.createElement('div');
         container.className = 'css3d-content-el';
         container.style.overflow = 'hidden';
-        container.appendChild(createContentEl(type, url));
+        container.appendChild(createContentEl(type, url, winId));
 
         const obj = new CSS3DObject(container);
         wallGroup.add(obj);
@@ -2275,7 +2326,7 @@ function syncWindowBackContent(win) {
         rd.backEls = [];
     }
     if (!state.doubleSided || !win.type || !win.url) return;
-    const result = buildContentSegments(win.type, win.url);
+    const result = buildContentSegments(win.type, win.url, win.id);
     if (rd) {
         rd.backObjects = result.objects;
         rd.backEls = result.els;
@@ -2287,11 +2338,17 @@ function setWindowContent(winId, type, url, name) {
     if (!win) return;
 
     removeWindowRenderObjects(winId);
+    clearWindowLoading(winId);
     win.type = type;
     win.url = url;
     win.name = name;
 
-    const front = buildContentSegments(type, url);
+    // Track per-window loading state
+    if (type === 'video' || type === 'image') {
+        markWindowLoading(winId);
+    }
+
+    const front = buildContentSegments(type, url, winId);
     const rd = windowRenderData.get(winId) || { frontObjects: [], frontEls: [], backObjects: [], backEls: [] };
     rd.frontObjects = front.objects;
     rd.frontEls = front.els;
@@ -2307,6 +2364,7 @@ function clearWindowContent(winId) {
     const win = state.contentWindows.find(w => w.id === winId);
     if (!win) return;
     removeWindowRenderObjects(winId);
+    clearWindowLoading(winId);
     win.type = null;
     win.url = null;
     win.name = 'Window ' + win.id;
@@ -2380,10 +2438,12 @@ function renderWindowList() {
         const iconMap = { image: '\u{1F5BC}', video: '\u{1F3AC}', website: '\u{1F310}' };
         const icon = iconMap[win.type] || '\u{1F532}';
         const sizeText = win.rect.w + '\u00d7' + win.rect.h;
+        const isLoading = windowLoadingSet.has(win.id);
 
         entry.innerHTML =
             '<span class="cw-entry-icon">' + icon + '</span>' +
             '<span class="cw-entry-name">' + escHtml(win.name) + '</span>' +
+            (isLoading ? '<span class="cw-entry-loading" title="Loading\u2026"></span>' : '') +
             '<span class="cw-entry-size">' + sizeText + '</span>' +
             '<button class="cw-entry-delete" title="Remove">\u2715</button>';
 
@@ -2473,7 +2533,7 @@ function rebuildAllWindowContent() {
     for (const win of state.contentWindows) {
         if (!win.type || !win.url) continue;
         removeWindowRenderObjects(win.id);
-        const front = buildContentSegments(win.type, win.url);
+        const front = buildContentSegments(win.type, win.url, win.id);
         const rd = { frontObjects: front.objects, frontEls: front.els, backObjects: [], backEls: [] };
         windowRenderData.set(win.id, rd);
         syncWindowBackContent(win);
