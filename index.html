@@ -9,7 +9,8 @@
     {
         "imports": {
             "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+            "mp4-muxer": "https://cdn.jsdelivr.net/npm/mp4-muxer@5/build/mp4-muxer.mjs"
         }
     }
     </script>
@@ -548,8 +549,10 @@
             top: 20px;
             right: 20px;
             display: flex;
+            flex-wrap: wrap;
             gap: 8px;
             z-index: 10;
+            justify-content: flex-end;
         }
 
         .view-btn {
@@ -562,6 +565,17 @@
             cursor: pointer;
             backdrop-filter: blur(8px);
             transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .view-btn:disabled {
+            opacity: 0.35;
+            cursor: default;
+            pointer-events: none;
         }
 
         .view-btn:hover {
@@ -1011,7 +1025,7 @@
         <button class="view-btn" id="viewFront">Front</button>
         <button class="view-btn" id="view34">3/4</button>
         <button class="view-btn" id="viewReset">Reset</button>
-        <button class="view-btn" id="moveToggle">Move</button>
+        <button class="view-btn" id="moveToggle" disabled>Move</button>
         <button class="view-btn" id="centerBtn">Center</button>
         <button class="view-btn" id="saveImageBtn">Save Image</button>
         <button class="view-btn" id="recordBtn">Record</button>
@@ -1024,6 +1038,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
+import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 
 /* ── Constants ── */
 const PANEL_PX_W = 344;
@@ -2564,36 +2579,85 @@ document.getElementById('saveImageBtn').addEventListener('click', () => {
     }, 'image/png');
 });
 
-/* ── Video recording ── */
-let mediaRecorder = null;
+/* ── Video recording (MP4 via WebCodecs, WebM fallback) ── */
+let isRecording = false;
 let recordedChunks = [];
 let recordStartTime = 0;
 let recordTimer = null;
+let recordInterval = null;
+let mediaRecorder = null;
+let mp4Muxer = null;
+let videoEncoder = null;
+let usingMP4 = false;
+let frameCount = 0;
 const recordBtn = document.getElementById('recordBtn');
 
+function downloadVideo(blob, ext) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'led-showroom-' + Date.now() + ext;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
 function startRecording() {
-    const stream = renderer.domElement.captureStream(30);
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? 'video/webm;codecs=vp9' : 'video/webm';
-    mediaRecorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 });
+    const canvas = renderer.domElement;
+    const w = canvas.width & ~1, h = canvas.height & ~1; // H.264 requires even dimensions
+    isRecording = true;
+    usingMP4 = false;
+    frameCount = 0;
+    recordStartTime = Date.now();
     recordedChunks = [];
 
-    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
-    mediaRecorder.onstop = () => {
-        const blob = new Blob(recordedChunks, { type: mimeType });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'led-showroom-' + Date.now() + '.webm';
-        a.click();
-        URL.revokeObjectURL(a.href);
-        recordedChunks = [];
-    };
+    if (typeof VideoEncoder !== 'undefined') {
+        try {
+            mp4Muxer = new Muxer({
+                target: new ArrayBufferTarget(),
+                video: { codec: 'avc', width: w, height: h },
+                fastStart: 'in-memory',
+            });
+            videoEncoder = new VideoEncoder({
+                output: (chunk, meta) => mp4Muxer.addVideoChunk(chunk, meta),
+                error: e => console.error('VideoEncoder error:', e),
+            });
+            videoEncoder.configure({
+                codec: 'avc1.640032', width: w, height: h,
+                bitrate: 8_000_000, framerate: 30,
+            });
+            const offscreen = new OffscreenCanvas(w, h);
+            const offCtx = offscreen.getContext('2d');
+            recordInterval = setInterval(() => {
+                offCtx.drawImage(canvas, 0, 0, w, h);
+                const frame = new VideoFrame(offscreen, {
+                    timestamp: frameCount * Math.round(1_000_000 / 30),
+                });
+                videoEncoder.encode(frame, { keyFrame: frameCount % 90 === 0 });
+                frame.close();
+                frameCount++;
+            }, 1000 / 30);
+            usingMP4 = true;
+        } catch (e) {
+            console.warn('MP4 recording unavailable, using WebM:', e);
+            mp4Muxer = null;
+            videoEncoder = null;
+        }
+    }
 
-    mediaRecorder.start(1000);
-    recordStartTime = Date.now();
+    if (!usingMP4) {
+        const stream = canvas.captureStream(30);
+        const mt = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+            ? 'video/webm;codecs=vp9' : 'video/webm';
+        mediaRecorder = new MediaRecorder(stream, { mimeType: mt, videoBitsPerSecond: 8_000_000 });
+        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+        mediaRecorder.onstop = () => {
+            downloadVideo(new Blob(recordedChunks, { type: mt }), '.webm');
+            recordedChunks = [];
+        };
+        mediaRecorder.start(1000);
+    }
+
     recordBtn.classList.add('recording');
     recordBtn.textContent = 'Stop 00:00';
-
     recordTimer = setInterval(() => {
         const elapsed = Math.floor((Date.now() - recordStartTime) / 1000);
         const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
@@ -2603,15 +2667,27 @@ function startRecording() {
     }, 1000);
 }
 
-function stopRecording() {
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+async function stopRecording() {
+    isRecording = false;
     clearInterval(recordTimer);
+    clearInterval(recordInterval);
     recordBtn.textContent = 'Record';
     recordBtn.classList.remove('recording');
+
+    if (usingMP4 && videoEncoder) {
+        await videoEncoder.flush();
+        mp4Muxer.finalize();
+        downloadVideo(new Blob([mp4Muxer.target.buffer], { type: 'video/mp4' }), '.mp4');
+        videoEncoder.close();
+        videoEncoder = null;
+        mp4Muxer = null;
+    } else if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+    }
 }
 
 recordBtn.addEventListener('click', () => {
-    if (mediaRecorder && mediaRecorder.state === 'recording') stopRecording();
+    if (isRecording) stopRecording();
     else startRecording();
 });
 
