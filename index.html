@@ -1077,7 +1077,7 @@
                     <div class="text">Drop video or <strong>browse</strong></div>
                     <div class="subtext">MP4, WebM, OGG</div>
                 </div>
-                <input type="file" id="videoInput" accept="video/*" style="display:none">
+                <input type="file" id="videoInput" accept="video/mp4,video/webm,video/ogg,.mp4,.webm,.ogv,.mov" style="display:none">
                 <div class="current-content hidden" id="videoInfo">
                     <span class="name" id="videoName"></span>
                     <button class="clear-btn" data-clear="content">Clear</button>
@@ -2270,12 +2270,60 @@ function createContentEl(type, url, winId) {
     }
     if (type === 'video') {
         const vid = document.createElement('video');
+        // HTML attributes required for autoplay policy compliance
+        vid.setAttribute('muted', '');
+        vid.setAttribute('autoplay', '');
+        vid.setAttribute('loop', '');
+        vid.setAttribute('playsinline', '');
+        vid.setAttribute('preload', 'auto');
+        vid.setAttribute('crossorigin', 'anonymous');
+        // Mirror as JS properties
+        vid.muted = true;
+        vid.loop = true;
+        vid.playsInline = true;
         vid.preload = 'auto';
+        vid.crossOrigin = 'anonymous';
+
         showLoading('Loading video\u2026');
-        vid.addEventListener('loadeddata', () => { hideLoading(); if (winId != null) clearWindowLoading(winId); }, { once: true });
-        vid.onerror = () => { hideLoading(); if (winId != null) clearWindowLoading(winId); };
-        Object.assign(vid, { src: url, autoplay: true, loop: true, muted: true, playsInline: true });
-        vid.play().catch(() => {});
+        let settled = false;
+        const settle = () => {
+            if (settled) return;
+            settled = true;
+            hideLoading();
+            if (winId != null) clearWindowLoading(winId);
+            markDirty();
+        };
+
+        // Multiple event hooks — first one to fire wins
+        vid.addEventListener('loadeddata', settle, { once: true });
+        vid.addEventListener('canplay', settle, { once: true });
+        vid.addEventListener('playing', settle, { once: true });
+        vid.addEventListener('error', () => {
+            if (!settled) {
+                settled = true;
+                hideLoading();
+                if (winId != null) clearWindowLoading(winId);
+                console.warn('Video load error:', vid.error?.message || 'unknown');
+            }
+        }, { once: true });
+
+        // Timeout fallback: hide loading after 15s even if events never fire
+        setTimeout(() => { if (!settled) settle(); }, 15000);
+
+        // Set source and begin loading
+        vid.src = url;
+        vid.load();
+
+        // Robust play: try immediately, retry after metadata, retry on timeout
+        const tryPlay = () => vid.play().catch(() =>
+            setTimeout(() => vid.play().catch(() => {}), 500)
+        );
+        vid.addEventListener('loadedmetadata', () => {
+            markDirty();
+            tryPlay();
+        }, { once: true });
+        setTimeout(tryPlay, 100);
+
         return vid;
     }
     const ifr = document.createElement('iframe');
