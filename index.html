@@ -549,8 +549,13 @@
             pointer-events: none;
         }
 
-        .controls-overlay {
+        .dim-container {
             z-index: 3;
+            pointer-events: none;
+        }
+
+        .controls-overlay {
+            z-index: 4;
             cursor: grab;
         }
 
@@ -1129,6 +1134,7 @@
     <div class="venue-bg" id="venueBg"></div>
     <div class="webgl-container" id="webglContainer"></div>
     <div class="css3d-container" id="css3dContainer"></div>
+    <div class="dim-container" id="dimContainer"></div>
     <div class="content-loading" id="contentLoading"></div>
     <div class="controls-overlay" id="controlsOverlay"></div>
 
@@ -1328,7 +1334,7 @@ function buildMiteredPanelGeom(leftCut, rightCut) {
 }
 
 /* ── Three.js objects ── */
-let scene, camera, renderer, cssRenderer, controls;
+let scene, camera, renderer, cssRenderer, dimRenderer, dimScene, dimGroup, controls;
 let wallGroup;
 let panelMeshes = [];
 let contentObjects = [];      // CSS3DObject per segment
@@ -1366,6 +1372,16 @@ function init() {
     cssRenderer = new CSS3DRenderer();
     cssRenderer.setSize(w, h);
     document.getElementById('css3dContainer').appendChild(cssRenderer.domElement);
+
+    // Dimension overlay renderer (above CSS3D layer)
+    dimRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+    dimRenderer.setPixelRatio(window.devicePixelRatio);
+    dimRenderer.setClearColor(0x000000, 0);
+    dimRenderer.setSize(w, h);
+    document.getElementById('dimContainer').appendChild(dimRenderer.domElement);
+    dimScene = new THREE.Scene();
+    dimGroup = new THREE.Group();
+    dimScene.add(dimGroup);
 
     // Lighting
     scene.add(new THREE.AmbientLight(0xffffff, 0.55));
@@ -1409,6 +1425,7 @@ function onResize() {
     camera.updateProjectionMatrix();
     renderer.setSize(c.clientWidth, c.clientHeight);
     cssRenderer.setSize(c.clientWidth, c.clientHeight);
+    dimRenderer.setSize(c.clientWidth, c.clientHeight);
 }
 
 function animate() {
@@ -1417,6 +1434,9 @@ function animate() {
     controls.update();
     renderer.render(scene, camera);
     cssRenderer.render(scene, camera);
+    dimGroup.position.copy(wallGroup.position);
+    dimGroup.rotation.copy(wallGroup.rotation);
+    dimRenderer.render(dimScene, camera);
 }
 
 /* ── Wall construction ── */
@@ -1719,7 +1739,7 @@ function createDimSprite(text) {
 
 function buildDimensions() {
     dimensionObjects.forEach(o => {
-        wallGroup.remove(o);
+        dimGroup.remove(o);
         if (o.isLineSegments) o.geometry.dispose();
         else if (o.isSprite) { o.material.map.dispose(); o.material.dispose(); }
     });
@@ -1780,14 +1800,14 @@ function buildDimensions() {
         lines.renderOrder = DIMENSION_RENDER_ORDER;
         lines.position.set(cx, 0, cz);
         lines.rotation.y = rotY;
-        wallGroup.add(lines);
+        dimGroup.add(lines);
         dimensionObjects.push(lines);
 
         // Width label (Sprite — always faces camera)
         const wSprite = createDimSprite(segW.toFixed(1) + '" (' + segWPx + ' px)');
         const labelY = dimLineY - 2.5;
         wSprite.position.set(cx - zFront * sin, labelY, cz - zFront * cos);
-        wallGroup.add(wSprite);
+        dimGroup.add(wSprite);
         dimensionObjects.push(wSprite);
     }
 
@@ -1829,7 +1849,7 @@ function buildDimensions() {
     hLines.renderOrder = DIMENSION_RENDER_ORDER;
     hLines.position.set(fCx, 0, fCz);
     hLines.rotation.y = fRotY;
-    wallGroup.add(hLines);
+    dimGroup.add(hLines);
     dimensionObjects.push(hLines);
 
     // Height label (Sprite — always faces camera)
@@ -1840,7 +1860,7 @@ function buildDimensions() {
         0,
         fCz - hLabelX * fSin - zFront * fCos
     );
-    wallGroup.add(hSprite);
+    dimGroup.add(hSprite);
     dimensionObjects.push(hSprite);
 }
 
@@ -2691,7 +2711,14 @@ overlay.addEventListener('mouseleave', () => { isDragging = false; });
 /* ── Save image ── */
 document.getElementById('saveImageBtn').addEventListener('click', () => {
     renderer.render(scene, camera);
-    renderer.domElement.toBlob(blob => {
+    dimRenderer.render(dimScene, camera);
+    const c = document.createElement('canvas');
+    c.width = renderer.domElement.width;
+    c.height = renderer.domElement.height;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(renderer.domElement, 0, 0);
+    ctx.drawImage(dimRenderer.domElement, 0, 0);
+    c.toBlob(blob => {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = 'led-showroom-' + Date.now() + '.png';
@@ -2747,8 +2774,10 @@ function startRecording() {
             });
             const offscreen = new OffscreenCanvas(w, h);
             const offCtx = offscreen.getContext('2d');
+            const dimCanvas = dimRenderer.domElement;
             recordInterval = setInterval(() => {
                 offCtx.drawImage(canvas, 0, 0, w, h);
+                offCtx.drawImage(dimCanvas, 0, 0, w, h);
                 const frame = new VideoFrame(offscreen, {
                     timestamp: frameCount * Math.round(1_000_000 / 30),
                 });
