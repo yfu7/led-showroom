@@ -2640,10 +2640,10 @@ function createContentEl(type, url, winId) {
 
         const canvas = document.createElement('canvas');
         const ctx2d = canvas.getContext('2d');
-        let animId = null;
         let stopped = false;
+        let drawing = false;
 
-        showLoading('Loading video\u2026');
+        showLoading('Loading video\u2026 0%');
         let settled = false;
         const settle = () => {
             if (settled) return;
@@ -2651,6 +2651,17 @@ function createContentEl(type, url, winId) {
             hideLoading();
             if (winId != null) clearWindowLoading(winId);
         };
+
+        // Progress tracking
+        vid.addEventListener('progress', () => {
+            if (settled) return;
+            try {
+                if (vid.buffered.length > 0 && vid.duration > 0) {
+                    const pct = Math.round(vid.buffered.end(vid.buffered.length - 1) / vid.duration * 100);
+                    showLoading('Loading video\u2026 ' + pct + '%');
+                }
+            } catch (e) {}
+        });
 
         function drawLoop() {
             if (stopped) return;
@@ -2662,11 +2673,23 @@ function createContentEl(type, url, winId) {
                 ctx2d.drawImage(vid, 0, 0);
                 markDirty();
             }
-            animId = requestAnimationFrame(drawLoop);
+            requestAnimationFrame(drawLoop);
         }
 
-        vid.addEventListener('loadeddata', () => { settle(); drawLoop(); }, { once: true });
-        vid.addEventListener('canplay', settle, { once: true });
+        // Start draw loop immediately — it safely checks readyState before drawing
+        function startDrawing() {
+            if (drawing) return;
+            drawing = true;
+            drawLoop();
+        }
+
+        vid.addEventListener('loadedmetadata', () => {
+            startDrawing();
+            tryPlay();
+        }, { once: true });
+        vid.addEventListener('loadeddata', () => { settle(); startDrawing(); }, { once: true });
+        vid.addEventListener('canplay', () => { settle(); startDrawing(); tryPlay(); }, { once: true });
+        vid.addEventListener('playing', () => { settle(); startDrawing(); }, { once: true });
         vid.addEventListener('error', () => {
             if (!settled) {
                 settled = true;
@@ -2675,21 +2698,23 @@ function createContentEl(type, url, winId) {
                 console.warn('Video load error:', vid.error?.message || 'unknown');
             }
         }, { once: true });
-        setTimeout(() => { if (!settled) settle(); }, 15000);
+        // Timeout fallback
+        setTimeout(() => { if (!settled) settle(); startDrawing(); }, 15000);
 
         vid.src = url;
         vid.load();
 
-        const tryPlay = () => vid.play().catch(() =>
-            setTimeout(() => vid.play().catch(() => {}), 500)
-        );
-        vid.addEventListener('loadedmetadata', tryPlay, { once: true });
-        setTimeout(tryPlay, 100);
+        const tryPlay = () => vid.play().catch(err => {
+            console.warn('Video play attempt failed:', err.message);
+            setTimeout(() => vid.play().catch(() => {}), 1000);
+        });
+        // Also try playing after a short delay in case events don't fire
+        setTimeout(() => { startDrawing(); tryPlay(); }, 300);
+        setTimeout(() => { startDrawing(); tryPlay(); }, 2000);
 
         // Cleanup hook for purgeContentEls
         canvas._vidCleanup = () => {
             stopped = true;
-            if (animId) cancelAnimationFrame(animId);
             vid.pause();
             vid.removeAttribute('src');
             vid.load();
