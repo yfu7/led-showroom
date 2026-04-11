@@ -1854,6 +1854,7 @@ function buildMiteredPanelGeom(leftCut, rightCut) {
 
 /* ── Three.js objects ── */
 let scene, camera, renderer, cssRenderer, controls;
+let gpuMaxTextureSize = 4096; // updated at init from GL context
 let wallGroup;
 let panelMeshes = [];
 /* Per-window render data: Map<windowId, { frontObjects, frontEls, backObjects, backEls }> */
@@ -1882,6 +1883,11 @@ function init() {
     renderer.setClearColor(0x000000, 0);
     renderer.setSize(w, h);
     document.getElementById('webglContainer').appendChild(renderer.domElement);
+
+    // Detect GPU max texture size for canvas resolution cap
+    const gl = renderer.getContext();
+    gpuMaxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 4096;
+    console.log('GPU max texture size:', gpuMaxTextureSize);
 
     // CSS3D renderer
     cssRenderer = new CSS3DRenderer();
@@ -2785,8 +2791,8 @@ function createContentEl(type, url, winId, existingVid) {
             } catch (e) {}
         });
 
-        // Canvas resolution cap — high ceiling for dedicated GPUs (e.g. A3000 12GB).
-        const MAX_CANVAS_DIM = 8192;
+        // Canvas resolution cap — auto-detected from GPU's max texture size
+        const MAX_CANVAS_DIM = gpuMaxTextureSize;
         let intervalId = null;
 
         function drawFrame() {
