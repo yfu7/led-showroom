@@ -2688,6 +2688,21 @@ const activeVideoCanvases = new Set();
 let sharedSpanVideo = null;   // single <video> shared by all walls in span mode
 let sharedSpanVideoRefCount = 0;
 
+// Firefox (and some browser configs) block even muted autoplay until user interaction.
+// On first click/touch anywhere, try to resume all paused videos.
+function resumeAllVideos() {
+    activeVideoCanvases.forEach(c => {
+        if (c._vid && c._vid.paused && c._vid.readyState >= 2) {
+            c._vid.play().catch(() => {});
+        }
+    });
+    if (sharedSpanVideo && sharedSpanVideo.paused && sharedSpanVideo.readyState >= 2) {
+        sharedSpanVideo.play().catch(() => {});
+    }
+}
+document.addEventListener('click', resumeAllVideos, { once: false });
+document.addEventListener('touchstart', resumeAllVideos, { once: false });
+
 function purgeContentEls(container) {
     if (!container) return;
     container.querySelectorAll('img,canvas,iframe').forEach(el => {
@@ -2767,8 +2782,9 @@ function createContentEl(type, url, winId, existingVid) {
         })();
 
         const canvas = document.createElement('canvas');
-        // desynchronized: true allows GPU to present frames without waiting for compositor
-        const ctx2d = canvas.getContext('2d', { desynchronized: true, willReadFrequently: false });
+        // desynchronized hint for GPU direct presentation (ignored if unsupported)
+        const ctx2d = canvas.getContext('2d', { desynchronized: true, willReadFrequently: false })
+                   || canvas.getContext('2d'); // Firefox fallback
         let stopped = false;
         let drawing = false;
 
