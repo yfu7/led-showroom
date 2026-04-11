@@ -4344,9 +4344,21 @@ async function startRecording() {
                     target: new ArrayBufferTarget(),
                     video: { codec: cc.muxCodec, width: w, height: h },
                     fastStart: 'in-memory',
+                    firstTimestampBehavior: 'offset',
                 });
                 videoEncoder = new VideoEncoder({
-                    output: (chunk, meta) => mp4Muxer.addVideoChunk(chunk, meta),
+                    output: (chunk, meta) => {
+                        if (meta?.decoderConfig) {
+                            // mp4-muxer v5 requires colorSpace in decoderConfig
+                            const dc = meta.decoderConfig;
+                            if (!dc.colorSpace || dc.colorSpace.primaries === null) {
+                                meta = { decoderConfig: Object.assign({}, dc, {
+                                    colorSpace: { primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRange: false }
+                                })};
+                            }
+                        }
+                        mp4Muxer.addVideoChunk(chunk, meta);
+                    },
                     error: e => console.error('VideoEncoder error:', e),
                 });
                 videoEncoder.configure({
@@ -4399,10 +4411,17 @@ async function stopRecording() {
     markDirty();
 
     if (usingMP4 && videoEncoder) {
-        await videoEncoder.flush();
-        mp4Muxer.finalize();
-        await saveVideoFile(new Blob([mp4Muxer.target.buffer], { type: 'video/mp4' }));
-        videoEncoder.close();
+        try {
+            await videoEncoder.flush();
+            mp4Muxer.finalize();
+            const buf = mp4Muxer.target.buffer;
+            if (buf.byteLength > 0) {
+                saveVideoFile(new Blob([buf], { type: 'video/mp4' }));
+            }
+        } catch (e) {
+            console.error('MP4 save error:', e);
+        }
+        try { videoEncoder.close(); } catch {}
         videoEncoder = null;
         mp4Muxer = null;
     } else if (mediaRecorder && mediaRecorder.state !== 'inactive') {
@@ -4415,8 +4434,8 @@ async function stopRecording() {
 }
 
 recordBtn.addEventListener('click', () => {
-    if (isRecording) stopRecording();
-    else startRecording();
+    if (isRecording) stopRecording().catch(e => console.error('Stop error:', e));
+    else startRecording().catch(e => console.error('Start error:', e));
 });
 
 /* ── Presets ── */
