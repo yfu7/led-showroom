@@ -699,8 +699,16 @@
             height: 4px;
             background: #1a1a2e;
             overflow: hidden;
+            position: relative;
         }
-        .content-loading-bar::after {
+        .content-loading-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+            transition: width 0.3s ease;
+        }
+        .content-loading-bar.indeterminate .content-loading-fill { display: none; }
+        .content-loading-bar.indeterminate::after {
             content: '';
             display: block;
             width: 40%;
@@ -1327,7 +1335,9 @@
     <div class="webgl-container" id="webglContainer"></div>
     <div class="css3d-container" id="css3dContainer"></div>
     <div class="content-loading" id="contentLoading">
-        <div class="content-loading-bar"></div>
+        <div class="content-loading-bar indeterminate" id="contentLoadingBar">
+            <div class="content-loading-fill" id="contentLoadingFill"></div>
+        </div>
         <span class="content-loading-label">Loading content…</span>
     </div>
     <div class="controls-overlay" id="controlsOverlay"></div>
@@ -2634,17 +2644,28 @@ function updateSidebarInfo() {
 let loadingCount = 0;
 const contentLoadingEl = document.getElementById('contentLoading');
 const contentLoadingLabel = contentLoadingEl.querySelector('.content-loading-label');
+const contentLoadingBar = document.getElementById('contentLoadingBar');
+const contentLoadingFill = document.getElementById('contentLoadingFill');
 const windowLoadingSet = new Set(); // track which windowIds are loading
 
-function showLoading(label) {
+function showLoading(label, pct) {
     loadingCount++;
     if (label && contentLoadingLabel) contentLoadingLabel.textContent = label;
+    if (pct != null && pct >= 0) {
+        contentLoadingBar.classList.remove('indeterminate');
+        contentLoadingFill.style.width = Math.min(100, Math.round(pct)) + '%';
+    } else {
+        contentLoadingBar.classList.add('indeterminate');
+        contentLoadingFill.style.width = '0%';
+    }
     contentLoadingEl.classList.add('active');
 }
 function hideLoading() {
     loadingCount = Math.max(0, loadingCount - 1);
     if (loadingCount === 0) {
         contentLoadingEl.classList.remove('active');
+        contentLoadingBar.classList.add('indeterminate');
+        contentLoadingFill.style.width = '0%';
         if (contentLoadingLabel) contentLoadingLabel.textContent = 'Loading content\u2026';
     }
 }
@@ -2744,7 +2765,7 @@ function createContentEl(type, url, winId, existingVid) {
         let stopped = false;
         let drawing = false;
 
-        showLoading('Loading video\u2026 0%');
+        showLoading('Loading video\u2026 0%', 0);
         let settled = false;
         const settle = () => {
             if (settled) return;
@@ -2753,19 +2774,19 @@ function createContentEl(type, url, winId, existingVid) {
             if (winId != null) clearWindowLoading(winId);
         };
 
-        // Progress tracking
+        // Progress tracking with numeric bar
         vid.addEventListener('progress', () => {
             if (settled) return;
             try {
                 if (vid.buffered.length > 0 && vid.duration > 0) {
                     const pct = Math.round(vid.buffered.end(vid.buffered.length - 1) / vid.duration * 100);
-                    showLoading('Loading video\u2026 ' + pct + '%');
+                    showLoading('Loading video\u2026 ' + pct + '%', pct);
                 }
             } catch (e) {}
         });
 
-        // Cap canvas resolution to avoid GPU memory exhaustion with multiple walls.
-        const MAX_CANVAS_DIM = 2048;
+        // Canvas resolution cap — high ceiling for dedicated GPUs (e.g. A3000 12GB).
+        const MAX_CANVAS_DIM = 8192;
         let intervalId = null;
 
         function drawFrame() {
