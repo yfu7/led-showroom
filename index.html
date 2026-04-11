@@ -814,6 +814,49 @@
             min-width: 0;
         }
 
+        /* ── Wall list entries ── */
+        .wall-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-bottom: 12px;
+        }
+        .wall-entry {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .wall-entry:hover { background: #1a1a1a; border-color: #555; }
+        .wall-entry.selected { background: #1e3a5f; border-color: #3b82f6; }
+        .wall-entry-name {
+            flex: 1;
+            font-size: 13px;
+            color: #ccc;
+            font-weight: 500;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .wall-entry.selected .wall-entry-name { color: #93c5fd; }
+        .wall-entry-info { font-size: 11px; color: #666; flex-shrink: 0; }
+        .wall-entry-rename {
+            flex: 1;
+            font-size: 13px;
+            color: #fff;
+            background: #0a0a0a;
+            border: 1px solid #3b82f6;
+            border-radius: 4px;
+            padding: 2px 6px;
+            outline: none;
+            min-width: 0;
+        }
+
         .no-windows-msg {
             font-size: 13px;
             color: #555;
@@ -988,6 +1031,17 @@
 
 <aside class="sidebar">
     <h1><span>LED</span> Wall Showroom</h1>
+
+    <!-- Walls -->
+    <div class="section">
+        <div class="section-title">Walls</div>
+        <div class="wall-list" id="wallList"></div>
+        <button class="add-corner-btn" id="addWallBtn">+ Add Wall</button>
+        <div class="config-row" style="margin-top:12px;">
+            <label>Span Content</label>
+            <label class="toggle"><input type="checkbox" id="spanToggle"><span class="slider"></span></label>
+        </div>
+    </div>
 
     <!-- Panel Configuration -->
     <div class="section">
@@ -1307,8 +1361,17 @@ const SUPPORT_ANGLE_RAD = 45 * Math.PI / 180;
 
 /* ── State ── */
 const state = {
+    /* Per-wall (mirrors active wall — context-switched) */
     cols: 4,
     rows: 3,
+    corners: [],
+    contentWindows: [],
+    selectedWindowId: null,
+    /* Multi-wall */
+    walls: [],              // { id, name, cols, rows, corners, contentWindows, selectedWindowId }
+    selectedWallId: null,
+    spanContent: false,
+    /* Global */
     cwUnit: 'px',
     showBezels: true,
     autoRotate: false,
@@ -1317,12 +1380,246 @@ const state = {
     contentDragMode: false,
     showAccessories: false,
     showDimensions: false,
-    corners: [],  // { afterCol: number, angle: number (degrees, -270 to +90) }
-    contentWindows: [],  // { id, type, url, name, rect:{x,y,w,h}, mode }
-    selectedWindowId: null,
 };
 
 let nextWindowId = 1;
+let nextWallId = 1;
+const MAX_WALLS = 10;
+const WALL_GAP_IN = 40;
+
+/* ── Per-wall render context ── */
+let wallContextMap = new Map();
+/* Each entry: { group, panelMeshes, windowRenderData, accessoryMeshes,
+   cornerFillMeshes, bezelLineMeshes, customPanelGeoms, dimensionObjects,
+   cachedDims, cachedLayout, cachedSegments } */
+let activeContextWallId = null;
+
+function saveWallContext() {
+    if (!activeContextWallId) return;
+    const ctx = wallContextMap.get(activeContextWallId);
+    if (ctx) {
+        ctx.panelMeshes = panelMeshes;
+        ctx.windowRenderData = windowRenderData;
+        ctx.accessoryMeshes = accessoryMeshes;
+        ctx.cornerFillMeshes = cornerFillMeshes;
+        ctx.bezelLineMeshes = bezelLineMeshes;
+        ctx.customPanelGeoms = customPanelGeoms;
+        ctx.dimensionObjects = dimensionObjects;
+        ctx.cachedDims = _cachedDims;
+        ctx.cachedLayout = _cachedLayout;
+        ctx.cachedSegments = _cachedSegments;
+    }
+    const wall = state.walls.find(w => w.id === activeContextWallId);
+    if (wall) {
+        wall.cols = state.cols;
+        wall.rows = state.rows;
+        wall.selectedWindowId = state.selectedWindowId;
+        // corners & contentWindows are references — already synced
+    }
+}
+
+function activateWallContext(wallId) {
+    if (wallId === activeContextWallId) return;
+    saveWallContext();
+    activeContextWallId = wallId;
+    const ctx = wallContextMap.get(wallId);
+    if (ctx) {
+        wallGroup = ctx.group;
+        panelMeshes = ctx.panelMeshes;
+        windowRenderData = ctx.windowRenderData;
+        accessoryMeshes = ctx.accessoryMeshes;
+        cornerFillMeshes = ctx.cornerFillMeshes;
+        bezelLineMeshes = ctx.bezelLineMeshes;
+        customPanelGeoms = ctx.customPanelGeoms;
+        dimensionObjects = ctx.dimensionObjects;
+        _cachedDims = ctx.cachedDims;
+        _cachedLayout = ctx.cachedLayout;
+        _cachedSegments = ctx.cachedSegments;
+    }
+    const wall = state.walls.find(w => w.id === wallId);
+    if (wall) {
+        state.cols = wall.cols;
+        state.rows = wall.rows;
+        state.corners = wall.corners;
+        state.contentWindows = wall.contentWindows;
+        state.selectedWindowId = wall.selectedWindowId;
+    }
+}
+
+function syncActiveWallScalars() {
+    const wall = state.walls.find(w => w.id === activeContextWallId);
+    if (wall) {
+        wall.cols = state.cols;
+        wall.rows = state.rows;
+        wall.selectedWindowId = state.selectedWindowId;
+    }
+}
+
+/* ── Wall management ── */
+function createWallRenderContext() {
+    const group = new THREE.Group();
+    scene.add(group);
+    return {
+        group,
+        panelMeshes: [],
+        windowRenderData: new Map(),
+        accessoryMeshes: [],
+        cornerFillMeshes: [],
+        bezelLineMeshes: [],
+        customPanelGeoms: [],
+        dimensionObjects: [],
+        cachedDims: null,
+        cachedLayout: null,
+        cachedSegments: null,
+    };
+}
+
+function addWall() {
+    if (state.walls.length >= MAX_WALLS) return null;
+    const id = nextWallId++;
+    const wall = {
+        id,
+        name: 'Wall ' + id,
+        cols: 4,
+        rows: 3,
+        corners: [],
+        contentWindows: [],
+        selectedWindowId: null,
+    };
+    state.walls.push(wall);
+    wallContextMap.set(id, createWallRenderContext());
+
+    // Activate this wall so buildWall operates on it
+    activateWallContext(id);
+    state.selectedWallId = id;
+    buildWall();
+    arrangeWalls();
+    renderWallList();
+    return wall;
+}
+
+function removeWall(wallId) {
+    if (state.walls.length <= 1) return;
+
+    activateWallContext(wallId);
+    [...state.contentWindows].forEach(w => removeContentWindow(w.id));
+    panelMeshes.forEach(m => wallGroup.remove(m));
+    customPanelGeoms.forEach(g => g.dispose());
+    accessoryMeshes.forEach(m => wallGroup.remove(m));
+    cornerFillMeshes.forEach(m => { if (m.geometry) m.geometry.dispose(); wallGroup.remove(m); });
+    bezelLineMeshes.forEach(m => { if (m.geometry) m.geometry.dispose(); wallGroup.remove(m); });
+    dimensionObjects.forEach(o => wallGroup.remove(o));
+    scene.remove(wallGroup);
+    wallContextMap.delete(wallId);
+
+    state.walls = state.walls.filter(w => w.id !== wallId);
+    activeContextWallId = null;
+
+    const newId = state.walls[0].id;
+    state.selectedWallId = newId;
+    activateWallContext(newId);
+    arrangeWalls();
+    fitCameraToWall();
+    syncUIFromState();
+    renderWallList();
+}
+
+function selectWall(wallId) {
+    if (wallId === state.selectedWallId) return;
+    state.selectedWallId = wallId;
+    activateWallContext(wallId);
+    syncUIFromState();
+    renderWallList();
+}
+
+function arrangeWalls() {
+    if (state.walls.length <= 1) {
+        const ctx = wallContextMap.get(state.walls[0]?.id);
+        if (ctx) ctx.group.position.set(0, 0, 0);
+        return;
+    }
+    const saved = activeContextWallId;
+    const infos = [];
+    let totalW = 0;
+    for (const wall of state.walls) {
+        activateWallContext(wall.id);
+        const b = wallBounds();
+        infos.push({ id: wall.id, w: b.w });
+        totalW += b.w;
+    }
+    totalW += (state.walls.length - 1) * WALL_GAP_IN;
+    let x = -totalW / 2;
+    for (const info of infos) {
+        const ctx = wallContextMap.get(info.id);
+        if (ctx) {
+            ctx.group.position.x = x + info.w / 2;
+            ctx.group.position.z = 0;
+        }
+        x += info.w + WALL_GAP_IN;
+    }
+    activateWallContext(saved);
+    markDirty();
+}
+
+/* ── Wall list UI ── */
+function renderWallList() {
+    const el = document.getElementById('wallList');
+    if (!el) return;
+    el.innerHTML = '';
+    state.walls.forEach(wall => {
+        const entry = document.createElement('div');
+        entry.className = 'wall-entry' + (wall.id === state.selectedWallId ? ' selected' : '');
+        entry.dataset.id = wall.id;
+
+        entry.innerHTML =
+            '<span class="wall-entry-name">' + escHtml(wall.name) + '</span>' +
+            '<span class="wall-entry-info">' + wall.cols + '\u00d7' + wall.rows + '</span>' +
+            (state.walls.length > 1 ? '<button class="cw-entry-delete wall-entry-delete" title="Remove">\u2715</button>' : '');
+
+        function startWallRename(nameSpan) {
+            if (document.querySelector('.wall-entry-rename')) return;
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'wall-entry-rename';
+            input.value = wall.name;
+            input.maxLength = 30;
+            nameSpan.replaceWith(input);
+            input.focus();
+            input.select();
+            const commit = () => {
+                const val = input.value.trim();
+                if (val) wall.name = val;
+                renderWallList();
+            };
+            input.addEventListener('blur', commit);
+            input.addEventListener('keydown', ev => {
+                if (ev.key === 'Enter') input.blur();
+                if (ev.key === 'Escape') { input.value = wall.name; input.blur(); }
+            });
+        }
+
+        let renameTimer = null;
+        entry.addEventListener('click', e => {
+            if (e.target.closest('.wall-entry-delete') || e.target.closest('.wall-entry-rename')) return;
+            clearTimeout(renameTimer);
+            if (wall.id !== state.selectedWallId) {
+                selectWall(wall.id);
+            } else {
+                const nameSpan = e.target.closest('.wall-entry-name');
+                if (nameSpan) renameTimer = setTimeout(() => startWallRename(nameSpan), 300);
+            }
+        });
+        entry.querySelector('.wall-entry-name')?.addEventListener('dblclick', e => {
+            e.stopPropagation();
+            clearTimeout(renameTimer);
+            startWallRename(e.currentTarget);
+        });
+        const delBtn = entry.querySelector('.wall-entry-delete');
+        if (delBtn) delBtn.addEventListener('click', e => { e.stopPropagation(); removeWall(wall.id); });
+
+        el.appendChild(entry);
+    });
+}
 
 /* ── Active window accessors ── */
 function activeWindow() {
@@ -1523,10 +1820,6 @@ function init() {
     back.position.set(0, 50, -200);
     scene.add(back);
 
-    // Wall group
-    wallGroup = new THREE.Group();
-    scene.add(wallGroup);
-
     // OrbitControls (attached to overlay so it captures all mouse events in showroom)
     controls = new OrbitControls(camera, document.getElementById('controlsOverlay'));
     controls.enableDamping = true;
@@ -1541,7 +1834,9 @@ function init() {
     };
     controls.addEventListener('change', markDirty);
 
-    buildWall();
+    // Create initial wall
+    addWall();
+    renderWallList();
 
     window.addEventListener('resize', onResize);
     animate();
@@ -1562,7 +1857,10 @@ function onResize() {
 
 function animate() {
     requestAnimationFrame(animate);
-    if (state.autoRotate) { wallGroup.rotation.y += 0.004; sceneDirty = true; }
+    if (state.autoRotate) {
+        for (const ctx of wallContextMap.values()) ctx.group.rotation.y += 0.004;
+        sceneDirty = true;
+    }
     controls.update();
     if (!sceneDirty) return;
     sceneDirty = false;
@@ -2025,8 +2323,27 @@ function wallBounds() {
     return { w: maxX - minX, h: d.totalH, depth: maxZ - minZ };
 }
 
+function allWallsBounds() {
+    const saved = activeContextWallId;
+    let minX = Infinity, maxX = -Infinity, maxH = 0, maxDepth = 0;
+    for (const wall of state.walls) {
+        activateWallContext(wall.id);
+        const b = wallBounds();
+        const ctx = wallContextMap.get(wall.id);
+        const ox = ctx ? ctx.group.position.x : 0;
+        minX = Math.min(minX, ox - b.w / 2);
+        maxX = Math.max(maxX, ox + b.w / 2);
+        maxH = Math.max(maxH, b.h);
+        maxDepth = Math.max(maxDepth, b.depth);
+    }
+    activateWallContext(saved);
+    const totalW = maxX - minX;
+    const cx = (minX + maxX) / 2;
+    return { w: isFinite(totalW) ? totalW : 100, h: maxH || 50, depth: maxDepth || 2, cx };
+}
+
 function fitCameraToWall() {
-    const b = wallBounds();
+    const b = allWallsBounds();
     const fov = camera.fov * Math.PI / 180;
     const aspect = camera.aspect;
     const span = Math.max(b.w, b.depth);
@@ -2034,15 +2351,15 @@ function fitCameraToWall() {
     const distW = (span / 2) / Math.tan(fov / 2) / aspect;
     const dist = Math.max(distH, distW) * 1.6;
 
-    controls.target.set(0, 0, 0);
-    camera.position.set(0, 0, dist);
-    wallGroup.rotation.set(0, 0, 0);
+    controls.target.set(b.cx, 0, 0);
+    camera.position.set(b.cx, 0, dist);
+    for (const ctx of wallContextMap.values()) ctx.group.rotation.set(0, 0, 0);
     controls.update();
 }
 
 function setCameraView(view) {
     markDirty();
-    const b = wallBounds();
+    const b = allWallsBounds();
     const fov = camera.fov * Math.PI / 180;
     const aspect = camera.aspect;
     const span = Math.max(b.w, b.depth);
@@ -2050,15 +2367,15 @@ function setCameraView(view) {
     const distW = (span / 2) / Math.tan(fov / 2) / aspect;
     const dist = Math.max(distH, distW) * 1.6;
 
-    controls.target.set(0, 0, 0);
-    wallGroup.rotation.set(0, 0, 0);
+    controls.target.set(b.cx, 0, 0);
+    for (const ctx of wallContextMap.values()) ctx.group.rotation.set(0, 0, 0);
 
     if (view === 'front') {
-        camera.position.set(0, 0, dist);
+        camera.position.set(b.cx, 0, dist);
     } else if (view === '34') {
-        camera.position.set(dist * 0.55, dist * 0.25, dist * 0.85);
+        camera.position.set(b.cx + dist * 0.55, dist * 0.25, dist * 0.85);
     } else {
-        camera.position.set(0, 0, dist);
+        camera.position.set(b.cx, 0, dist);
     }
     controls.update();
 }
@@ -2134,11 +2451,20 @@ function applyWindowRect(win) {
             const innerEl = layerEls[i].firstChild;
             if (innerEl) {
                 innerEl.style.position = 'absolute';
-                innerEl.style.width = rect.w + 'px';
-                innerEl.style.height = rect.h + 'px';
-                innerEl.style.left = -(overlapLeft - cwLeft) + 'px';
+                if (state.spanContent && state.walls.length > 1) {
+                    const sp = getSpanInfo();
+                    const wallOffset = sp.offsets[activeContextWallId] || 0;
+                    innerEl.style.width = sp.totalW + 'px';
+                    innerEl.style.height = sp.totalH + 'px';
+                    innerEl.style.left = -(wallOffset + overlapLeft - cwLeft) + 'px';
+                    innerEl.style.objectFit = 'fill';
+                } else {
+                    innerEl.style.width = rect.w + 'px';
+                    innerEl.style.height = rect.h + 'px';
+                    innerEl.style.left = -(overlapLeft - cwLeft) + 'px';
+                    innerEl.style.objectFit = win.mode === 'scaled' ? 'contain' : 'fill';
+                }
                 innerEl.style.top = '0px';
-                innerEl.style.objectFit = win.mode === 'scaled' ? 'contain' : 'fill';
             }
 
             const firstCol = layout[seg.startCol];
@@ -2220,7 +2546,9 @@ function updateSidebarInfo() {
     elTotalRes.textContent = d.wallWPx + ' x ' + d.wallHPx + ' px';
     elTotalSize.textContent = totalWIn.toFixed(1) + '" x ' + totalHIn.toFixed(1) + '"';
     elTotalSizeFt.textContent = (totalWIn / 12).toFixed(1) + "' x " + (totalHIn / 12).toFixed(1) + "'";
-    elInfoWall.textContent = ' ' + d.cols + 'x' + d.rows + ' panels · ' +
+    const wallName = state.walls.find(w => w.id === state.selectedWallId)?.name || '';
+    const wallPrefix = state.walls.length > 1 ? wallName + ': ' : '';
+    elInfoWall.textContent = ' ' + wallPrefix + d.cols + 'x' + d.rows + ' panels \u00b7 ' +
         totalWIn.toFixed(1) + '" x ' + totalHIn.toFixed(1) + '"';
 }
 
@@ -2406,6 +2734,11 @@ function setWindowContent(winId, type, url, name) {
     applyAllWindowRects();
     renderWindowList();
     updateContentSourceUI();
+
+    // If span mode is on, replicate content to all walls
+    if (state.spanContent && state.walls.length > 1) {
+        setTimeout(() => applySpanContent(), 50);
+    }
 }
 
 function clearWindowContent(winId) {
@@ -2458,6 +2791,7 @@ function removeContentWindow(id) {
 
 function selectContentWindow(id) {
     state.selectedWindowId = id;
+    syncActiveWallScalars();
     renderWindowList();
     syncCwControlsToWindow();
 }
@@ -2589,6 +2923,47 @@ function rebuildAllWindowContent() {
     applyAllWindowRects();
 }
 
+/* ── Content spanning across walls ── */
+function getSpanInfo() {
+    let totalW = 0, maxH = 0;
+    const offsets = {};
+    for (const wall of state.walls) {
+        offsets[wall.id] = totalW;
+        totalW += wall.cols * PANEL_PX_W;
+        maxH = Math.max(maxH, wall.rows * PANEL_PX_H);
+    }
+    return { totalW, totalH: maxH, offsets };
+}
+
+function applySpanContent() {
+    if (!state.spanContent || state.walls.length < 2) return;
+    const saved = activeContextWallId;
+
+    // Find first wall that has content
+    let sourceType = null, sourceUrl = null, sourceName = null;
+    for (const wall of state.walls) {
+        const cw = wall.contentWindows.find(w => w.type);
+        if (cw) { sourceType = cw.type; sourceUrl = cw.url; sourceName = cw.name; break; }
+    }
+    if (!sourceType) { activateWallContext(saved); return; }
+
+    // Apply same content to first window of every wall
+    for (const wall of state.walls) {
+        activateWallContext(wall.id);
+        if (state.contentWindows.length === 0) addContentWindow();
+        const win = state.contentWindows[0];
+        if (!win) continue;
+        win.mode = 'fill';
+        if (win.type !== sourceType || win.url !== sourceUrl) {
+            setWindowContent(win.id, sourceType, sourceUrl, sourceName);
+        }
+        applyAllWindowRects();
+    }
+    activateWallContext(saved);
+    renderWindowList();
+    syncCwControlsToWindow();
+}
+
 /* ── Pixel coordinate from 3D hit on wall surface ── */
 function worldToWallPixel(worldPoint) {
     const d = wallDims();
@@ -2630,7 +3005,10 @@ function adjustValue(id, delta) {
     input.value = Math.max(1, Math.min(50, parseInt(input.value) + delta));
     state[id] = parseInt(input.value);
     if (id === 'cols') pruneCorners();
+    syncActiveWallScalars();
     buildWall();
+    arrangeWalls();
+    renderWallList();
 }
 
 document.querySelectorAll('[data-action]').forEach(btn => {
@@ -2646,11 +3024,28 @@ document.querySelectorAll('[data-action]').forEach(btn => {
 document.getElementById('cols').addEventListener('change', e => {
     state.cols = parseInt(e.target.value) || 1;
     pruneCorners();
+    syncActiveWallScalars();
     buildWall();
+    arrangeWalls();
+    renderWallList();
 });
 document.getElementById('rows').addEventListener('change', e => {
     state.rows = parseInt(e.target.value) || 1;
+    syncActiveWallScalars();
     buildWall();
+    arrangeWalls();
+    renderWallList();
+});
+
+/* ── Wall UI wiring ── */
+document.getElementById('addWallBtn').addEventListener('click', () => {
+    addWall();
+    fitCameraToWall();
+});
+
+document.getElementById('spanToggle').addEventListener('change', e => {
+    state.spanContent = e.target.checked;
+    if (state.spanContent) applySpanContent();
 });
 
 /* ── Corner management ── */
@@ -2752,6 +3147,7 @@ function rebuildForCorners() {
 
     buildWall();
     rebuildAllWindowContent();
+    arrangeWalls();
 
     // Restore video playback positions
     for (const [winId, time] of savedVideoTimes) {
@@ -3417,22 +3813,30 @@ function savePresetsToStorage(presets) {
 }
 
 function capturePreset(name) {
+    saveWallContext();
     return {
         name,
         ts: Date.now(),
-        cols: state.cols,
-        rows: state.rows,
-        corners: JSON.parse(JSON.stringify(state.corners)),
-        cwUnit: state.cwUnit,
-        contentWindows: state.contentWindows.map(w => ({
-            rect: { ...w.rect },
-            mode: w.mode,
+        walls: state.walls.map(w => ({
+            id: w.id,
+            name: w.name,
+            cols: w.cols,
+            rows: w.rows,
+            corners: JSON.parse(JSON.stringify(w.corners)),
+            contentWindows: w.contentWindows.map(cw => ({ rect: { ...cw.rect }, mode: cw.mode })),
         })),
+        cwUnit: state.cwUnit,
+        spanContent: state.spanContent,
         showBezels: state.showBezels,
         autoRotate: state.autoRotate,
         doubleSided: state.doubleSided,
         showAccessories: state.showAccessories,
         showDimensions: state.showDimensions,
+        // Backward compat fields
+        cols: state.cols,
+        rows: state.rows,
+        corners: JSON.parse(JSON.stringify(state.corners)),
+        contentWindows: state.contentWindows.map(w => ({ rect: { ...w.rect }, mode: w.mode })),
     };
 }
 
@@ -3444,46 +3848,96 @@ function syncUIFromState() {
     document.getElementById('doubleSidedToggle').checked = state.doubleSided;
     document.getElementById('accessoryToggle').checked = state.showAccessories;
     document.getElementById('dimensionToggle').checked = state.showDimensions;
+    document.getElementById('spanToggle').checked = state.spanContent;
+    renderWallList();
+    renderCornerList();
     renderWindowList();
     syncCwControlsToWindow();
+    updateSidebarInfo();
 }
 
 function applyPreset(preset) {
-    state.cols = preset.cols;
-    state.rows = preset.rows;
-    state.corners = JSON.parse(JSON.stringify(preset.corners || []));
+    // Multi-wall presets (new format)
+    if (preset.walls && preset.walls.length > 0) {
+        // Remove all existing walls except one
+        while (state.walls.length > 1) {
+            removeWall(state.walls[state.walls.length - 1].id);
+        }
+        // Apply first wall to existing wall
+        const firstPresetWall = preset.walls[0];
+        activateWallContext(state.walls[0].id);
+        state.cols = firstPresetWall.cols;
+        state.rows = firstPresetWall.rows;
+        state.corners = JSON.parse(JSON.stringify(firstPresetWall.corners || []));
+        state.walls[0].name = firstPresetWall.name || 'Wall 1';
+        syncActiveWallScalars();
+        state.walls[0].corners = state.corners;
+        [...state.contentWindows].forEach(w => removeContentWindow(w.id));
+        if (firstPresetWall.contentWindows) {
+            firstPresetWall.contentWindows.forEach(pw => {
+                const win = addContentWindow();
+                if (win) { win.mode = pw.mode || 'fill'; win.rect = { ...pw.rect }; }
+            });
+        }
+        buildWall();
+
+        // Create additional walls
+        for (let i = 1; i < preset.walls.length; i++) {
+            const pw = preset.walls[i];
+            const wall = addWall();
+            if (!wall) break;
+            wall.name = pw.name || 'Wall ' + wall.id;
+            activateWallContext(wall.id);
+            state.cols = pw.cols;
+            state.rows = pw.rows;
+            state.corners = JSON.parse(JSON.stringify(pw.corners || []));
+            syncActiveWallScalars();
+            wall.corners = state.corners;
+            [...state.contentWindows].forEach(w => removeContentWindow(w.id));
+            if (pw.contentWindows) {
+                pw.contentWindows.forEach(cwp => {
+                    const win = addContentWindow();
+                    if (win) { win.mode = cwp.mode || 'fill'; win.rect = { ...cwp.rect }; }
+                });
+            }
+            buildWall();
+        }
+        selectWall(state.walls[0].id);
+    } else {
+        // Backward compat: single-wall preset
+        activateWallContext(state.walls[0].id);
+        state.cols = preset.cols;
+        state.rows = preset.rows;
+        state.corners = JSON.parse(JSON.stringify(preset.corners || []));
+        syncActiveWallScalars();
+        state.walls[0].corners = state.corners;
+
+        if (preset.contentWindows && preset.contentWindows.length > 0) {
+            [...state.contentWindows].forEach(w => removeContentWindow(w.id));
+            preset.contentWindows.forEach(pw => {
+                const win = addContentWindow();
+                if (win) { win.mode = pw.mode || 'fill'; win.rect = { ...pw.rect }; }
+            });
+        } else if (preset.cwRect) {
+            if (state.contentWindows.length === 0) addContentWindow();
+            const win = activeWindow();
+            if (win) { win.mode = preset.cwMode || 'fill'; win.rect = { ...preset.cwRect }; }
+        }
+    }
+
     state.showBezels = preset.showBezels;
     state.autoRotate = preset.autoRotate;
     state.doubleSided = preset.doubleSided;
     state.showAccessories = preset.showAccessories;
     state.showDimensions = preset.showDimensions;
     if (preset.cwUnit) state.cwUnit = preset.cwUnit;
-
-    // Handle multi-window presets (new format)
-    if (preset.contentWindows && preset.contentWindows.length > 0) {
-        // Remove all existing windows
-        [...state.contentWindows].forEach(w => removeContentWindow(w.id));
-        // Create windows from preset layout (without content)
-        preset.contentWindows.forEach(pw => {
-            const win = addContentWindow();
-            if (win) {
-                win.mode = pw.mode || 'fill';
-                win.rect = { ...pw.rect };
-            }
-        });
-    } else if (preset.cwRect) {
-        // Backward compat: single-window preset
-        if (state.contentWindows.length === 0) addContentWindow();
-        const win = activeWindow();
-        if (win) {
-            win.mode = preset.cwMode || 'fill';
-            win.rect = { ...preset.cwRect };
-        }
-    }
+    state.spanContent = preset.spanContent || false;
 
     syncUIFromState();
     pruneCorners();
     rebuildForCorners();
+    arrangeWalls();
+    fitCameraToWall();
     state.contentWindows.forEach(win => syncWindowBackContent(win));
 }
 
