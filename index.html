@@ -3966,14 +3966,53 @@ overlay.addEventListener('mousemove', e => {
 });
 
 /* ── Save image ── */
-document.getElementById('saveImageBtn').addEventListener('click', () => {
+/* Composite capture: WebGL canvas + CSS3D content elements at their screen positions */
+function captureShowroom(targetW, targetH) {
+    const showroom = document.getElementById('showroom');
+    const rect = showroom.getBoundingClientRect();
+    const w = targetW || Math.round(rect.width);
+    const h = targetH || Math.round(rect.height);
+
+    const composite = document.createElement('canvas');
+    composite.width = w;
+    composite.height = h;
+    const ctx = composite.getContext('2d');
+
+    // Scale to map showroom viewport to target size
+    const sx = w / rect.width, sy = h / rect.height;
+    ctx.scale(sx, sy);
+
+    // 1. Draw WebGL layer (panels, structure, dimensions)
     renderer.render(scene, camera);
-    renderer.domElement.toBlob(blob => {
+    ctx.drawImage(renderer.domElement, 0, 0, rect.width, rect.height);
+
+    // 2. Draw CSS3D content (videos, images) at their projected screen positions
+    const contentEls = document.querySelectorAll('.css3d-content-el canvas, .css3d-content-el img');
+    contentEls.forEach(el => {
+        const elRect = el.getBoundingClientRect();
+        if (elRect.width < 1 || elRect.height < 1) return;
+        try {
+            ctx.drawImage(el,
+                elRect.left - rect.left,
+                elRect.top - rect.top,
+                elRect.width,
+                elRect.height
+            );
+        } catch (e) {} // skip tainted/cross-origin elements
+    });
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // reset
+    return composite;
+}
+
+document.getElementById('saveImageBtn').addEventListener('click', () => {
+    const composite = captureShowroom();
+    composite.toBlob(blob => {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = 'led-showroom-' + Date.now() + '.png';
         a.click();
-        URL.revokeObjectURL(a.href);
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }, 'image/png');
 });
 
@@ -3991,17 +4030,33 @@ let usingMP4 = false;
 let frameCount = 0;
 const recordBtn = document.getElementById('recordBtn');
 
-function downloadVideo(blob, ext) {
+async function saveVideoFile(blob) {
+    const filename = 'led-showroom-' + Date.now() + '.mp4';
+    // Try native Save-As dialog (Chrome 86+), fall back to download link
+    if (typeof showSaveFilePicker === 'function') {
+        try {
+            const handle = await showSaveFilePicker({
+                suggestedName: filename,
+                types: [{ description: 'MP4 Video', accept: { 'video/mp4': ['.mp4'] } }],
+            });
+            const writable = await handle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            return;
+        } catch (e) {
+            if (e.name === 'AbortError') return; // user cancelled
+        }
+    }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'led-showroom-' + Date.now() + ext;
+    a.download = filename;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-function startRecording() {
+async function startRecording() {
     const canvas = renderer.domElement;
-    const w = canvas.width & ~1, h = canvas.height & ~1; // H.264 requires even dimensions
+    const w = canvas.width & ~1, h = canvas.height & ~1; // codecs require even dimensions
     isRecording = true;
     usingMP4 = false;
     frameCount = 0;
@@ -4009,47 +4064,72 @@ function startRecording() {
     recordedChunks = [];
 
     if (typeof VideoEncoder !== 'undefined') {
-        try {
-            mp4Muxer = new Muxer({
-                target: new ArrayBufferTarget(),
-                video: { codec: 'avc', width: w, height: h },
-                fastStart: 'in-memory',
-            });
-            videoEncoder = new VideoEncoder({
-                output: (chunk, meta) => mp4Muxer.addVideoChunk(chunk, meta),
-                error: e => console.error('VideoEncoder error:', e),
-            });
-            videoEncoder.configure({
-                codec: 'avc1.640032', width: w, height: h,
-                bitrate: 8_000_000, framerate: 30,
-            });
-            const offscreen = new OffscreenCanvas(w, h);
-            const offCtx = offscreen.getContext('2d');
-            recordInterval = setInterval(() => {
-                offCtx.drawImage(canvas, 0, 0, w, h);
-                const frame = new VideoFrame(offscreen, {
-                    timestamp: frameCount * Math.round(1_000_000 / 30),
+        // Try codecs in order: H.264 (Chrome), VP9 (Firefox), VP8
+        const codecs = [
+            { codec: 'avc1.640032', muxCodec: 'avc', label: 'H.264' },
+            { codec: 'vp09.00.10.08', muxCodec: 'vp9', label: 'VP9' },
+            { codec: 'vp8', muxCodec: 'vp9', label: 'VP8' },
+        ];
+        for (const cc of codecs) {
+            try {
+                const support = await VideoEncoder.isConfigSupported({
+                    codec: cc.codec, width: w, height: h,
+                    bitrate: 8_000_000, framerate: 30,
                 });
-                videoEncoder.encode(frame, { keyFrame: frameCount % 90 === 0 });
-                frame.close();
-                frameCount++;
-            }, 1000 / 30);
-            usingMP4 = true;
-        } catch (e) {
-            console.warn('MP4 recording unavailable, using WebM:', e);
-            mp4Muxer = null;
-            videoEncoder = null;
+                if (!support.supported) continue;
+
+                mp4Muxer = new Muxer({
+                    target: new ArrayBufferTarget(),
+                    video: { codec: cc.muxCodec, width: w, height: h },
+                    fastStart: 'in-memory',
+                });
+                videoEncoder = new VideoEncoder({
+                    output: (chunk, meta) => mp4Muxer.addVideoChunk(chunk, meta),
+                    error: e => console.error('VideoEncoder error:', e),
+                });
+                videoEncoder.configure({
+                    codec: cc.codec, width: w, height: h,
+                    bitrate: 8_000_000, framerate: 30,
+                });
+                recordInterval = setInterval(() => {
+                    const comp = captureShowroom(w, h);
+                    const frame = new VideoFrame(comp, {
+                        timestamp: frameCount * Math.round(1_000_000 / 30),
+                    });
+                    videoEncoder.encode(frame, { keyFrame: frameCount % 90 === 0 });
+                    frame.close();
+                    frameCount++;
+                }, 1000 / 30);
+                usingMP4 = true;
+                console.log('Recording with', cc.label);
+                break;
+            } catch (e) {
+                console.warn(cc.label + ' encoding unavailable:', e.message);
+                if (videoEncoder) { try { videoEncoder.close(); } catch {} }
+                videoEncoder = null;
+                mp4Muxer = null;
+            }
         }
     }
 
     if (!usingMP4) {
-        mediaStream = canvas.captureStream(30);
+        console.log('Recording with MediaRecorder (WebM)');
+        // Create a composite canvas and capture its stream
+        const compCanvas = document.createElement('canvas');
+        compCanvas.width = w; compCanvas.height = h;
+        const compCtx = compCanvas.getContext('2d');
+        mediaStream = compCanvas.captureStream(30);
+        // Draw composite frames into the stream source canvas
+        recordInterval = recordInterval || setInterval(() => {
+            const frame = captureShowroom(w, h);
+            compCtx.drawImage(frame, 0, 0);
+        }, 1000 / 30);
         const mt = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
             ? 'video/webm;codecs=vp9' : 'video/webm';
         mediaRecorder = new MediaRecorder(mediaStream, { mimeType: mt, videoBitsPerSecond: 8_000_000 });
         mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
         mediaRecorder.onstop = () => {
-            downloadVideo(new Blob(recordedChunks, { type: mt }), '.webm');
+            saveVideoFile(new Blob(recordedChunks, { type: mt }));
             recordedChunks = [];
         };
         mediaRecorder.start(1000);
@@ -4076,12 +4156,12 @@ async function stopRecording() {
     if (usingMP4 && videoEncoder) {
         await videoEncoder.flush();
         mp4Muxer.finalize();
-        downloadVideo(new Blob([mp4Muxer.target.buffer], { type: 'video/mp4' }), '.mp4');
+        await saveVideoFile(new Blob([mp4Muxer.target.buffer], { type: 'video/mp4' }));
         videoEncoder.close();
         videoEncoder = null;
         mp4Muxer = null;
     } else if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-        mediaRecorder.stop();
+        mediaRecorder.stop(); // triggers onstop → saveVideoFile
     }
     if (mediaStream) {
         mediaStream.getTracks().forEach(t => t.stop());
