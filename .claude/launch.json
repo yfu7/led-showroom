@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "led-showroom",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["D:/Projects/Code/led-showroom/server.js"],
+      "port": 3000
+    }
+  ]
+}
