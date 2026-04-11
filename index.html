@@ -831,8 +831,8 @@
         }
         .wall-entry {
             display: flex;
-            align-items: center;
-            gap: 8px;
+            flex-direction: column;
+            gap: 6px;
             padding: 8px 10px;
             background: #0a0a0a;
             border: 1px solid #333;
@@ -852,7 +852,72 @@
             white-space: nowrap;
         }
         .wall-entry.selected .wall-entry-name { color: #93c5fd; }
-        .wall-entry-info { font-size: 11px; color: #666; flex-shrink: 0; }
+        .wall-entry-info { font-size: 11px; color: #666; flex-shrink: 0; margin-left: auto; }
+        .wall-entry-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+        }
+        .wall-entry-controls {
+            display: flex;
+            align-items: flex-end;
+            gap: 3px;
+            padding-top: 4px;
+        }
+        .wall-dim-group {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 3px;
+        }
+        .wall-dim-group-row {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+        .wall-dim-title {
+            font-size: 10px;
+            color: #fff;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 500;
+        }
+        .wall-dim-btn {
+            width: 22px;
+            height: 22px;
+            border: 1px solid #444;
+            background: #1a1a1a;
+            color: #aaa;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            line-height: 1;
+        }
+        .wall-dim-btn:hover { background: #2a2a2a; border-color: #666; color: #fff; }
+        .wall-dim-input {
+            width: 34px;
+            height: 22px;
+            text-align: center;
+            background: #111;
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: #ddd;
+            font-size: 12px;
+            padding: 0 2px;
+            -moz-appearance: textfield;
+        }
+        .wall-dim-input::-webkit-inner-spin-button,
+        .wall-dim-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        .wall-dim-sep {
+            color: #555;
+            font-size: 12px;
+            margin: 0 4px;
+        }
         .wall-entry-rename {
             flex: 1;
             font-size: 13px;
@@ -1076,22 +1141,6 @@
 
         <!-- Panel config for selected wall (hidden when span is on) -->
         <div id="wallConfigSection" style="margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2a;">
-            <div class="config-row">
-                <label>Columns</label>
-                <div class="input-group">
-                    <button class="btn" data-action="cols-dec">&#8722;</button>
-                    <input type="number" id="cols" value="4" min="1" max="50">
-                    <button class="btn" data-action="cols-inc">+</button>
-                </div>
-            </div>
-            <div class="config-row">
-                <label>Rows</label>
-                <div class="input-group">
-                    <button class="btn" data-action="rows-dec">&#8722;</button>
-                    <input type="number" id="rows" value="3" min="1" max="50">
-                    <button class="btn" data-action="rows-inc">+</button>
-                </div>
-            </div>
             <div class="wall-info">
                 <div class="info-row">
                     <span class="label">Total Panels</span>
@@ -1596,6 +1645,7 @@ function arrangeWalls() {
         x += info.w + WALL_GAP_IN;
     }
     activateWallContext(saved);
+    if (isRecording) buildRecordOverlays();
     markDirty();
 }
 
@@ -1615,8 +1665,10 @@ function renderWallList() {
         entry.className = 'wall-entry selected';
         const names = state.walls.map(w => w.name).join(' + ');
         entry.innerHTML =
+            '<div class="wall-entry-header">' +
             '<span class="wall-entry-name">Walls combined</span>' +
-            '<span class="wall-entry-info">' + state.walls.length + ' walls</span>';
+            '<span class="wall-entry-info">' + state.walls.length + ' walls</span>' +
+            '</div>';
         entry.style.cursor = 'default';
         el.appendChild(entry);
         updateSpanInfo();
@@ -1633,9 +1685,27 @@ function renderWallList() {
         entry.dataset.id = wall.id;
 
         entry.innerHTML =
+            '<div class="wall-entry-header">' +
             '<span class="wall-entry-name">' + escHtml(wall.name) + '</span>' +
-            '<span class="wall-entry-info">' + wall.cols + '\u00d7' + wall.rows + '</span>' +
-            (state.walls.length > 1 ? '<button class="cw-entry-delete wall-entry-delete" title="Remove">\u2715</button>' : '');
+            (state.walls.length > 1 ? '<button class="cw-entry-delete wall-entry-delete" title="Remove">\u2715</button>' : '') +
+            '</div>' +
+            '<div class="wall-entry-controls">' +
+            '<div class="wall-dim-group">' +
+            '<span class="wall-dim-title">Columns</span>' +
+            '<div class="wall-dim-group-row">' +
+            '<button class="wall-dim-btn" data-wall="' + wall.id + '" data-dim="cols" data-delta="-1">&#8722;</button>' +
+            '<input type="number" class="wall-dim-input" data-wall="' + wall.id + '" data-dim="cols" value="' + wall.cols + '" min="1" max="50">' +
+            '<button class="wall-dim-btn" data-wall="' + wall.id + '" data-dim="cols" data-delta="1">+</button>' +
+            '</div></div>' +
+            '<span class="wall-dim-sep">\u00d7</span>' +
+            '<div class="wall-dim-group">' +
+            '<span class="wall-dim-title">Rows</span>' +
+            '<div class="wall-dim-group-row">' +
+            '<button class="wall-dim-btn" data-wall="' + wall.id + '" data-dim="rows" data-delta="-1">&#8722;</button>' +
+            '<input type="number" class="wall-dim-input" data-wall="' + wall.id + '" data-dim="rows" value="' + wall.rows + '" min="1" max="50">' +
+            '<button class="wall-dim-btn" data-wall="' + wall.id + '" data-dim="rows" data-delta="1">+</button>' +
+            '</div></div>' +
+            '</div>';
 
         function startWallRename(nameSpan) {
             if (document.querySelector('.wall-entry-rename')) return;
@@ -1661,7 +1731,7 @@ function renderWallList() {
 
         let renameTimer = null;
         entry.addEventListener('click', e => {
-            if (e.target.closest('.wall-entry-delete') || e.target.closest('.wall-entry-rename')) return;
+            if (e.target.closest('.wall-entry-delete') || e.target.closest('.wall-entry-rename') || e.target.closest('.wall-entry-controls')) return;
             clearTimeout(renameTimer);
             if (wall.id !== state.selectedWallId) {
                 selectWall(wall.id);
@@ -1948,10 +2018,21 @@ function animate() {
         sceneDirty = true;
     }
     controls.update();
+    if (isRecording && recordOverlays.length > 0) {
+        updateRecordOverlays();
+        sceneDirty = true;
+    }
     if (!sceneDirty) return;
     sceneDirty = false;
     renderer.render(scene, camera);
     cssRenderer.render(scene, camera);
+    if (isRecording && usingMP4 && videoEncoder && videoEncoder.encodeQueueSize <= 10) {
+        const timestamp = (Date.now() - recordStartTime) * 1000;
+        const frame = new VideoFrame(renderer.domElement, { timestamp });
+        videoEncoder.encode(frame, { keyFrame: frameCount % 90 === 0 });
+        frame.close();
+        frameCount++;
+    }
 }
 
 /* ── Wall construction ── */
@@ -2024,6 +2105,7 @@ function buildWall() {
     buildAccessories();
     buildDimensions();
     // Corner fill wedges no longer needed — miter faces meet seamlessly
+    if (isRecording) buildRecordOverlays();
 }
 
 function setAccessoryVisibility(visible) {
@@ -2640,10 +2722,22 @@ function updateSidebarInfo() {
     elTotalRes.textContent = d.wallWPx + ' x ' + d.wallHPx + ' px';
     elTotalSize.textContent = totalWIn.toFixed(1) + '" x ' + totalHIn.toFixed(1) + '"';
     elTotalSizeFt.textContent = (totalWIn / 12).toFixed(1) + "' x " + (totalHIn / 12).toFixed(1) + "'";
-    const wallName = state.walls.find(w => w.id === state.selectedWallId)?.name || '';
-    const wallPrefix = state.walls.length > 1 ? wallName + ': ' : '';
-    elInfoWall.textContent = ' ' + wallPrefix + d.cols + 'x' + d.rows + ' panels \u00b7 ' +
-        totalWIn.toFixed(1) + '" x ' + totalHIn.toFixed(1) + '"';
+    if (state.walls.length <= 1) {
+        elInfoWall.textContent = ' ' + d.cols + 'x' + d.rows + ' panels \u00b7 ' +
+            totalWIn.toFixed(1) + '" x ' + totalHIn.toFixed(1) + '"';
+    } else {
+        const saved = activeContextWallId;
+        let allPanels = 0;
+        const parts = [];
+        for (const wall of state.walls) {
+            activateWallContext(wall.id);
+            const wd = wallDims();
+            allPanels += wd.cols * wd.rows;
+            parts.push(wall.name + ' ' + wd.cols + '\u00d7' + wd.rows);
+        }
+        activateWallContext(saved);
+        elInfoWall.textContent = ' ' + state.walls.length + ' walls \u00b7 ' + allPanels + ' panels \u00b7 ' + parts.join(', ');
+    }
 }
 
 /* ── Content helpers ── */
@@ -3275,41 +3369,41 @@ function windowAtPixel(px, py) {
 }
 
 /* ── Sidebar wiring ── */
-function adjustValue(id, delta) {
-    const input = document.getElementById(id);
-    input.value = Math.max(1, Math.min(50, parseInt(input.value) + delta));
-    state[id] = parseInt(input.value);
-    if (id === 'cols') pruneCorners();
+function adjustWallDim(wallId, dim, newValue) {
+    const saved = activeContextWallId;
+    activateWallContext(wallId);
+    state[dim] = Math.max(1, Math.min(50, newValue));
+    if (dim === 'cols') pruneCorners();
     syncActiveWallScalars();
     buildWall();
+    activateWallContext(saved);
     arrangeWalls();
     renderWallList();
+    if (wallId === state.selectedWallId) {
+        updateSidebarInfo();
+        renderCornerList();
+    }
+    if (state.spanContent && state.walls.length > 1) applySpanContent();
 }
 
-document.querySelectorAll('[data-action]').forEach(btn => {
-    btn.addEventListener('click', () => {
-        const a = btn.dataset.action;
-        if (a === 'cols-dec') adjustValue('cols', -1);
-        else if (a === 'cols-inc') adjustValue('cols', 1);
-        else if (a === 'rows-dec') adjustValue('rows', -1);
-        else if (a === 'rows-inc') adjustValue('rows', 1);
-    });
+document.getElementById('wallList').addEventListener('click', e => {
+    const btn = e.target.closest('.wall-dim-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    const wallId = parseInt(btn.dataset.wall);
+    const dim = btn.dataset.dim;
+    const delta = parseInt(btn.dataset.delta);
+    const wall = state.walls.find(w => w.id === wallId);
+    if (wall) adjustWallDim(wallId, dim, wall[dim] + delta);
 });
 
-document.getElementById('cols').addEventListener('change', e => {
-    state.cols = parseInt(e.target.value) || 1;
-    pruneCorners();
-    syncActiveWallScalars();
-    buildWall();
-    arrangeWalls();
-    renderWallList();
-});
-document.getElementById('rows').addEventListener('change', e => {
-    state.rows = parseInt(e.target.value) || 1;
-    syncActiveWallScalars();
-    buildWall();
-    arrangeWalls();
-    renderWallList();
+document.getElementById('wallList').addEventListener('change', e => {
+    const input = e.target.closest('.wall-dim-input');
+    if (!input) return;
+    e.stopPropagation();
+    const wallId = parseInt(input.dataset.wall);
+    const dim = input.dataset.dim;
+    adjustWallDim(wallId, dim, parseInt(input.value) || 1);
 });
 
 /* ── Wall UI wiring ── */
@@ -3973,35 +4067,81 @@ function captureShowroom(targetW, targetH) {
     const w = targetW || Math.round(rect.width);
     const h = targetH || Math.round(rect.height);
 
+    // Build temporary WebGL textured planes for each CSS3D content element
+    // so the WebGL renderer handles all 3D perspective natively.
+    const tempMeshes = [];
+    scene.traverse(obj => {
+        if (!obj.element || !obj.visible) return;
+        const container = obj.element;
+        if (!container.classList || !container.classList.contains('css3d-content-el')) return;
+        const drawEl = container.querySelector('canvas') || container.querySelector('img');
+        if (!drawEl) return;
+
+        const visW = parseFloat(container.style.width) || 0;
+        const visH = parseFloat(container.style.height) || 0;
+        if (visW < 1 || visH < 1) return;
+
+        // Source pixel dimensions
+        const srcW = drawEl.tagName === 'CANVAS' ? drawEl.width : (drawEl.naturalWidth || drawEl.width);
+        const srcH = drawEl.tagName === 'CANVAS' ? drawEl.height : (drawEl.naturalHeight || drawEl.height);
+        if (srcW < 1 || srcH < 1) return;
+
+        // Inner element CSS dimensions and offset (handles span-mode cropping)
+        const innerCssW = parseFloat(drawEl.style.width) || visW;
+        const innerCssH = parseFloat(drawEl.style.height) || visH;
+        const offsetX = -(parseFloat(drawEl.style.left) || 0);
+        const offsetY = -(parseFloat(drawEl.style.top) || 0);
+
+        const scX = srcW / innerCssW;
+        const scY = srcH / innerCssH;
+        const cropX = Math.max(0, offsetX * scX);
+        const cropY = Math.max(0, offsetY * scY);
+        const cropW = Math.min(srcW - cropX, visW * scX);
+        const cropH = Math.min(srcH - cropY, visH * scY);
+        if (cropW < 1 || cropH < 1) return;
+
+        // Create cropped texture from visible portion
+        const texC = document.createElement('canvas');
+        texC.width = Math.round(cropW);
+        texC.height = Math.round(cropH);
+        try {
+            texC.getContext('2d').drawImage(drawEl, cropX, cropY, cropW, cropH, 0, 0, texC.width, texC.height);
+        } catch (e) { return; } // skip cross-origin
+
+        const texture = new THREE.CanvasTexture(texC);
+        texture.colorSpace = THREE.SRGBColorSpace;
+
+        // World dimensions = CSS pixels × CSS3DObject scale
+        const worldW = visW * obj.scale.x;
+        const worldH = visH * obj.scale.y;
+
+        const geo = new THREE.PlaneGeometry(worldW, worldH);
+        const mat = new THREE.MeshBasicMaterial({ map: texture });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.copy(obj.position);
+        mesh.rotation.copy(obj.rotation);
+
+        obj.parent.add(mesh);
+        tempMeshes.push({ mesh, texture, geo, mat, parent: obj.parent });
+    });
+
+    // Render scene with content as WebGL textures (handles perspective natively)
+    renderer.render(scene, camera);
+
     const composite = document.createElement('canvas');
     composite.width = w;
     composite.height = h;
     const ctx = composite.getContext('2d');
+    ctx.drawImage(renderer.domElement, 0, 0, w, h);
 
-    // Scale to map showroom viewport to target size
-    const sx = w / rect.width, sy = h / rect.height;
-    ctx.scale(sx, sy);
-
-    // 1. Draw WebGL layer (panels, structure, dimensions)
-    renderer.render(scene, camera);
-    ctx.drawImage(renderer.domElement, 0, 0, rect.width, rect.height);
-
-    // 2. Draw CSS3D content (videos, images) at their projected screen positions
-    const contentEls = document.querySelectorAll('.css3d-content-el canvas, .css3d-content-el img');
-    contentEls.forEach(el => {
-        const elRect = el.getBoundingClientRect();
-        if (elRect.width < 1 || elRect.height < 1) return;
-        try {
-            ctx.drawImage(el,
-                elRect.left - rect.left,
-                elRect.top - rect.top,
-                elRect.width,
-                elRect.height
-            );
-        } catch (e) {} // skip tainted/cross-origin elements
+    // Remove temporary objects and free GPU memory
+    tempMeshes.forEach(t => {
+        t.parent.remove(t.mesh);
+        t.texture.dispose();
+        t.geo.dispose();
+        t.mat.dispose();
     });
 
-    ctx.setTransform(1, 0, 0, 1, 0, 0); // reset
     return composite;
 }
 
@@ -4021,13 +4161,13 @@ let isRecording = false;
 let recordedChunks = [];
 let recordStartTime = 0;
 let recordTimer = null;
-let recordInterval = null;
 let mediaRecorder = null;
 let mediaStream = null;
 let mp4Muxer = null;
 let videoEncoder = null;
 let usingMP4 = false;
 let frameCount = 0;
+let recordOverlays = [];
 const recordBtn = document.getElementById('recordBtn');
 
 async function saveVideoFile(blob) {
@@ -4054,6 +4194,80 @@ async function saveVideoFile(blob) {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+function buildRecordOverlays() {
+    teardownRecordOverlays();
+    scene.traverse(obj => {
+        if (!obj.element || !obj.visible) return;
+        const container = obj.element;
+        if (!container.classList || !container.classList.contains('css3d-content-el')) return;
+        const drawEl = container.querySelector('canvas') || container.querySelector('img');
+        if (!drawEl) return;
+        const visW = parseFloat(container.style.width) || 0;
+        const visH = parseFloat(container.style.height) || 0;
+        if (visW < 1 || visH < 1) return;
+        const worldW = visW * obj.scale.x;
+        const worldH = visH * obj.scale.y;
+        const texCanvas = document.createElement('canvas');
+        texCanvas.width = 2; texCanvas.height = 2;
+        const texture = new THREE.CanvasTexture(texCanvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        const geo = new THREE.PlaneGeometry(worldW, worldH);
+        const mat = new THREE.MeshBasicMaterial({ map: texture });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.copy(obj.position);
+        mesh.rotation.copy(obj.rotation);
+        obj.parent.add(mesh);
+        recordOverlays.push({ mesh, texture, texCanvas, geo, mat, css3dObj: obj, parent: obj.parent });
+    });
+}
+
+function updateRecordOverlays() {
+    for (const ov of recordOverlays) {
+        const obj = ov.css3dObj;
+        if (!obj.parent) continue;
+        const container = obj.element;
+        if (!container) continue;
+        const drawEl = container.querySelector('canvas') || container.querySelector('img');
+        if (!drawEl) continue;
+        const visW = parseFloat(container.style.width) || 0;
+        const visH = parseFloat(container.style.height) || 0;
+        if (visW < 1 || visH < 1) continue;
+        const srcW = drawEl.tagName === 'CANVAS' ? drawEl.width : (drawEl.naturalWidth || drawEl.width);
+        const srcH = drawEl.tagName === 'CANVAS' ? drawEl.height : (drawEl.naturalHeight || drawEl.height);
+        if (srcW < 1 || srcH < 1) continue;
+        const innerCssW = parseFloat(drawEl.style.width) || visW;
+        const innerCssH = parseFloat(drawEl.style.height) || visH;
+        const offsetX = -(parseFloat(drawEl.style.left) || 0);
+        const offsetY = -(parseFloat(drawEl.style.top) || 0);
+        const scX = srcW / innerCssW;
+        const scY = srcH / innerCssH;
+        const cropX = Math.max(0, offsetX * scX);
+        const cropY = Math.max(0, offsetY * scY);
+        const cropW = Math.min(srcW - cropX, visW * scX);
+        const cropH = Math.min(srcH - cropY, visH * scY);
+        if (cropW < 1 || cropH < 1) continue;
+        const tw = Math.round(cropW), th = Math.round(cropH);
+        if (ov.texCanvas.width !== tw || ov.texCanvas.height !== th) {
+            ov.texCanvas.width = tw; ov.texCanvas.height = th;
+        }
+        try { ov.texCanvas.getContext('2d').drawImage(drawEl, cropX, cropY, cropW, cropH, 0, 0, tw, th); }
+        catch (e) { continue; }
+        ov.texture.needsUpdate = true;
+        ov.mesh.position.copy(obj.position);
+        ov.mesh.rotation.copy(obj.rotation);
+    }
+}
+
+function teardownRecordOverlays() {
+    for (const ov of recordOverlays) {
+        if (ov.parent) ov.parent.remove(ov.mesh);
+        ov.texture.dispose();
+        ov.geo.dispose();
+        ov.mat.dispose();
+    }
+    recordOverlays = [];
+}
+
 async function startRecording() {
     const canvas = renderer.domElement;
     const w = canvas.width & ~1, h = canvas.height & ~1; // codecs require even dimensions
@@ -4062,6 +4276,7 @@ async function startRecording() {
     frameCount = 0;
     recordStartTime = Date.now();
     recordedChunks = [];
+    buildRecordOverlays();
 
     if (typeof VideoEncoder !== 'undefined') {
         // Try codecs in order: H.264 (Chrome), VP9 (Firefox), VP8
@@ -4091,15 +4306,6 @@ async function startRecording() {
                     codec: cc.codec, width: w, height: h,
                     bitrate: 8_000_000, framerate: 30,
                 });
-                recordInterval = setInterval(() => {
-                    const comp = captureShowroom(w, h);
-                    const frame = new VideoFrame(comp, {
-                        timestamp: frameCount * Math.round(1_000_000 / 30),
-                    });
-                    videoEncoder.encode(frame, { keyFrame: frameCount % 90 === 0 });
-                    frame.close();
-                    frameCount++;
-                }, 1000 / 30);
                 usingMP4 = true;
                 console.log('Recording with', cc.label);
                 break;
@@ -4114,16 +4320,7 @@ async function startRecording() {
 
     if (!usingMP4) {
         console.log('Recording with MediaRecorder (WebM)');
-        // Create a composite canvas and capture its stream
-        const compCanvas = document.createElement('canvas');
-        compCanvas.width = w; compCanvas.height = h;
-        const compCtx = compCanvas.getContext('2d');
-        mediaStream = compCanvas.captureStream(30);
-        // Draw composite frames into the stream source canvas
-        recordInterval = recordInterval || setInterval(() => {
-            const frame = captureShowroom(w, h);
-            compCtx.drawImage(frame, 0, 0);
-        }, 1000 / 30);
+        mediaStream = canvas.captureStream(30);
         const mt = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
             ? 'video/webm;codecs=vp9' : 'video/webm';
         mediaRecorder = new MediaRecorder(mediaStream, { mimeType: mt, videoBitsPerSecond: 8_000_000 });
@@ -4149,9 +4346,10 @@ async function startRecording() {
 async function stopRecording() {
     isRecording = false;
     clearInterval(recordTimer);
-    clearInterval(recordInterval);
     recordBtn.textContent = 'Record';
     recordBtn.classList.remove('recording');
+    teardownRecordOverlays();
+    markDirty();
 
     if (usingMP4 && videoEncoder) {
         await videoEncoder.flush();
@@ -4224,8 +4422,6 @@ function capturePreset(name) {
 }
 
 function syncUIFromState() {
-    document.getElementById('cols').value = state.cols;
-    document.getElementById('rows').value = state.rows;
     document.getElementById('bezelToggle').checked = state.showBezels;
     document.getElementById('rotateToggle').checked = state.autoRotate;
     document.getElementById('doubleSidedToggle').checked = state.doubleSided;
