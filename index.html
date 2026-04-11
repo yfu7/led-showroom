@@ -1544,11 +1544,14 @@ function arrangeWalls() {
     const saved = activeContextWallId;
     const infos = [];
     let totalW = 0;
+    let maxH = 0;
     for (const wall of state.walls) {
         activateWallContext(wall.id);
         const b = wallBounds();
-        infos.push({ id: wall.id, w: b.w });
+        const d = wallDims();
+        infos.push({ id: wall.id, w: b.w, h: d.totalH });
         totalW += b.w;
+        maxH = Math.max(maxH, d.totalH);
     }
     totalW += (state.walls.length - 1) * WALL_GAP_IN;
     let x = -totalW / 2;
@@ -1556,6 +1559,8 @@ function arrangeWalls() {
         const ctx = wallContextMap.get(info.id);
         if (ctx) {
             ctx.group.position.x = x + info.w / 2;
+            // Bottom-align: shift shorter walls down so all bottoms are at the same Y
+            ctx.group.position.y = -(maxH - info.h) / 2;
             ctx.group.position.z = 0;
         }
         x += info.w + WALL_GAP_IN;
@@ -2335,21 +2340,25 @@ function wallBounds() {
 
 function allWallsBounds() {
     const saved = activeContextWallId;
-    let minX = Infinity, maxX = -Infinity, maxH = 0, maxDepth = 0;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, maxDepth = 0;
     for (const wall of state.walls) {
         activateWallContext(wall.id);
         const b = wallBounds();
         const ctx = wallContextMap.get(wall.id);
         const ox = ctx ? ctx.group.position.x : 0;
+        const oy = ctx ? ctx.group.position.y : 0;
         minX = Math.min(minX, ox - b.w / 2);
         maxX = Math.max(maxX, ox + b.w / 2);
-        maxH = Math.max(maxH, b.h);
+        minY = Math.min(minY, oy - b.h / 2);
+        maxY = Math.max(maxY, oy + b.h / 2);
         maxDepth = Math.max(maxDepth, b.depth);
     }
     activateWallContext(saved);
     const totalW = maxX - minX;
+    const totalH = maxY - minY;
     const cx = (minX + maxX) / 2;
-    return { w: isFinite(totalW) ? totalW : 100, h: maxH || 50, depth: maxDepth || 2, cx };
+    const cy = (minY + maxY) / 2;
+    return { w: isFinite(totalW) ? totalW : 100, h: totalH || 50, depth: maxDepth || 2, cx, cy };
 }
 
 function fitCameraToWall() {
@@ -2361,8 +2370,8 @@ function fitCameraToWall() {
     const distW = (span / 2) / Math.tan(fov / 2) / aspect;
     const dist = Math.max(distH, distW) * 1.6;
 
-    controls.target.set(b.cx, 0, 0);
-    camera.position.set(b.cx, 0, dist);
+    controls.target.set(b.cx, b.cy || 0, 0);
+    camera.position.set(b.cx, b.cy || 0, dist);
     for (const ctx of wallContextMap.values()) ctx.group.rotation.set(0, 0, 0);
     controls.update();
 }
@@ -2377,15 +2386,16 @@ function setCameraView(view) {
     const distW = (span / 2) / Math.tan(fov / 2) / aspect;
     const dist = Math.max(distH, distW) * 1.6;
 
-    controls.target.set(b.cx, 0, 0);
+    const cy = b.cy || 0;
+    controls.target.set(b.cx, cy, 0);
     for (const ctx of wallContextMap.values()) ctx.group.rotation.set(0, 0, 0);
 
     if (view === 'front') {
-        camera.position.set(b.cx, 0, dist);
+        camera.position.set(b.cx, cy, dist);
     } else if (view === '34') {
-        camera.position.set(b.cx + dist * 0.55, dist * 0.25, dist * 0.85);
+        camera.position.set(b.cx + dist * 0.55, cy + dist * 0.25, dist * 0.85);
     } else {
-        camera.position.set(b.cx, 0, dist);
+        camera.position.set(b.cx, cy, dist);
     }
     controls.update();
 }
@@ -2464,17 +2474,20 @@ function applyWindowRect(win) {
                 if (state.spanContent && state.walls.length > 1) {
                     const sp = getSpanInfo();
                     const wallOffset = sp.offsets[activeContextWallId] || 0;
+                    const wallHPx = d.rows * PANEL_PX_H;
+                    const topClip = sp.totalH - wallHPx; // how much taller the max-height rect is vs this wall
                     innerEl.style.width = sp.totalW + 'px';
                     innerEl.style.height = sp.totalH + 'px';
                     innerEl.style.left = -(wallOffset + overlapLeft - cwLeft) + 'px';
+                    innerEl.style.top = -topClip + 'px'; // bottom-align: shift content up
                     innerEl.style.objectFit = 'fill';
                 } else {
                     innerEl.style.width = rect.w + 'px';
                     innerEl.style.height = rect.h + 'px';
                     innerEl.style.left = -(overlapLeft - cwLeft) + 'px';
+                    innerEl.style.top = '0px';
                     innerEl.style.objectFit = win.mode === 'scaled' ? 'contain' : 'fill';
                 }
-                innerEl.style.top = '0px';
             }
 
             const firstCol = layout[seg.startCol];
@@ -2592,7 +2605,7 @@ function clearWindowLoading(winId) {
 function purgeContentEls(container) {
     if (!container) return;
     container.querySelectorAll('img,video,iframe').forEach(el => {
-        if (el.src?.startsWith('blob:')) URL.revokeObjectURL(el.src);
+        if (el.tagName === 'VIDEO') { el.pause(); el.removeAttribute('src'); el.load(); }
         el.remove();
     });
 }
@@ -2614,13 +2627,16 @@ function createContentEl(type, url, winId) {
         vid.setAttribute('loop', '');
         vid.setAttribute('playsinline', '');
         vid.setAttribute('preload', 'auto');
-        vid.setAttribute('crossorigin', 'anonymous');
         // Mirror as JS properties
         vid.muted = true;
         vid.loop = true;
         vid.playsInline = true;
         vid.preload = 'auto';
-        vid.crossOrigin = 'anonymous';
+        // Only set crossOrigin for non-blob URLs (blob: doesn't need CORS)
+        if (!url.startsWith('blob:')) {
+            vid.setAttribute('crossorigin', 'anonymous');
+            vid.crossOrigin = 'anonymous';
+        }
 
         showLoading('Loading video\u2026');
         let settled = false;
@@ -2754,8 +2770,10 @@ function setWindowContent(winId, type, url, name) {
 function clearWindowContent(winId) {
     const win = state.contentWindows.find(w => w.id === winId);
     if (!win) return;
+    const oldUrl = win.url;
     removeWindowRenderObjects(winId);
     clearWindowLoading(winId);
+    if (oldUrl?.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
     win.type = null;
     win.url = null;
     win.name = 'Window ' + win.id;
