@@ -1040,7 +1040,33 @@
         <div class="wall-list" id="wallList"></div>
         <button class="add-corner-btn" id="addWallBtn">+ Add Wall</button>
 
-        <!-- Panel config for selected wall -->
+        <!-- Span content toggle (right below Add Wall) -->
+        <div class="config-row" style="margin-top:12px;">
+            <label>Span Content</label>
+            <label class="toggle"><input type="checkbox" id="spanToggle"><span class="slider"></span></label>
+        </div>
+
+        <!-- Combined walls info (shown when span is on) -->
+        <div id="spanInfoSection" class="wall-info" style="display:none;margin-top:12px;">
+            <div class="info-row">
+                <span class="label">Total Panels</span>
+                <span class="value" id="spanTotalPanels">-</span>
+            </div>
+            <div class="info-row">
+                <span class="label">Resolution</span>
+                <span class="value" id="spanTotalRes">-</span>
+            </div>
+            <div class="info-row">
+                <span class="label">Physical Size</span>
+                <span class="value" id="spanTotalSize">-</span>
+            </div>
+            <div class="info-row">
+                <span class="label">Size (ft)</span>
+                <span class="value" id="spanTotalSizeFt">-</span>
+            </div>
+        </div>
+
+        <!-- Panel config for selected wall (hidden when span is on) -->
         <div id="wallConfigSection" style="margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2a;">
             <div class="config-row">
                 <label>Columns</label>
@@ -1083,12 +1109,6 @@
                 <div id="cornerList"></div>
                 <button class="add-corner-btn" id="addCornerBtn">+ Add Corner</button>
             </div>
-        </div>
-
-        <!-- Span content toggle -->
-        <div class="config-row" style="margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2a;">
-            <label>Span Content</label>
-            <label class="toggle"><input type="checkbox" id="spanToggle"><span class="slider"></span></label>
         </div>
     </div>
 
@@ -1577,6 +1597,22 @@ function renderWallList() {
 
     // Update selected wall label
     const wallLabel = document.getElementById('selectedWallLabel');
+
+    // Collapsed "combined" view when span is on with multiple walls
+    if (state.spanContent && state.walls.length > 1) {
+        if (wallLabel) wallLabel.textContent = ' \u2014 Combined';
+        const entry = document.createElement('div');
+        entry.className = 'wall-entry selected';
+        const names = state.walls.map(w => w.name).join(' + ');
+        entry.innerHTML =
+            '<span class="wall-entry-name">Walls combined</span>' +
+            '<span class="wall-entry-info">' + state.walls.length + ' walls</span>';
+        entry.style.cursor = 'default';
+        el.appendChild(entry);
+        updateSpanInfo();
+        return;
+    }
+
     if (wallLabel) {
         const sel = state.walls.find(w => w.id === state.selectedWallId);
         wallLabel.textContent = sel ? ' \u2014 ' + sel.name : '';
@@ -1634,6 +1670,25 @@ function renderWallList() {
 
         el.appendChild(entry);
     });
+}
+
+function updateSpanInfo() {
+    const sp = getSpanInfo();
+    let totalPanels = 0;
+    for (const wall of state.walls) totalPanels += wall.cols * wall.rows;
+    const totalWIn = sp.totalW * IN_PER_PX_W;
+    const totalHIn = sp.totalH * IN_PER_PX_H;
+    document.getElementById('spanTotalPanels').textContent = totalPanels;
+    document.getElementById('spanTotalRes').textContent = sp.totalW + ' x ' + sp.totalH + ' px';
+    document.getElementById('spanTotalSize').textContent = totalWIn.toFixed(1) + '" x ' + totalHIn.toFixed(1) + '"';
+    document.getElementById('spanTotalSizeFt').textContent = (totalWIn / 12).toFixed(1) + "' x " + (totalHIn / 12).toFixed(1) + "'";
+}
+
+function updateSpanUI() {
+    const isSpan = state.spanContent && state.walls.length > 1;
+    document.getElementById('wallConfigSection').style.display = isSpan ? 'none' : '';
+    document.getElementById('spanInfoSection').style.display = isSpan ? '' : 'none';
+    renderWallList();
 }
 
 /* ── Active window accessors ── */
@@ -3117,6 +3172,7 @@ document.getElementById('addWallBtn').addEventListener('click', () => {
 document.getElementById('spanToggle').addEventListener('change', e => {
     state.spanContent = e.target.checked;
     if (state.spanContent) applySpanContent();
+    updateSpanUI();
 });
 
 /* ── Corner management ── */
@@ -3921,7 +3977,7 @@ function syncUIFromState() {
     document.getElementById('accessoryToggle').checked = state.showAccessories;
     document.getElementById('dimensionToggle').checked = state.showDimensions;
     document.getElementById('spanToggle').checked = state.spanContent;
-    renderWallList();
+    updateSpanUI();
     renderCornerList();
     renderWindowList();
     syncCwControlsToWindow();
