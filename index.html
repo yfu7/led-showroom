@@ -2765,9 +2765,10 @@ function createContentEl(type, url, winId, existingVid) {
         });
 
         // Cap canvas resolution to avoid GPU memory exhaustion with multiple walls.
-        // No reason for the canvas bitmap to exceed the CSS display size.
         const MAX_CANVAS_DIM = 2048;
-        function drawLoop() {
+        let intervalId = null;
+
+        function drawFrame() {
             if (stopped) return;
             if (vid.readyState >= 2 && vid.videoWidth > 0) {
                 let cw = vid.videoWidth, ch = vid.videoHeight;
@@ -2783,20 +2784,31 @@ function createContentEl(type, url, winId, existingVid) {
                 ctx2d.drawImage(vid, 0, 0, cw, ch);
                 markDirty();
             }
+        }
+
+        function drawLoop() {
+            if (stopped) return;
+            drawFrame();
             requestAnimationFrame(drawLoop);
         }
 
-        // Start draw loop immediately — it safely checks readyState before drawing
+        // Start both rAF loop and setInterval fallback for reliability.
+        // rAF gives smooth frames; setInterval ensures drawing even when rAF is throttled.
         function startDrawing() {
             if (drawing) return;
             drawing = true;
             drawLoop();
+            intervalId = setInterval(() => {
+                if (stopped) { clearInterval(intervalId); return; }
+                drawFrame();
+                // Keep retrying play if video got paused by browser power-saving
+                if (vid.paused && vid.readyState >= 2) {
+                    vid.play().catch(() => {});
+                }
+            }, 250);
         }
 
-        vid.addEventListener('loadedmetadata', () => {
-            startDrawing();
-            tryPlay();
-        }, { once: true });
+        vid.addEventListener('loadedmetadata', () => { startDrawing(); tryPlay(); }, { once: true });
         vid.addEventListener('loadeddata', () => { settle(); startDrawing(); }, { once: true });
         vid.addEventListener('canplay', () => { settle(); startDrawing(); tryPlay(); }, { once: true });
         vid.addEventListener('playing', () => { settle(); startDrawing(); }, { once: true });
@@ -2808,8 +2820,6 @@ function createContentEl(type, url, winId, existingVid) {
                 console.warn('Video load error:', vid.error?.message || 'unknown');
             }
         }, { once: true });
-        // Timeout fallback
-        setTimeout(() => { if (!settled) settle(); startDrawing(); }, 15000);
 
         if (!isShared) {
             vid.src = url;
@@ -2820,13 +2830,16 @@ function createContentEl(type, url, winId, existingVid) {
             console.warn('Video play attempt failed:', err.message);
             setTimeout(() => vid.play().catch(() => {}), 1000);
         });
-        // Also try playing after a short delay in case events don't fire
-        setTimeout(() => { startDrawing(); tryPlay(); }, 300);
+        // Aggressive start: try at multiple intervals to handle any loading timing
+        setTimeout(() => { startDrawing(); tryPlay(); }, 100);
+        setTimeout(() => { startDrawing(); tryPlay(); }, 500);
         setTimeout(() => { startDrawing(); tryPlay(); }, 2000);
+        setTimeout(() => { if (!settled) settle(); startDrawing(); tryPlay(); }, 8000);
 
         // Cleanup hook for purgeContentEls
         canvas._vidCleanup = () => {
             stopped = true;
+            if (intervalId) clearInterval(intervalId);
             if (isShared) {
                 releaseSharedSpanVideo(false);
             } else {
@@ -3708,12 +3721,31 @@ document.getElementById('infoToggle').addEventListener('change', e => {
 
 document.getElementById('accessoryToggle').addEventListener('change', e => {
     state.showAccessories = e.target.checked;
-    setAccessoryVisibility(state.showAccessories);
+    if (state.walls.length > 1) {
+        const saved = activeContextWallId;
+        for (const wall of state.walls) {
+            activateWallContext(wall.id);
+            setAccessoryVisibility(state.showAccessories);
+        }
+        activateWallContext(saved);
+    } else {
+        setAccessoryVisibility(state.showAccessories);
+    }
 });
 
 document.getElementById('dimensionToggle').addEventListener('change', e => {
     state.showDimensions = e.target.checked;
-    buildDimensions();
+    // Build dimensions for ALL walls, not just the active one
+    if (state.walls.length > 1) {
+        const saved = activeContextWallId;
+        for (const wall of state.walls) {
+            activateWallContext(wall.id);
+            buildDimensions();
+        }
+        activateWallContext(saved);
+    } else {
+        buildDimensions();
+    }
 });
 
 /* View buttons */
