@@ -660,7 +660,7 @@
         }
 
         .css3d-content-el img,
-        .css3d-content-el video {
+        .css3d-content-el canvas {
             width: 100%;
             height: 100%;
             object-fit: fill;
@@ -2602,10 +2602,13 @@ function clearWindowLoading(winId) {
     renderWindowList();
 }
 
+const activeVideoCanvases = new Set();
+
 function purgeContentEls(container) {
     if (!container) return;
-    container.querySelectorAll('img,video,iframe').forEach(el => {
-        if (el.tagName === 'VIDEO') { el.pause(); el.removeAttribute('src'); el.load(); }
+    container.querySelectorAll('img,canvas,iframe').forEach(el => {
+        if (el._vidCleanup) el._vidCleanup();
+        activeVideoCanvases.delete(el);
         el.remove();
     });
 }
@@ -2620,23 +2623,25 @@ function createContentEl(type, url, winId) {
         return img;
     }
     if (type === 'video') {
+        // Use off-screen video + canvas to avoid CSS 3D transform compositing issues
         const vid = document.createElement('video');
-        // HTML attributes required for autoplay policy compliance
+        vid.muted = true;
+        vid.loop = true;
+        vid.playsInline = true;
+        vid.preload = 'auto';
         vid.setAttribute('muted', '');
         vid.setAttribute('autoplay', '');
         vid.setAttribute('loop', '');
         vid.setAttribute('playsinline', '');
         vid.setAttribute('preload', 'auto');
-        // Mirror as JS properties
-        vid.muted = true;
-        vid.loop = true;
-        vid.playsInline = true;
-        vid.preload = 'auto';
-        // Only set crossOrigin for non-blob URLs (blob: doesn't need CORS)
         if (!url.startsWith('blob:')) {
-            vid.setAttribute('crossorigin', 'anonymous');
             vid.crossOrigin = 'anonymous';
         }
+
+        const canvas = document.createElement('canvas');
+        const ctx2d = canvas.getContext('2d');
+        let animId = null;
+        let stopped = false;
 
         showLoading('Loading video\u2026');
         let settled = false;
@@ -2645,13 +2650,23 @@ function createContentEl(type, url, winId) {
             settled = true;
             hideLoading();
             if (winId != null) clearWindowLoading(winId);
-            markDirty();
         };
 
-        // Multiple event hooks — first one to fire wins
-        vid.addEventListener('loadeddata', settle, { once: true });
+        function drawLoop() {
+            if (stopped) return;
+            if (vid.readyState >= 2 && vid.videoWidth > 0) {
+                if (canvas.width !== vid.videoWidth || canvas.height !== vid.videoHeight) {
+                    canvas.width = vid.videoWidth;
+                    canvas.height = vid.videoHeight;
+                }
+                ctx2d.drawImage(vid, 0, 0);
+                markDirty();
+            }
+            animId = requestAnimationFrame(drawLoop);
+        }
+
+        vid.addEventListener('loadeddata', () => { settle(); drawLoop(); }, { once: true });
         vid.addEventListener('canplay', settle, { once: true });
-        vid.addEventListener('playing', settle, { once: true });
         vid.addEventListener('error', () => {
             if (!settled) {
                 settled = true;
@@ -2660,25 +2675,29 @@ function createContentEl(type, url, winId) {
                 console.warn('Video load error:', vid.error?.message || 'unknown');
             }
         }, { once: true });
-
-        // Timeout fallback: hide loading after 15s even if events never fire
         setTimeout(() => { if (!settled) settle(); }, 15000);
 
-        // Set source and begin loading
         vid.src = url;
         vid.load();
 
-        // Robust play: try immediately, retry after metadata, retry on timeout
         const tryPlay = () => vid.play().catch(() =>
             setTimeout(() => vid.play().catch(() => {}), 500)
         );
-        vid.addEventListener('loadedmetadata', () => {
-            markDirty();
-            tryPlay();
-        }, { once: true });
+        vid.addEventListener('loadedmetadata', tryPlay, { once: true });
         setTimeout(tryPlay, 100);
 
-        return vid;
+        // Cleanup hook for purgeContentEls
+        canvas._vidCleanup = () => {
+            stopped = true;
+            if (animId) cancelAnimationFrame(animId);
+            vid.pause();
+            vid.removeAttribute('src');
+            vid.load();
+        };
+        // Store vid reference for save/restore of currentTime
+        canvas._vid = vid;
+        activeVideoCanvases.add(canvas);
+        return canvas;
     }
     const ifr = document.createElement('iframe');
     showLoading('Loading website\u2026');
@@ -3164,9 +3183,9 @@ function rebuildForCorners() {
         const rd = windowRenderData.get(win.id);
         if (!rd) continue;
         for (const el of rd.frontEls) {
-            const vid = el.querySelector('video');
-            if (vid && vid.currentTime > 0) {
-                savedVideoTimes.set(win.id, vid.currentTime);
+            const cvs = el.querySelector('canvas');
+            if (cvs?._vid && cvs._vid.currentTime > 0) {
+                savedVideoTimes.set(win.id, cvs._vid.currentTime);
                 break;
             }
         }
@@ -3181,8 +3200,9 @@ function rebuildForCorners() {
         const rd = windowRenderData.get(winId);
         if (!rd) continue;
         rd.frontEls.forEach(el => {
-            const vid = el.querySelector('video');
-            if (vid) {
+            const cvs = el.querySelector('canvas');
+            if (cvs?._vid) {
+                const vid = cvs._vid;
                 const restore = () => { vid.currentTime = time; };
                 if (vid.readyState >= 1) restore();
                 else vid.addEventListener('loadedmetadata', restore, { once: true });
