@@ -1033,60 +1033,63 @@
     <h1><span>LED</span> Wall Showroom</h1>
 
     <!-- Walls -->
-    <div class="section">
-        <div class="section-title">Walls</div>
+    <div class="section" id="wallSection">
+        <div class="section-title">Walls<span class="selected-window-label" id="selectedWallLabel"></span></div>
+
+        <!-- Wall list + add button -->
         <div class="wall-list" id="wallList"></div>
         <button class="add-corner-btn" id="addWallBtn">+ Add Wall</button>
-        <div class="config-row" style="margin-top:12px;">
+
+        <!-- Panel config for selected wall -->
+        <div id="wallConfigSection" style="margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2a;">
+            <div class="config-row">
+                <label>Columns</label>
+                <div class="input-group">
+                    <button class="btn" data-action="cols-dec">&#8722;</button>
+                    <input type="number" id="cols" value="4" min="1" max="50">
+                    <button class="btn" data-action="cols-inc">+</button>
+                </div>
+            </div>
+            <div class="config-row">
+                <label>Rows</label>
+                <div class="input-group">
+                    <button class="btn" data-action="rows-dec">&#8722;</button>
+                    <input type="number" id="rows" value="3" min="1" max="50">
+                    <button class="btn" data-action="rows-inc">+</button>
+                </div>
+            </div>
+            <div class="wall-info">
+                <div class="info-row">
+                    <span class="label">Total Panels</span>
+                    <span class="value" id="totalPanels">12</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Resolution</span>
+                    <span class="value" id="totalRes">1376 x 774 px</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Physical Size</span>
+                    <span class="value" id="totalSize">100.5" x 56.6"</span>
+                </div>
+                <div class="info-row">
+                    <span class="label">Size (ft)</span>
+                    <span class="value" id="totalSizeFt">8.4' x 4.7'</span>
+                </div>
+            </div>
+
+            <!-- Corners -->
+            <div style="margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2a;">
+                <div class="section-title" style="margin-bottom:12px;">Corners</div>
+                <div id="cornerList"></div>
+                <button class="add-corner-btn" id="addCornerBtn">+ Add Corner</button>
+            </div>
+        </div>
+
+        <!-- Span content toggle -->
+        <div class="config-row" style="margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2a;">
             <label>Span Content</label>
             <label class="toggle"><input type="checkbox" id="spanToggle"><span class="slider"></span></label>
         </div>
-    </div>
-
-    <!-- Panel Configuration -->
-    <div class="section">
-        <div class="section-title">Panel Configuration</div>
-        <div class="config-row">
-            <label>Columns</label>
-            <div class="input-group">
-                <button class="btn" data-action="cols-dec">&#8722;</button>
-                <input type="number" id="cols" value="4" min="1" max="50">
-                <button class="btn" data-action="cols-inc">+</button>
-            </div>
-        </div>
-        <div class="config-row">
-            <label>Rows</label>
-            <div class="input-group">
-                <button class="btn" data-action="rows-dec">&#8722;</button>
-                <input type="number" id="rows" value="3" min="1" max="50">
-                <button class="btn" data-action="rows-inc">+</button>
-            </div>
-        </div>
-        <div class="wall-info">
-            <div class="info-row">
-                <span class="label">Total Panels</span>
-                <span class="value" id="totalPanels">12</span>
-            </div>
-            <div class="info-row">
-                <span class="label">Resolution</span>
-                <span class="value" id="totalRes">1376 x 774 px</span>
-            </div>
-            <div class="info-row">
-                <span class="label">Physical Size</span>
-                <span class="value" id="totalSize">100.5" x 56.6"</span>
-            </div>
-            <div class="info-row">
-                <span class="label">Size (ft)</span>
-                <span class="value" id="totalSizeFt">8.4' x 4.7'</span>
-            </div>
-        </div>
-    </div>
-
-    <!-- Corner Configuration -->
-    <div class="section">
-        <div class="section-title">Corners</div>
-        <div id="cornerList"></div>
-        <button class="add-corner-btn" id="addCornerBtn">+ Add Corner</button>
     </div>
 
     <!-- Content -->
@@ -1566,6 +1569,13 @@ function renderWallList() {
     const el = document.getElementById('wallList');
     if (!el) return;
     el.innerHTML = '';
+
+    // Update selected wall label
+    const wallLabel = document.getElementById('selectedWallLabel');
+    if (wallLabel) {
+        const sel = state.walls.find(w => w.id === state.selectedWallId);
+        wallLabel.textContent = sel ? ' \u2014 ' + sel.name : '';
+    }
     state.walls.forEach(wall => {
         const entry = document.createElement('div');
         entry.className = 'wall-entry' + (wall.id === state.selectedWallId ? ' selected' : '');
@@ -2939,13 +2949,12 @@ function applySpanContent() {
     if (!state.spanContent || state.walls.length < 2) return;
     const saved = activeContextWallId;
 
-    // Find first wall that has content
-    let sourceType = null, sourceUrl = null, sourceName = null;
-    for (const wall of state.walls) {
-        const cw = wall.contentWindows.find(w => w.type);
-        if (cw) { sourceType = cw.type; sourceUrl = cw.url; sourceName = cw.name; break; }
-    }
-    if (!sourceType) { activateWallContext(saved); return; }
+    // Content always starts from Wall 1 (first wall)
+    const wall1 = state.walls[0];
+    if (!wall1) { activateWallContext(saved); return; }
+    const cw1 = wall1.contentWindows.find(w => w.type);
+    if (!cw1) { activateWallContext(saved); return; }
+    const sourceType = cw1.type, sourceUrl = cw1.url, sourceName = cw1.name;
 
     // Apply same content to first window of every wall
     for (const wall of state.walls) {
