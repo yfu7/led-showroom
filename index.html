@@ -4120,10 +4120,12 @@ function captureShowroom(targetW, targetH) {
         const worldH = visH * obj.scale.y;
 
         const geo = new THREE.PlaneGeometry(worldW, worldH);
-        const mat = new THREE.MeshBasicMaterial({ map: texture });
+        const mat = new THREE.MeshBasicMaterial({ map: texture, depthTest: false });
         const mesh = new THREE.Mesh(geo, mat);
+        mesh.renderOrder = 999;
         mesh.position.copy(obj.position);
         mesh.rotation.copy(obj.rotation);
+        mesh.translateZ(0.1);
 
         obj.parent.add(mesh);
         tempMeshes.push({ mesh, texture, geo, mat, parent: obj.parent });
@@ -4256,10 +4258,12 @@ function buildRecordOverlays() {
             uv.setXY(2, u0, v0); uv.setXY(3, u1, v0);
             uv.needsUpdate = true;
         }
-        const mat = new THREE.MeshBasicMaterial({ map: texture });
+        const mat = new THREE.MeshBasicMaterial({ map: texture, depthTest: false });
         const mesh = new THREE.Mesh(geo, mat);
+        mesh.renderOrder = 999;
         mesh.position.copy(obj.position);
         mesh.rotation.copy(obj.rotation);
+        mesh.translateZ(0.1); // push in front of panel face to prevent z-fighting
         obj.parent.add(mesh);
         recordOverlays.push({ mesh, texture, texCanvas, geo, mat, css3dObj: obj, parent: obj.parent, isVideo });
     });
