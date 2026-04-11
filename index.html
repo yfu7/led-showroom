@@ -2658,6 +2658,8 @@ function clearWindowLoading(winId) {
 }
 
 const activeVideoCanvases = new Set();
+let sharedSpanVideo = null;   // single <video> shared by all walls in span mode
+let sharedSpanVideoRefCount = 0;
 
 function purgeContentEls(container) {
     if (!container) return;
@@ -2668,7 +2670,49 @@ function purgeContentEls(container) {
     });
 }
 
-function createContentEl(type, url, winId) {
+/* Get or create a shared video element for span mode to avoid
+   multiple heavy video decoders for the same source. */
+function getSharedSpanVideo(url) {
+    if (sharedSpanVideo && sharedSpanVideo._srcUrl === url) {
+        sharedSpanVideoRefCount++;
+        return sharedSpanVideo;
+    }
+    // Clean up previous shared video if any
+    releaseSharedSpanVideo(true);
+    const vid = document.createElement('video');
+    vid.muted = true;
+    vid.loop = true;
+    vid.playsInline = true;
+    vid.preload = 'auto';
+    vid.setAttribute('muted', '');
+    vid.setAttribute('autoplay', '');
+    vid.setAttribute('loop', '');
+    vid.setAttribute('playsinline', '');
+    vid.setAttribute('preload', 'auto');
+    if (!url.startsWith('blob:')) vid.crossOrigin = 'anonymous';
+    vid._srcUrl = url;
+    vid.src = url;
+    vid.load();
+    vid.play().catch(() => {});
+    sharedSpanVideo = vid;
+    sharedSpanVideoRefCount = 1;
+    return vid;
+}
+
+function releaseSharedSpanVideo(force) {
+    if (!sharedSpanVideo) return;
+    if (!force) {
+        sharedSpanVideoRefCount = Math.max(0, sharedSpanVideoRefCount - 1);
+        if (sharedSpanVideoRefCount > 0) return;
+    }
+    sharedSpanVideo.pause();
+    sharedSpanVideo.removeAttribute('src');
+    sharedSpanVideo.load();
+    sharedSpanVideo = null;
+    sharedSpanVideoRefCount = 0;
+}
+
+function createContentEl(type, url, winId, existingVid) {
     if (type === 'image') {
         const img = document.createElement('img');
         showLoading('Loading image\u2026');
@@ -2679,19 +2723,21 @@ function createContentEl(type, url, winId) {
     }
     if (type === 'video') {
         // Use off-screen video + canvas to avoid CSS 3D transform compositing issues
-        const vid = document.createElement('video');
-        vid.muted = true;
-        vid.loop = true;
-        vid.playsInline = true;
-        vid.preload = 'auto';
-        vid.setAttribute('muted', '');
-        vid.setAttribute('autoplay', '');
-        vid.setAttribute('loop', '');
-        vid.setAttribute('playsinline', '');
-        vid.setAttribute('preload', 'auto');
-        if (!url.startsWith('blob:')) {
-            vid.crossOrigin = 'anonymous';
-        }
+        const isShared = !!existingVid;
+        const vid = existingVid || (() => {
+            const v = document.createElement('video');
+            v.muted = true;
+            v.loop = true;
+            v.playsInline = true;
+            v.preload = 'auto';
+            v.setAttribute('muted', '');
+            v.setAttribute('autoplay', '');
+            v.setAttribute('loop', '');
+            v.setAttribute('playsinline', '');
+            v.setAttribute('preload', 'auto');
+            if (!url.startsWith('blob:')) v.crossOrigin = 'anonymous';
+            return v;
+        })();
 
         const canvas = document.createElement('canvas');
         const ctx2d = canvas.getContext('2d');
@@ -2718,14 +2764,23 @@ function createContentEl(type, url, winId) {
             } catch (e) {}
         });
 
+        // Cap canvas resolution to avoid GPU memory exhaustion with multiple walls.
+        // No reason for the canvas bitmap to exceed the CSS display size.
+        const MAX_CANVAS_DIM = 2048;
         function drawLoop() {
             if (stopped) return;
             if (vid.readyState >= 2 && vid.videoWidth > 0) {
-                if (canvas.width !== vid.videoWidth || canvas.height !== vid.videoHeight) {
-                    canvas.width = vid.videoWidth;
-                    canvas.height = vid.videoHeight;
+                let cw = vid.videoWidth, ch = vid.videoHeight;
+                if (cw > MAX_CANVAS_DIM || ch > MAX_CANVAS_DIM) {
+                    const scale = Math.min(MAX_CANVAS_DIM / cw, MAX_CANVAS_DIM / ch);
+                    cw = Math.round(cw * scale);
+                    ch = Math.round(ch * scale);
                 }
-                ctx2d.drawImage(vid, 0, 0);
+                if (canvas.width !== cw || canvas.height !== ch) {
+                    canvas.width = cw;
+                    canvas.height = ch;
+                }
+                ctx2d.drawImage(vid, 0, 0, cw, ch);
                 markDirty();
             }
             requestAnimationFrame(drawLoop);
@@ -2756,8 +2811,10 @@ function createContentEl(type, url, winId) {
         // Timeout fallback
         setTimeout(() => { if (!settled) settle(); startDrawing(); }, 15000);
 
-        vid.src = url;
-        vid.load();
+        if (!isShared) {
+            vid.src = url;
+            vid.load();
+        }
 
         const tryPlay = () => vid.play().catch(err => {
             console.warn('Video play attempt failed:', err.message);
@@ -2770,12 +2827,17 @@ function createContentEl(type, url, winId) {
         // Cleanup hook for purgeContentEls
         canvas._vidCleanup = () => {
             stopped = true;
-            vid.pause();
-            vid.removeAttribute('src');
-            vid.load();
+            if (isShared) {
+                releaseSharedSpanVideo(false);
+            } else {
+                vid.pause();
+                vid.removeAttribute('src');
+                vid.load();
+            }
         };
         // Store vid reference for save/restore of currentTime
         canvas._vid = vid;
+        canvas._isSharedVid = isShared;
         activeVideoCanvases.add(canvas);
         return canvas;
     }
@@ -2789,7 +2851,7 @@ function createContentEl(type, url, winId) {
 }
 
 /* ── Content management (multi-window, multi-segment) ── */
-function buildContentSegments(type, url, winId) {
+function buildContentSegments(type, url, winId, sharedVid) {
     const segments = computeSegments();
     const objects = [];
     const els = [];
@@ -2798,7 +2860,7 @@ function buildContentSegments(type, url, winId) {
         const container = document.createElement('div');
         container.className = 'css3d-content-el';
         container.style.overflow = 'hidden';
-        container.appendChild(createContentEl(type, url, winId));
+        container.appendChild(createContentEl(type, url, winId, sharedVid || undefined));
 
         const obj = new CSS3DObject(container);
         wallGroup.add(obj);
@@ -2834,7 +2896,7 @@ function syncWindowBackContent(win) {
     }
 }
 
-function setWindowContent(winId, type, url, name) {
+function setWindowContent(winId, type, url, name, sharedVid) {
     const win = state.contentWindows.find(w => w.id === winId);
     if (!win) return;
 
@@ -2849,7 +2911,7 @@ function setWindowContent(winId, type, url, name) {
         markWindowLoading(winId);
     }
 
-    const front = buildContentSegments(type, url, winId);
+    const front = buildContentSegments(type, url, winId, sharedVid);
     const rd = windowRenderData.get(winId) || { frontObjects: [], frontEls: [], backObjects: [], backEls: [] };
     rd.frontObjects = front.objects;
     rd.frontEls = front.els;
@@ -2861,7 +2923,7 @@ function setWindowContent(winId, type, url, name) {
     updateContentSourceUI();
 
     // If span mode is on, replicate content to all walls
-    if (state.spanContent && state.walls.length > 1) {
+    if (state.spanContent && state.walls.length > 1 && !sharedVid) {
         setTimeout(() => applySpanContent(), 50);
     }
 }
@@ -3080,15 +3142,21 @@ function applySpanContent() {
     if (!cw1) { activateWallContext(saved); return; }
     const sourceType = cw1.type, sourceUrl = cw1.url, sourceName = cw1.name;
 
-    // Apply same content to first window of every wall
+    // For video, use a single shared <video> element across all walls
+    // to avoid multiple heavy decoders for the same source
+    const spanVid = (sourceType === 'video') ? getSharedSpanVideo(sourceUrl) : null;
+
+    // Apply same content to first window of every wall.
+    // When using a shared video, always rebuild so every wall uses the same decoder.
     for (const wall of state.walls) {
         activateWallContext(wall.id);
         if (state.contentWindows.length === 0) addContentWindow();
         const win = state.contentWindows[0];
         if (!win) continue;
         win.mode = 'fill';
-        if (win.type !== sourceType || win.url !== sourceUrl) {
-            setWindowContent(win.id, sourceType, sourceUrl, sourceName);
+        const needsContent = win.type !== sourceType || win.url !== sourceUrl;
+        if (needsContent || spanVid) {
+            setWindowContent(win.id, sourceType, sourceUrl, sourceName, spanVid);
         }
         applyAllWindowRects();
     }
@@ -3182,6 +3250,9 @@ document.getElementById('spanToggle').addEventListener('change', e => {
         // Switch to Wall 1 context when entering combined mode
         selectWall(state.walls[0].id);
         applySpanContent();
+    } else {
+        // Leaving span mode — release shared video
+        releaseSharedSpanVideo(true);
     }
     updateSpanUI();
 });
