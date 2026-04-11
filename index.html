@@ -2924,6 +2924,13 @@ function selectContentWindow(id) {
 }
 
 function ensureActiveWindow() {
+    // When span is on, always operate on Wall 1
+    if (state.spanContent && state.walls.length > 1) {
+        const wall1Id = state.walls[0].id;
+        if (activeContextWallId !== wall1Id) {
+            activateWallContext(wall1Id);
+        }
+    }
     if (!activeWindow()) addContentWindow();
     return activeWindow();
 }
@@ -3171,7 +3178,11 @@ document.getElementById('addWallBtn').addEventListener('click', () => {
 
 document.getElementById('spanToggle').addEventListener('change', e => {
     state.spanContent = e.target.checked;
-    if (state.spanContent) applySpanContent();
+    if (state.spanContent && state.walls.length > 1) {
+        // Switch to Wall 1 context when entering combined mode
+        selectWall(state.walls[0].id);
+        applySpanContent();
+    }
     updateSpanUI();
 });
 
