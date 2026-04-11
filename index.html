@@ -2767,7 +2767,8 @@ function createContentEl(type, url, winId, existingVid) {
         })();
 
         const canvas = document.createElement('canvas');
-        const ctx2d = canvas.getContext('2d');
+        // desynchronized: true allows GPU to present frames without waiting for compositor
+        const ctx2d = canvas.getContext('2d', { desynchronized: true, willReadFrequently: false });
         let stopped = false;
         let drawing = false;
 
@@ -2794,41 +2795,58 @@ function createContentEl(type, url, winId, existingVid) {
         // Canvas resolution cap — auto-detected from GPU's max texture size
         const MAX_CANVAS_DIM = gpuMaxTextureSize;
         let intervalId = null;
+        const hasRVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+
+        function sizeCanvas() {
+            if (vid.videoWidth === 0) return;
+            let cw = vid.videoWidth, ch = vid.videoHeight;
+            if (cw > MAX_CANVAS_DIM || ch > MAX_CANVAS_DIM) {
+                const scale = Math.min(MAX_CANVAS_DIM / cw, MAX_CANVAS_DIM / ch);
+                cw = Math.round(cw * scale);
+                ch = Math.round(ch * scale);
+            }
+            if (canvas.width !== cw || canvas.height !== ch) {
+                canvas.width = cw;
+                canvas.height = ch;
+            }
+        }
 
         function drawFrame() {
             if (stopped) return;
             if (vid.readyState >= 2 && vid.videoWidth > 0) {
-                let cw = vid.videoWidth, ch = vid.videoHeight;
-                if (cw > MAX_CANVAS_DIM || ch > MAX_CANVAS_DIM) {
-                    const scale = Math.min(MAX_CANVAS_DIM / cw, MAX_CANVAS_DIM / ch);
-                    cw = Math.round(cw * scale);
-                    ch = Math.round(ch * scale);
-                }
-                if (canvas.width !== cw || canvas.height !== ch) {
-                    canvas.width = cw;
-                    canvas.height = ch;
-                }
-                ctx2d.drawImage(vid, 0, 0, cw, ch);
+                sizeCanvas();
+                ctx2d.drawImage(vid, 0, 0, canvas.width, canvas.height);
                 markDirty();
             }
         }
 
-        function drawLoop() {
+        // requestVideoFrameCallback fires exactly when a new decoded frame is ready,
+        // avoiding redundant redraws and letting the GPU drive the timing.
+        function videoFrameLoop() {
             if (stopped) return;
             drawFrame();
-            requestAnimationFrame(drawLoop);
+            vid.requestVideoFrameCallback(videoFrameLoop);
         }
 
-        // Start both rAF loop and setInterval fallback for reliability.
-        // rAF gives smooth frames; setInterval ensures drawing even when rAF is throttled.
+        // rAF fallback for browsers without requestVideoFrameCallback
+        function rafLoop() {
+            if (stopped) return;
+            drawFrame();
+            requestAnimationFrame(rafLoop);
+        }
+
         function startDrawing() {
             if (drawing) return;
             drawing = true;
-            drawLoop();
+            if (hasRVFC) {
+                vid.requestVideoFrameCallback(videoFrameLoop);
+            } else {
+                rafLoop();
+            }
+            // setInterval fallback: catches paused/throttled states, retries play
             intervalId = setInterval(() => {
                 if (stopped) { clearInterval(intervalId); return; }
                 drawFrame();
-                // Keep retrying play if video got paused by browser power-saving
                 if (vid.paused && vid.readyState >= 2) {
                     vid.play().catch(() => {});
                 }
