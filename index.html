@@ -648,7 +648,11 @@
         }
 
         .info-overlay .label { color: #6b8ab5; margin-right: 6px; }
-        .info-overlay div { margin: 2px 0; }
+        .info-overlay > div { margin: 2px 0; }
+        .info-overlay .wall-info-title { color: #6b8ab5; font-weight: 600; margin-bottom: 4px; }
+        .info-overlay .wall-info-entry { margin: 3px 0; }
+        .info-overlay .wall-info-name { color: #93c5fd; font-weight: 600; }
+        .info-overlay .wall-info-detail { color: #7bacd4; font-size: 11px; margin-left: 2px; }
 
         /* CSS3D content layer styling */
         .css3d-content-el {
@@ -1392,7 +1396,7 @@
     <div class="controls-overlay" id="controlsOverlay"></div>
 
     <div class="info-overlay" id="infoOverlay">
-        <div><span class="label">Wall:</span><span id="infoWall">-</span></div>
+        <div id="infoWallBlock"></div>
         <div><span class="label">Window:</span><span id="infoWindow">-</span></div>
         <div><span class="label">Position:</span><span id="infoPos">0, 0, 0</span></div>
     </div>
@@ -2702,7 +2706,7 @@ const elCwInfoPx = document.getElementById('cwInfoPx');
 const elCwInfoIn = document.getElementById('cwInfoIn');
 const elCwInfoPct = document.getElementById('cwInfoPct');
 const elInfoWindow = document.getElementById('infoWindow');
-const elInfoWall = document.getElementById('infoWall');
+const elInfoWallBlock = document.getElementById('infoWallBlock');
 const elInfoPos = document.getElementById('infoPos');
 const elTotalPanels = document.getElementById('totalPanels');
 const elTotalRes = document.getElementById('totalRes');
@@ -2741,22 +2745,35 @@ function updateSidebarInfo() {
     elTotalRes.textContent = d.wallWPx + ' x ' + d.wallHPx + ' px';
     elTotalSize.textContent = totalWIn.toFixed(1) + '" x ' + totalHIn.toFixed(1) + '"';
     elTotalSizeFt.textContent = (totalWIn / 12).toFixed(1) + "' x " + (totalHIn / 12).toFixed(1) + "'";
-    if (state.walls.length <= 1) {
-        elInfoWall.textContent = ' ' + d.cols + 'x' + d.rows + ' panels \u00b7 ' +
-            totalWIn.toFixed(1) + '" x ' + totalHIn.toFixed(1) + '"';
-    } else {
-        const saved = activeContextWallId;
-        let allPanels = 0;
-        const parts = [];
-        for (const wall of state.walls) {
-            activateWallContext(wall.id);
-            const wd = wallDims();
-            allPanels += wd.cols * wd.rows;
-            parts.push(wall.name + ' ' + wd.cols + '\u00d7' + wd.rows);
-        }
-        activateWallContext(saved);
-        elInfoWall.textContent = ' ' + state.walls.length + ' walls \u00b7 ' + allPanels + ' panels \u00b7 ' + parts.join(', ');
+    function fmtFtIn(inches) {
+        var ft = Math.floor(inches / 12);
+        var rem = inches % 12;
+        return ft + "'" + rem.toFixed(1) + '"';
     }
+
+    var html = '';
+    if (state.walls.length > 1) {
+        html += '<div class="wall-info-title">Walls Combined</div>';
+    }
+    var saved = activeContextWallId;
+    for (var i = 0; i < state.walls.length; i++) {
+        var wall = state.walls[i];
+        activateWallContext(wall.id);
+        var wd = wallDims();
+        var wIn = wd.cols * PANEL_W_IN;
+        var hIn = wd.rows * PANEL_H_IN;
+        var corners = wall.corners ? wall.corners.length : 0;
+        html += '<div class="wall-info-entry">';
+        html += '<span class="wall-info-name">' + wall.name + '</span>: ' +
+            wd.cols + ' by ' + wd.rows + (corners > 0 ? ' \u00b7 ' + corners + ' corner' + (corners > 1 ? 's' : '') : '');
+        html += '<div class="wall-info-detail">' +
+            wd.wallWPx + ' x ' + wd.wallHPx + ' px, ' +
+            fmtFtIn(wIn) + ' x ' + fmtFtIn(hIn) +
+            '</div>';
+        html += '</div>';
+    }
+    activateWallContext(saved);
+    elInfoWallBlock.innerHTML = html;
 }
 
 /* ── Content helpers ── */
