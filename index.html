@@ -2024,6 +2024,18 @@ function animate() {
     }
     if (!sceneDirty) return;
     sceneDirty = false;
+    // Scale dimension labels with camera distance
+    if (state.showDimensions && dimensionObjects.length > 0) {
+        const camDist = camera.position.distanceTo(controls.target);
+        const refDist = 200;
+        const scale = Math.max(0.4, camDist / refDist);
+        for (const obj of dimensionObjects) {
+            if (obj.isSprite && obj.userData.dimBaseH) {
+                const h = obj.userData.dimBaseH * scale;
+                obj.scale.set(h * obj.userData.dimAspect, h, 1);
+            }
+        }
+    }
     renderer.render(scene, camera);
     cssRenderer.render(scene, camera);
     if (isRecording && usingMP4 && videoEncoder && videoEncoder.encodeQueueSize <= 10) {
@@ -2316,9 +2328,9 @@ function buildBezelLines(layout, d, miterCuts) {
 function createDimSprite(text) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    const fontSize = 40;
+    const fontSize = 56;
     const font = 'bold ' + fontSize + 'px "Courier New", monospace';
-    const pad = 16;
+    const pad = 20;
 
     ctx.font = font;
     const tw = ctx.measureText(text).width;
@@ -2326,7 +2338,7 @@ function createDimSprite(text) {
     canvas.height = Math.ceil(fontSize * 1.4 + pad * 2);
 
     ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(0, 0, canvas.width, canvas.height, 8); ctx.fill(); }
+    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(0, 0, canvas.width, canvas.height, 10); ctx.fill(); }
     else ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.font = font;
@@ -2341,8 +2353,11 @@ function createDimSprite(text) {
     const sprite = new THREE.Sprite(material);
     sprite.renderOrder = DIMENSION_RENDER_ORDER;
 
-    const targetH = 4.5;
-    sprite.scale.set(targetH * canvas.width / canvas.height, targetH, 1);
+    const baseH = 6;
+    const aspect = canvas.width / canvas.height;
+    sprite.scale.set(baseH * aspect, baseH, 1);
+    sprite.userData.dimBaseH = baseH;
+    sprite.userData.dimAspect = aspect;
     return sprite;
 }
 
