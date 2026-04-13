@@ -616,6 +616,40 @@
             50% { border-color: #991b1b; }
         }
 
+        .dist-meter {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 6px 12px;
+            background: rgba(20, 20, 20, 0.85);
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #9ca3af;
+            font-size: 13px;
+            font-family: 'Courier New', monospace;
+            cursor: pointer;
+            backdrop-filter: blur(8px);
+            transition: all 0.15s;
+            user-select: none;
+            white-space: nowrap;
+        }
+        .dist-meter:hover { border-color: #3b82f6; color: #fff; }
+        .dist-meter.close { color: #4ade80; border-color: #22c55e44; }
+        .dist-icon { font-size: 14px; }
+        .dist-ref { font-size: 10px; color: #6b7280; margin-left: 2px; }
+        .dist-meter.close .dist-ref { color: #4ade8088; }
+        .dist-input {
+            width: 48px;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid #3b82f6;
+            color: #fff;
+            font-size: 13px;
+            font-family: 'Courier New', monospace;
+            outline: none;
+            text-align: center;
+        }
+
         .showroom-hint {
             position: absolute;
             bottom: 20px;
@@ -1417,6 +1451,11 @@
         <button class="view-btn" id="centerBtn">Center</button>
         <button class="view-btn" id="saveImageBtn">Save Image</button>
         <button class="view-btn" id="recordBtn">Record</button>
+        <div class="dist-meter" id="distMeter" title="Distance to wall — click to set">
+            <span class="dist-icon">&#x1f4cf;</span>
+            <span id="distValue">--</span>
+            <span class="dist-ref" id="distRef"></span>
+        </div>
     </div>
 
     <div class="showroom-hint" id="showroomHint">Drag to rotate · Scroll to zoom · Middle/right-click to pan</div>
@@ -2086,6 +2125,69 @@ function init() {
 let sceneDirty = true;
 function markDirty() { sceneDirty = true; }
 
+/* ── Distance-to-wall meter & auto pixel-grid threshold ── */
+const GRID_DIST_THRESHOLD = 60;  // 5 ft in inches — grid lines only render within this range
+let _prevDistIn = -1;            // last displayed distance in inches (avoid DOM thrash)
+let _gridAutoVisible = false;    // tracks whether grid is currently auto-shown
+
+let _skipControlsUpdate = false;
+
+/* Set camera to a specific distance from the wall (in inches, matching panel X/Y scale).
+   Simulates a person viewing the wall at that distance. */
+function setDistanceToWall(inches) {
+    const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+    camera.position.copy(controls.target).addScaledVector(dir, inches);
+    camera.lookAt(controls.target);
+    _skipControlsUpdate = true;
+    _prevDistIn = -1;
+    markDirty();
+}
+
+function updateDistMeter() {
+    const camDist = camera.position.distanceTo(controls.target);  // inches (same scale as panel X/Y)
+    const roundedIn = camDist < 120 ? Math.round(camDist * 10) / 10 : Math.round(camDist);
+    if (roundedIn === _prevDistIn) return;  // no change — skip DOM write
+    _prevDistIn = roundedIn;
+    const el = document.getElementById('distValue');
+    const ref = document.getElementById('distRef');
+    const meter = document.getElementById('distMeter');
+    // Primary: inches (matches panel X/Y scale), secondary: feet
+    const ft = camDist / 12;
+    el.textContent = roundedIn + '"';
+    ref.textContent = '(' + (ft < 10 ? ft.toFixed(1) : Math.round(ft)) + "')";
+    // Highlight green when within grid threshold
+    meter.classList.toggle('close', camDist <= GRID_DIST_THRESHOLD);
+}
+
+function checkGridAutoVisibility() {
+    if (!state.showPixelGrid) {
+        if (_gridAutoVisible) { _removeAllGrids(); _gridAutoVisible = false; }
+        return;
+    }
+    const camDist = camera.position.distanceTo(controls.target);
+    const shouldShow = camDist <= GRID_DIST_THRESHOLD;
+    if (shouldShow === _gridAutoVisible) return;
+    _gridAutoVisible = shouldShow;
+    if (state.walls.length > 1) {
+        const saved = activeContextWallId;
+        for (const wall of state.walls) {
+            activateWallContext(wall.id);
+            if (shouldShow) buildPixelGrid(computeColumnLayout(), wallDims());
+            else _removeAllGrids();
+        }
+        activateWallContext(saved);
+    } else {
+        if (shouldShow) buildPixelGrid(computeColumnLayout(), wallDims());
+        else _removeAllGrids();
+    }
+}
+
+function _removeAllGrids() {
+    pixelGridMeshes.forEach(m => wallGroup.remove(m));
+    pixelGridMeshes = [];
+    markDirty();
+}
+
 function onResize() {
     const c = document.getElementById('showroom');
     if (!c.clientWidth || !c.clientHeight) return;
@@ -2102,13 +2204,17 @@ function animate() {
         for (const ctx of wallContextMap.values()) ctx.group.rotation.y += 0.004;
         sceneDirty = true;
     }
-    controls.update();
+    if (_skipControlsUpdate) _skipControlsUpdate = false;
+    else controls.update();
     if (isRecording) {
         if (recordOverlays.length > 0) updateRecordOverlays();
         sceneDirty = true; // always render during recording
     }
     if (!sceneDirty) return;
     sceneDirty = false;
+    // Update distance meter & auto-toggle pixel grid
+    updateDistMeter();
+    checkGridAutoVisibility();
     // Scale dimension labels with camera distance
     if (state.showDimensions && dimensionObjects.length > 0) {
         const camDist = camera.position.distanceTo(controls.target);
@@ -4044,16 +4150,36 @@ document.getElementById('accessoryToggle').addEventListener('change', e => {
 
 document.getElementById('pixelGridToggle').addEventListener('change', e => {
     state.showPixelGrid = e.target.checked;
-    if (state.walls.length > 1) {
-        const saved = activeContextWallId;
-        for (const wall of state.walls) {
-            activateWallContext(wall.id);
-            buildPixelGrid(computeColumnLayout(), wallDims());
-        }
-        activateWallContext(saved);
-    } else {
-        buildPixelGrid(computeColumnLayout(), wallDims());
+    _gridAutoVisible = false;   // reset so checkGridAutoVisibility re-evaluates
+    markDirty();
+});
+
+/* ── Distance meter click — toggle between display / input mode ── */
+document.getElementById('distMeter').addEventListener('click', () => {
+    const el = document.getElementById('distValue');
+    if (el.querySelector('input')) return;  // already editing
+    const curIn = parseFloat(_prevDistIn) || 120;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'dist-input';
+    input.value = curIn < 120 ? curIn.toFixed(0) : Math.round(curIn);
+    input.min = '12'; input.max = '2400'; input.step = '1';
+    input.placeholder = 'inches';
+    el.textContent = '';
+    el.appendChild(input);
+    input.focus();
+    input.select();
+    function commit() {
+        const inches = parseFloat(input.value);
+        if (inches && inches > 0) setDistanceToWall(inches);
+        el.textContent = '--';
+        _prevDistIn = -1;  // force refresh on next frame
     }
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { el.textContent = _prevDistIn + '"'; _prevDistIn = -1; }
+    });
 });
 
 
