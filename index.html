@@ -2033,7 +2033,7 @@ function init() {
     camera.position.set(0, 0, 300);
 
     // WebGL renderer
-    renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+    renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setClearColor(0x000000, 0);
     renderer.setSize(w, h);
@@ -2412,7 +2412,7 @@ function buildPixelGrid(layout, d) {
     if (!state.showPixelGrid) return;
 
     const zOff = -(PANEL_D_IN / 2 + 0.06);   // in front of all content layers
-    const bg = _pgBackground(0.20);
+    const bg = _pgBackground(0.10);
 
     for (let c = 0; c < d.cols; c++) {
         const col = layout[c];
