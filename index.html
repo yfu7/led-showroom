@@ -1433,23 +1433,25 @@ const PANEL_GAP_IN = 0.06;
 const DIMENSION_RENDER_ORDER = 999;
 const MAX_CONTENT_WINDOWS = 8;
 
-/* Mounting Base dimensions (from engineering drawing) */
-const BASE_W = 25.080;
-const BASE_H = 9.060;
-const BASE_D = 18.780;
+/* Mounting Base dimensions (from CAD: LED iPoster - Base) */
+const BASE_W = 25.080;          // back-edge width (widest)
+const BASE_FRONT_W = 9.060;     // front-edge width (narrowest)
+const BASE_D = 18.780;          // depth front-to-back
+const BASE_THICK = 0.250;       // plate thickness
+const BASE_NOTCH = 5.510;       // corner-notch size at back edge
 
-/* Back Support dimensions (from engineering drawing) */
-const SUPPORT_W = 2.000;
-const SUPPORT_THICK = 1.180;
-const SUPPORT_VERT_H = 19.900;
-const SUPPORT_FOOT_D = 6.700;
-const SUPPORT_ANGLE_RAD = 45 * Math.PI / 180;
+/* Back Support dimensions (from CAD: LED iPoster - LH Back Support) */
+const SUPPORT_W = 2.000;        // bracket width (left-right)
+const SUPPORT_THICK = 1.180;    // plate thickness
+const SUPPORT_TOTAL_H = 21.140; // overall height
+const SUPPORT_CHAMFER = 1.000;  // 45-deg chamfer at top
+const SUPPORT_FOOT_D = 6.700;   // foot depth
 
 /* ── State ── */
 const state = {
     /* Per-wall (mirrors active wall — context-switched) */
-    cols: 4,
-    rows: 3,
+    cols: 5,
+    rows: 5,
     corners: [],
     contentWindows: [],
     selectedWindowId: null,
@@ -1566,8 +1568,8 @@ function addWall() {
     const wall = {
         id,
         name: 'Wall ' + id,
-        cols: 4,
-        rows: 3,
+        cols: 5,
+        rows: 5,
         corners: [],
         contentWindows: [],
         selectedWindowId: null,
@@ -1883,10 +1885,45 @@ const dimLineMat = new THREE.LineBasicMaterial({ color: 0x00bbff, depthTest: fal
 
 /* Shared geometry (identical for every panel / accessory piece) */
 const panelGeom = new THREE.BoxGeometry(PANEL_W_IN, PANEL_H_IN, PANEL_D_IN);
-const baseGeom = new THREE.BoxGeometry(BASE_W, BASE_H, BASE_D);
-const vertBarGeom = new THREE.BoxGeometry(SUPPORT_W, SUPPORT_VERT_H, SUPPORT_THICK);
-const footGeom = new THREE.BoxGeometry(SUPPORT_W, SUPPORT_THICK, SUPPORT_FOOT_D);
-const diagGeom = new THREE.BoxGeometry(SUPPORT_W, SUPPORT_FOOT_D * Math.SQRT2, SUPPORT_THICK);
+/* Base plate — concave trapezoid: wide front (25.080") steps down to narrow back (9.060") */
+const baseShape = new THREE.Shape();
+const _bw2 = BASE_W / 2, _bfw2 = BASE_FRONT_W / 2, _bd2 = BASE_D / 2;
+const _stepY = _bd2 - BASE_NOTCH;                   // depth where width steps in
+baseShape.moveTo(-_bfw2, -_bd2);                     // back-left (narrow)
+baseShape.lineTo( _bfw2, -_bd2);                     // back-right (narrow)
+baseShape.lineTo( _bfw2,  _stepY);                   // up right side at narrow width
+baseShape.lineTo( _bw2,   _stepY);                   // step out to full width (concave corner)
+baseShape.lineTo( _bw2,   _bd2);                     // front-right (full width)
+baseShape.lineTo(-_bw2,   _bd2);                     // front-left (full width)
+baseShape.lineTo(-_bw2,   _stepY);                   // down left side at full width
+baseShape.lineTo(-_bfw2,  _stepY);                   // step in to narrow width (concave corner)
+baseShape.closePath();
+const baseGeom = new THREE.ExtrudeGeometry(baseShape, { depth: BASE_THICK, bevelEnabled: false });
+baseGeom.rotateX(-Math.PI / 2); // lay flat: shape XY → world XZ, extrusion → -Y
+baseGeom.rotateY(Math.PI);      // flip: wide end forward, narrow end toward wall
+
+/* Back support bracket — triangular plate with cutouts (from CAD: LH Back Support) */
+const supportProfile = new THREE.Shape();
+supportProfile.moveTo(0, 0);                                        // ground, at panel back
+supportProfile.lineTo(0, SUPPORT_TOTAL_H - SUPPORT_CHAMFER);       // up vertical to chamfer start
+supportProfile.lineTo(SUPPORT_CHAMFER, SUPPORT_TOTAL_H);            // 45-deg chamfer peak
+supportProfile.lineTo(SUPPORT_FOOT_D, 0);                           // diagonal to foot end
+supportProfile.closePath();
+
+// Weight-relief cutouts matching CAD side profile (3 oval openings)
+// Diagonal line: from (1.0, 21.14) to (6.7, 0), inner offset ~1.2in
+function _addCutout(cx, cy, rx, ry) {
+    const h = new THREE.Path();
+    h.absellipse(cx, cy, rx, ry, 0, Math.PI * 2, false);
+    supportProfile.holes.push(h);
+}
+_addCutout(2.8,  4.0,  1.2, 1.8);  // bottom — largest opening
+_addCutout(2.0,  9.5,  0.8, 2.2);  // middle
+_addCutout(1.4, 14.5,  0.35, 1.8); // upper — narrowest
+
+const supportGeom = new THREE.ExtrudeGeometry(supportProfile, { depth: SUPPORT_W, bevelEnabled: false });
+supportGeom.translate(0, 0, -SUPPORT_W / 2);  // center width
+supportGeom.rotateY(Math.PI / 2);             // profile X→world -Z (foot behind panel), extrusion→world X (width)
 
 /* Build custom panel geometry with 45-degree miter cuts on corner-adjacent edges.
    leftCut / rightCut: { front: number, back: number } or null.
@@ -2141,17 +2178,14 @@ function buildAccessories() {
     const d = wallDims();
     const layout = computeColumnLayout();
     const panelBottom = -d.totalH / 2;
-    const groundY = panelBottom - BASE_H;
-    const inset = 2.5;
-
+    const groundY = panelBottom - BASE_THICK;
     for (let c = 0; c < d.cols; c++) {
         const col = layout[c];
 
         // Each accessory is placed in the column's local coordinate frame,
         // then rotated to match the column's orientation.
-        function addLocal(geom, lx, ly, lz, rx) {
+        function addLocal(geom, lx, ly, lz) {
             const m = new THREE.Mesh(geom, metalMat);
-            // Rotate local offset by column's Y rotation
             const cos = Math.cos(col.rotY), sin = Math.sin(col.rotY);
             m.position.set(
                 col.x + lx * cos - lz * sin,
@@ -2159,23 +2193,21 @@ function buildAccessories() {
                 col.z - lx * sin - lz * cos
             );
             m.rotation.y = col.rotY;
-            if (rx) m.rotation.x = rx;
             wallGroup.add(m);
             accessoryMeshes.push(m);
         }
 
-        addLocal(baseGeom, 0, panelBottom - BASE_H / 2, -(PANEL_D_IN / 2 - BASE_D / 2));
+        // Base plate — centered on panel depth (panel sits in middle of 18.780" base)
+        addLocal(baseGeom, 0, panelBottom, 0);
 
+        // Support brackets — flush with panel edges
         const offsets = [
-            -PANEL_W_IN / 2 + SUPPORT_W / 2 + inset,
-             PANEL_W_IN / 2 - SUPPORT_W / 2 - inset
+            -PANEL_W_IN / 2 + SUPPORT_W / 2,
+             PANEL_W_IN / 2 - SUPPORT_W / 2
         ];
-        const vBackZ = -PANEL_D_IN / 2 - SUPPORT_THICK;
-
         for (const lx of offsets) {
-            addLocal(vertBarGeom, lx, groundY + SUPPORT_VERT_H / 2, PANEL_D_IN / 2 + SUPPORT_THICK / 2);
-            addLocal(footGeom, lx, groundY + SUPPORT_THICK / 2, -vBackZ + SUPPORT_FOOT_D / 2);
-            addLocal(diagGeom, lx, groundY + SUPPORT_FOOT_D / 2, -vBackZ + SUPPORT_FOOT_D / 2, SUPPORT_ANGLE_RAD);
+            // Bracket origin at ground level, front face at panel back
+            addLocal(supportGeom, lx, groundY, PANEL_D_IN / 2);
         }
     }
     setAccessoryVisibility(state.showAccessories);
