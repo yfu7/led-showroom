@@ -2126,7 +2126,7 @@ let sceneDirty = true;
 function markDirty() { sceneDirty = true; }
 
 /* ── Distance-to-wall meter & auto pixel-grid threshold ── */
-const GRID_DIST_THRESHOLD = 60;  // 5 ft in inches — grid lines only render within this range
+const GRID_DIST_THRESHOLD = 108; // 9 ft in inches — grid lines only render within this range
 let _prevDistIn = -1;            // last displayed distance in inches (avoid DOM thrash)
 let _gridAutoVisible = false;    // tracks whether grid is currently auto-shown
 
