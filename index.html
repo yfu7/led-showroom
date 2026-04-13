@@ -1885,18 +1885,26 @@ const dimLineMat = new THREE.LineBasicMaterial({ color: 0x00bbff, depthTest: fal
 
 /* Shared geometry (identical for every panel / accessory piece) */
 const panelGeom = new THREE.BoxGeometry(PANEL_W_IN, PANEL_H_IN, PANEL_D_IN);
-/* Base plate — concave trapezoid: wide front (25.080") steps down to narrow back (9.060") */
+/* Base plate — dodecagon: rectangle with rectangular notches at all 4 corners
+   Front notches: 5.510" per side → front edge = 14.060"
+   Back notches: 8.010" per side → back edge = 9.060"
+   Full width (middle): 25.080"  */
 const baseShape = new THREE.Shape();
 const _bw2 = BASE_W / 2, _bfw2 = BASE_FRONT_W / 2, _bd2 = BASE_D / 2;
-const _stepY = _bd2 - BASE_NOTCH;                   // depth where width steps in
-baseShape.moveTo(-_bfw2, -_bd2);                     // back-left (narrow)
-baseShape.lineTo( _bfw2, -_bd2);                     // back-right (narrow)
-baseShape.lineTo( _bfw2,  _stepY);                   // up right side at narrow width
-baseShape.lineTo( _bw2,   _stepY);                   // step out to full width (concave corner)
-baseShape.lineTo( _bw2,   _bd2);                     // front-right (full width)
-baseShape.lineTo(-_bw2,   _bd2);                     // front-left (full width)
-baseShape.lineTo(-_bw2,   _stepY);                   // down left side at full width
-baseShape.lineTo(-_bfw2,  _stepY);                   // step in to narrow width (concave corner)
+const _fn = BASE_NOTCH;                              // notch depth (front & back)
+const _ifw2 = _bw2 - _fn;                           // inner front half-width (7.030)
+baseShape.moveTo(-_ifw2,  _bd2);                     // 1  front-left inner
+baseShape.lineTo( _ifw2,  _bd2);                     // 2  front-right inner
+baseShape.lineTo( _ifw2,  _bd2 - _fn);              // 3  front-right notch corner
+baseShape.lineTo( _bw2,   _bd2 - _fn);              // 4  right full-width top
+baseShape.lineTo( _bw2,  -_bd2 + _fn);              // 5  right full-width bottom
+baseShape.lineTo( _bfw2, -_bd2 + _fn);              // 6  back-right notch corner
+baseShape.lineTo( _bfw2, -_bd2);                     // 7  back-right
+baseShape.lineTo(-_bfw2, -_bd2);                     // 8  back-left
+baseShape.lineTo(-_bfw2, -_bd2 + _fn);              // 9  back-left notch corner
+baseShape.lineTo(-_bw2,  -_bd2 + _fn);              // 10 left full-width bottom
+baseShape.lineTo(-_bw2,   _bd2 - _fn);              // 11 left full-width top
+baseShape.lineTo(-_ifw2,  _bd2 - _fn);              // 12 front-left notch corner
 baseShape.closePath();
 const baseGeom = new THREE.ExtrudeGeometry(baseShape, { depth: BASE_THICK, bevelEnabled: false });
 baseGeom.rotateX(-Math.PI / 2); // lay flat: shape XY → world XZ, extrusion → -Y
