@@ -1370,11 +1370,6 @@
                 <span class="slider"></span>
             </label>
         </div>
-        <div class="toggle-row" id="pixelGridSliderRow" style="display:none">
-            <label style="white-space:nowrap">Line <span id="pixelGridValue">0.20</span>mm</label>
-            <input type="range" id="pixelGridSlider" min="0.01" max="1" step="0.01" value="0.20"
-                   style="flex:1;margin-left:8px;accent-color:#4af">
-        </div>
         <div class="toggle-row">
             <label>Dimensions</label>
             <label class="toggle">
@@ -1480,7 +1475,6 @@ const state = {
     contentDragMode: false,
     showAccessories: false,
     showPixelGrid: false,
-    pixelGridLineWidth: 0.20,  // mm
     showDimensions: false,
 };
 
@@ -2418,7 +2412,7 @@ function buildPixelGrid(layout, d) {
     if (!state.showPixelGrid) return;
 
     const zOff = -(PANEL_D_IN / 2 + 0.06);   // in front of all content layers
-    const bg = _pgBackground(state.pixelGridLineWidth);
+    const bg = _pgBackground(0.20);
 
     for (let c = 0; c < d.cols; c++) {
         const col = layout[c];
@@ -2451,12 +2445,6 @@ function buildPixelGrid(layout, d) {
     markDirty();
 }
 
-function updatePixelGridLineWidth(lwMm) {
-    state.pixelGridLineWidth = lwMm;
-    const bg = _pgBackground(lwMm);
-    pixelGridMeshes.forEach(obj => { obj.element.style.backgroundImage = bg; });
-    markDirty();
-}
 
 /* ── Dimension annotations (engineering-drawing style) ── */
 function createDimSprite(text) {
@@ -4056,7 +4044,6 @@ document.getElementById('accessoryToggle').addEventListener('change', e => {
 
 document.getElementById('pixelGridToggle').addEventListener('change', e => {
     state.showPixelGrid = e.target.checked;
-    document.getElementById('pixelGridSliderRow').style.display = e.target.checked ? '' : 'none';
     if (state.walls.length > 1) {
         const saved = activeContextWallId;
         for (const wall of state.walls) {
@@ -4069,20 +4056,6 @@ document.getElementById('pixelGridToggle').addEventListener('change', e => {
     }
 });
 
-document.getElementById('pixelGridSlider').addEventListener('input', e => {
-    const val = parseFloat(e.target.value);
-    document.getElementById('pixelGridValue').textContent = val.toFixed(2);
-    if (state.walls.length > 1) {
-        const saved = activeContextWallId;
-        for (const wall of state.walls) {
-            activateWallContext(wall.id);
-            updatePixelGridLineWidth(val);
-        }
-        activateWallContext(saved);
-    } else {
-        updatePixelGridLineWidth(val);
-    }
-});
 
 document.getElementById('dimensionToggle').addEventListener('change', e => {
     state.showDimensions = e.target.checked;
@@ -4689,9 +4662,6 @@ function syncUIFromState() {
     document.getElementById('doubleSidedToggle').checked = state.doubleSided;
     document.getElementById('accessoryToggle').checked = state.showAccessories;
     document.getElementById('pixelGridToggle').checked = state.showPixelGrid;
-    document.getElementById('pixelGridSliderRow').style.display = state.showPixelGrid ? '' : 'none';
-    document.getElementById('pixelGridSlider').value = state.pixelGridLineWidth;
-    document.getElementById('pixelGridValue').textContent = state.pixelGridLineWidth.toFixed(2);
     document.getElementById('dimensionToggle').checked = state.showDimensions;
     document.getElementById('spanToggle').checked = state.spanContent;
     updateSpanUI();
