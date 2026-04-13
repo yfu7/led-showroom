@@ -1364,6 +1364,18 @@
             </label>
         </div>
         <div class="toggle-row">
+            <label>Pixel Grid</label>
+            <label class="toggle">
+                <input type="checkbox" id="pixelGridToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+        <div class="toggle-row" id="pixelGridSliderRow" style="display:none">
+            <label style="white-space:nowrap">Line <span id="pixelGridValue">0.20</span>mm</label>
+            <input type="range" id="pixelGridSlider" min="0.01" max="1" step="0.01" value="0.20"
+                   style="flex:1;margin-left:8px;accent-color:#4af">
+        </div>
+        <div class="toggle-row">
             <label>Dimensions</label>
             <label class="toggle">
                 <input type="checkbox" id="dimensionToggle">
@@ -1467,6 +1479,8 @@ const state = {
     moveMode: false,
     contentDragMode: false,
     showAccessories: false,
+    showPixelGrid: false,
+    pixelGridLineWidth: 0.20,  // mm
     showDimensions: false,
 };
 
@@ -1478,7 +1492,7 @@ const WALL_GAP_IN = 40;
 /* ── Per-wall render context ── */
 let wallContextMap = new Map();
 /* Each entry: { group, panelMeshes, windowRenderData, accessoryMeshes,
-   cornerFillMeshes, bezelLineMeshes, customPanelGeoms, dimensionObjects,
+   cornerFillMeshes, bezelLineMeshes, pixelGridMeshes, customPanelGeoms, dimensionObjects,
    cachedDims, cachedLayout, cachedSegments } */
 let activeContextWallId = null;
 
@@ -1491,6 +1505,7 @@ function saveWallContext() {
         ctx.accessoryMeshes = accessoryMeshes;
         ctx.cornerFillMeshes = cornerFillMeshes;
         ctx.bezelLineMeshes = bezelLineMeshes;
+        ctx.pixelGridMeshes = pixelGridMeshes;
         ctx.customPanelGeoms = customPanelGeoms;
         ctx.dimensionObjects = dimensionObjects;
         ctx.cachedDims = _cachedDims;
@@ -1518,6 +1533,7 @@ function activateWallContext(wallId) {
         accessoryMeshes = ctx.accessoryMeshes;
         cornerFillMeshes = ctx.cornerFillMeshes;
         bezelLineMeshes = ctx.bezelLineMeshes;
+        pixelGridMeshes = ctx.pixelGridMeshes;
         customPanelGeoms = ctx.customPanelGeoms;
         dimensionObjects = ctx.dimensionObjects;
         _cachedDims = ctx.cachedDims;
@@ -1554,6 +1570,7 @@ function createWallRenderContext() {
         accessoryMeshes: [],
         cornerFillMeshes: [],
         bezelLineMeshes: [],
+        pixelGridMeshes: [],
         customPanelGeoms: [],
         dimensionObjects: [],
         cachedDims: null,
@@ -1596,6 +1613,7 @@ function removeWall(wallId) {
     accessoryMeshes.forEach(m => wallGroup.remove(m));
     cornerFillMeshes.forEach(m => { if (m.geometry) m.geometry.dispose(); wallGroup.remove(m); });
     bezelLineMeshes.forEach(m => { if (m.geometry) m.geometry.dispose(); wallGroup.remove(m); });
+    pixelGridMeshes.forEach(m => wallGroup.remove(m));
     dimensionObjects.forEach(o => wallGroup.remove(o));
     scene.remove(wallGroup);
     wallContextMap.delete(wallId);
@@ -1883,6 +1901,29 @@ const cornerFillMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b8, metalnes
 const bezelLineMat = new THREE.LineBasicMaterial({ color: 0x555560 });
 const dimLineMat = new THREE.LineBasicMaterial({ color: 0x00bbff, depthTest: false });
 
+/* Pixel-grid overlay — CSS3DObject with repeating-linear-gradient
+   Uses 10× CSS-pixel resolution for sub-mm line precision.
+   640×480mm panel, 344×258 px, pitch ≈ 1.86mm. */
+const _pgScale = 10;                               // CSS pixels per LED pixel
+const _pgPitchMm = 640 / PANEL_PX_W;               // 1.8605mm
+const _pgPitchPx = _pgScale;                       // 10 CSS px per pitch
+const _pgDivW = PANEL_PX_W * _pgScale;             // 3440 CSS px
+const _pgDivH = PANEL_PX_H * _pgScale;             // 2580 CSS px
+const _pgClipW = (PANEL_PX_W - 1) * _pgScale;     // 3430 — exactly 343 gradient periods
+const _pgClipH = (PANEL_PX_H - 1) * _pgScale;     // 2570 — exactly 257 gradient periods
+const _pgOffX  = (_pgDivW - _pgClipW) / 2;        // 5px centering offset
+const _pgOffY  = (_pgDivH - _pgClipH) / 2;        // 5px centering offset
+const _pgScaleX = IN_PER_PX_W / _pgScale;
+const _pgScaleY = IN_PER_PX_H / _pgScale;
+
+function _pgBackground(lineWidthMm) {
+    const lw = lineWidthMm / _pgPitchMm * _pgPitchPx;   // line width in CSS px
+    const gap = _pgPitchPx - lw;                          // transparent pixel area
+    // Line sits at the END of each period → between adjacent pixels (343 V × 257 H)
+    return 'repeating-linear-gradient(to right,transparent 0,transparent ' + gap + 'px,#000 ' + gap + 'px,#000 ' + _pgPitchPx + 'px),' +
+           'repeating-linear-gradient(to bottom,transparent 0,transparent ' + gap + 'px,#000 ' + gap + 'px,#000 ' + _pgPitchPx + 'px)';
+}
+
 /* Shared geometry (identical for every panel / accessory piece) */
 const panelGeom = new THREE.BoxGeometry(PANEL_W_IN, PANEL_H_IN, PANEL_D_IN);
 /* Base plate — dodecagon: rectangle with rectangular notches at all 4 corners
@@ -1981,6 +2022,7 @@ let windowRenderData = new Map();
 let accessoryMeshes = [];
 let cornerFillMeshes = [];
 let bezelLineMeshes = [];
+let pixelGridMeshes = [];
 let customPanelGeoms = [];
 let dimensionObjects = [];   // Lines + CSS3D labels for dimension annotations
 let venueObjectUrl = null;
@@ -2164,6 +2206,7 @@ function buildWall() {
     }
 
     buildBezelLines(layout, d, miterCuts);
+    buildPixelGrid(layout, d);
     updateSidebarInfo();
     applyAllWindowRects();
     fitCameraToWall();
@@ -2366,6 +2409,53 @@ function buildBezelLines(layout, d, miterCuts) {
         wallGroup.add(lines);
         bezelLineMeshes.push(lines);
     }
+}
+
+/* ── Pixel-grid overlay (CSS3DObject — renders above CSS3D content) ── */
+function buildPixelGrid(layout, d) {
+    pixelGridMeshes.forEach(m => wallGroup.remove(m));
+    pixelGridMeshes = [];
+    if (!state.showPixelGrid) return;
+
+    const zOff = -(PANEL_D_IN / 2 + 0.06);   // in front of all content layers
+    const bg = _pgBackground(state.pixelGridLineWidth);
+
+    for (let c = 0; c < d.cols; c++) {
+        const col = layout[c];
+        const cos = Math.cos(col.rotY), sin = Math.sin(col.rotY);
+
+        for (let r = 0; r < d.rows; r++) {
+            const y = d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap);
+
+            const div = document.createElement('div');
+            div.style.width = _pgDivW + 'px';
+            div.style.height = _pgDivH + 'px';
+            div.style.backgroundImage = bg;
+            div.style.backgroundSize = _pgClipW + 'px 100%, 100% ' + _pgClipH + 'px';
+            div.style.backgroundRepeat = 'no-repeat';
+            div.style.backgroundPosition = _pgOffX + 'px ' + _pgOffY + 'px';
+            div.style.pointerEvents = 'none';
+
+            const obj = new CSS3DObject(div);
+            obj.scale.set(_pgScaleX, _pgScaleY, 1);
+            obj.position.set(
+                col.x - zOff * sin,
+                y,
+                col.z - zOff * cos
+            );
+            obj.rotation.y = col.rotY;
+            wallGroup.add(obj);
+            pixelGridMeshes.push(obj);
+        }
+    }
+    markDirty();
+}
+
+function updatePixelGridLineWidth(lwMm) {
+    state.pixelGridLineWidth = lwMm;
+    const bg = _pgBackground(lwMm);
+    pixelGridMeshes.forEach(obj => { obj.element.style.backgroundImage = bg; });
+    markDirty();
 }
 
 /* ── Dimension annotations (engineering-drawing style) ── */
@@ -3964,6 +4054,36 @@ document.getElementById('accessoryToggle').addEventListener('change', e => {
     }
 });
 
+document.getElementById('pixelGridToggle').addEventListener('change', e => {
+    state.showPixelGrid = e.target.checked;
+    document.getElementById('pixelGridSliderRow').style.display = e.target.checked ? '' : 'none';
+    if (state.walls.length > 1) {
+        const saved = activeContextWallId;
+        for (const wall of state.walls) {
+            activateWallContext(wall.id);
+            buildPixelGrid(computeColumnLayout(), wallDims());
+        }
+        activateWallContext(saved);
+    } else {
+        buildPixelGrid(computeColumnLayout(), wallDims());
+    }
+});
+
+document.getElementById('pixelGridSlider').addEventListener('input', e => {
+    const val = parseFloat(e.target.value);
+    document.getElementById('pixelGridValue').textContent = val.toFixed(2);
+    if (state.walls.length > 1) {
+        const saved = activeContextWallId;
+        for (const wall of state.walls) {
+            activateWallContext(wall.id);
+            updatePixelGridLineWidth(val);
+        }
+        activateWallContext(saved);
+    } else {
+        updatePixelGridLineWidth(val);
+    }
+});
+
 document.getElementById('dimensionToggle').addEventListener('change', e => {
     state.showDimensions = e.target.checked;
     // Build dimensions for ALL walls, not just the active one
@@ -4568,6 +4688,10 @@ function syncUIFromState() {
     document.getElementById('rotateToggle').checked = state.autoRotate;
     document.getElementById('doubleSidedToggle').checked = state.doubleSided;
     document.getElementById('accessoryToggle').checked = state.showAccessories;
+    document.getElementById('pixelGridToggle').checked = state.showPixelGrid;
+    document.getElementById('pixelGridSliderRow').style.display = state.showPixelGrid ? '' : 'none';
+    document.getElementById('pixelGridSlider').value = state.pixelGridLineWidth;
+    document.getElementById('pixelGridValue').textContent = state.pixelGridLineWidth.toFixed(2);
     document.getElementById('dimensionToggle').checked = state.showDimensions;
     document.getElementById('spanToggle').checked = state.spanContent;
     updateSpanUI();
