@@ -2532,6 +2532,9 @@ function buildPixelGrid(layout, d) {
             div.style.backgroundSize = _pgScale + 'px ' + _pgScale + 'px';
             div.style.imageRendering = 'pixelated';
             div.style.pointerEvents = 'none';
+            div.style.position = 'relative';
+            div.style.zIndex = '9999';          // force above iframes/video in CSS3D
+            div.style.willChange = 'transform'; // own compositing layer
 
             const obj = new CSS3DObject(div);
             obj.scale.set(_pgScaleX, _pgScaleY, 1);
