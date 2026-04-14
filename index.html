@@ -2008,7 +2008,7 @@ const dimLineMat = new THREE.LineBasicMaterial({ color: 0x00bbff, depthTest: fal
    Each panel draws 344 vertical + 258 horizontal lines (matching 344×258 LED grid).
    Both line sets originate at (0,0) in panel-local coords (top-left corner),
    spaced at pitch = PANEL_W_IN/PANEL_PX_W ≈ 0.0730" (1.855mm).
-   LineMaterial with worldUnits:true draws at physical 0.1mm thickness (≈0.00394").
+   LineMaterial with worldUnits:true draws at physical 0.15mm thickness (≈0.00591").
    Rendered on dedicated gridRenderer (layer 1) to avoid CSS3D perspective distortion. */
 const _pgLineGeom = (() => {
     const pitchX = PANEL_W_IN / PANEL_PX_W;
@@ -2033,7 +2033,7 @@ const _pgLineGeom = (() => {
 const _pgLineMat = new LineMaterial({
     color: 0x000000,
     worldUnits: true,
-    linewidth: 0.1 / 25.4,      // 0.1mm expressed in inches (scene units)
+    linewidth: 0.15 / 25.4,     // 0.15mm expressed in inches (scene units)
     depthTest: false,
     alphaToCoverage: true,       // smooth sub-pixel edges via MSAA
     transparent: true
