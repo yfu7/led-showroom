@@ -2001,35 +2001,32 @@ const cornerFillMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b8, metalnes
 const bezelLineMat = new THREE.LineBasicMaterial({ color: 0x555560 });
 const dimLineMat = new THREE.LineBasicMaterial({ color: 0x00bbff, depthTest: false });
 
-/* Pixel-grid overlay — CSS3DObject with pre-rendered bitmap tile.
-   Uses a small canvas tile (one pitch cell) repeated via CSS, with
-   image-rendering: pixelated for crisp nearest-neighbor scaling.
-   Eliminates moiré / shimmer from CSS gradient rasterization.
-   640×480mm panel, 344×258 px, pitch ≈ 1.86mm. */
-const _pgScale = 10;                               // texels per LED pixel in grid tile
-
-/* WebGL grid texture — rendered on dedicated overlay (gridRenderer layer 1).
-   NearestFilter keeps grid lines crisp within 12"–108" viewing range. */
-const _pgWebGLTex = (() => {
-    const c = document.createElement('canvas');
-    c.width = _pgScale; c.height = _pgScale;
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#000';
-    ctx.fillRect(_pgScale - 1, 0, 1, _pgScale);
-    ctx.fillRect(0, _pgScale - 1, _pgScale, 1);
-    const tex = new THREE.CanvasTexture(c);
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(PANEL_PX_W, PANEL_PX_H);       // 344 × 258 tiles
-    tex.minFilter = THREE.NearestFilter;             // crisp grid lines at all distances (no mipmap fade)
-    tex.magFilter = THREE.NearestFilter;            // crisp when close
-    tex.generateMipmaps = false;                    // not needed with NearestFilter
-    return tex;
+/* Pixel-grid overlay — physically drawn geometric lines via THREE.LineSegments.
+   Each panel draws 344 vertical + 258 horizontal lines (matching 344×258 LED grid).
+   Both line sets originate at (0,0) in panel-local coords (top-left corner),
+   spaced at pitch = PANEL_W_IN/PANEL_PX_W ≈ 0.0730" (1.855mm).
+   Rendered on dedicated gridRenderer (layer 1) to avoid CSS3D perspective distortion. */
+const _pgLineGeom = (() => {
+    const pitchX = PANEL_W_IN / PANEL_PX_W;
+    const pitchY = PANEL_H_IN / PANEL_PX_H;
+    const hw = PANEL_W_IN / 2;
+    const hh = PANEL_H_IN / 2;
+    const pts = [];
+    // 344 vertical lines — first at top-left corner (x=-hw), spaced by pitchX, full panel height
+    for (let i = 0; i < PANEL_PX_W; i++) {
+        const x = -hw + i * pitchX;
+        pts.push(x, hh, 0, x, -hh, 0);
+    }
+    // 258 horizontal lines — first at top-left corner (y=+hh), spaced by pitchY, full panel width
+    for (let j = 0; j < PANEL_PX_H; j++) {
+        const y = hh - j * pitchY;
+        pts.push(-hw, y, 0, hw, y, 0);
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    return geom;
 })();
-const _pgWebGLMat = new THREE.MeshBasicMaterial({
-    map: _pgWebGLTex, transparent: true, depthTest: false, side: THREE.DoubleSide
-});
-const _pgPlaneGeom = new THREE.PlaneGeometry(PANEL_W_IN, PANEL_H_IN);
+const _pgLineMat = new THREE.LineBasicMaterial({ color: 0x000000, depthTest: false });
 
 /* Shared geometry (identical for every panel / accessory piece) */
 const panelGeom = new THREE.BoxGeometry(PANEL_W_IN, PANEL_H_IN, PANEL_D_IN);
@@ -2604,7 +2601,7 @@ function buildBezelLines(layout, d, miterCuts) {
     }
 }
 
-/* ── Pixel-grid overlay (WebGL mesh on layer 1 — renders on dedicated grid overlay) ── */
+/* ── Pixel-grid overlay (WebGL LineSegments on layer 1 — renders on dedicated grid overlay) ── */
 function buildPixelGrid(layout, d) {
     pixelGridMeshes.forEach(m => wallGroup.remove(m));
     pixelGridMeshes = [];
@@ -2619,21 +2616,20 @@ function buildPixelGrid(layout, d) {
         for (let r = 0; r < d.rows; r++) {
             const y = d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap);
 
-            /* WebGL mesh — rendered on dedicated grid overlay (layer 1).
-               GPU mipmapping + anisotropic filtering = clean grid lines at any
-               distance/angle with no CSS3D perspective distortion.
+            /* Geometric lines — 344 vertical + 258 horizontal, rendered on gridRenderer (layer 1).
+               No texture / mipmap filtering — perfectly crisp at any distance or angle.
                Also captured by Save Image & Recording (renderOrder 1000 > content 999). */
-            const mesh = new THREE.Mesh(_pgPlaneGeom, _pgWebGLMat);
-            mesh.layers.set(1);         // grid layer — rendered only on gridRenderer
-            mesh.renderOrder = 1000;    // above content overlays (999) during capture
-            mesh.position.set(
+            const lines = new THREE.LineSegments(_pgLineGeom, _pgLineMat);
+            lines.layers.set(1);         // grid layer — rendered only on gridRenderer
+            lines.renderOrder = 1000;    // above content overlays (999) during capture
+            lines.position.set(
                 col.x - zOff * sin,
                 y,
                 col.z - zOff * cos
             );
-            mesh.rotation.y = col.rotY;
-            wallGroup.add(mesh);
-            pixelGridMeshes.push(mesh);
+            lines.rotation.y = col.rotY;
+            wallGroup.add(lines);
+            pixelGridMeshes.push(lines);
         }
     }
     markDirty();
