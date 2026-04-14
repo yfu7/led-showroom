@@ -1531,6 +1531,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 
 /* ── Constants ── */
@@ -2001,10 +2004,11 @@ const cornerFillMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b8, metalnes
 const bezelLineMat = new THREE.LineBasicMaterial({ color: 0x555560 });
 const dimLineMat = new THREE.LineBasicMaterial({ color: 0x00bbff, depthTest: false });
 
-/* Pixel-grid overlay — physically drawn geometric lines via THREE.LineSegments.
+/* Pixel-grid overlay — physically drawn geometric lines via LineSegments2 (fat lines).
    Each panel draws 344 vertical + 258 horizontal lines (matching 344×258 LED grid).
    Both line sets originate at (0,0) in panel-local coords (top-left corner),
    spaced at pitch = PANEL_W_IN/PANEL_PX_W ≈ 0.0730" (1.855mm).
+   LineMaterial with worldUnits:true draws at physical 0.1mm thickness (≈0.00394").
    Rendered on dedicated gridRenderer (layer 1) to avoid CSS3D perspective distortion. */
 const _pgLineGeom = (() => {
     const pitchX = PANEL_W_IN / PANEL_PX_W;
@@ -2022,11 +2026,19 @@ const _pgLineGeom = (() => {
         const y = hh - j * pitchY;
         pts.push(-hw, y, 0, hw, y, 0);
     }
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    const geom = new LineSegmentsGeometry();
+    geom.setPositions(pts);
     return geom;
 })();
-const _pgLineMat = new THREE.LineBasicMaterial({ color: 0x000000, depthTest: false });
+const _pgLineMat = new LineMaterial({
+    color: 0x000000,
+    worldUnits: true,
+    linewidth: 0.1 / 25.4,      // 0.1mm expressed in inches (scene units)
+    depthTest: false,
+    alphaToCoverage: true,       // smooth sub-pixel edges via MSAA
+    transparent: true
+});
+_pgLineMat.resolution.set(window.innerWidth, window.innerHeight);
 
 /* Shared geometry (identical for every panel / accessory piece) */
 const panelGeom = new THREE.BoxGeometry(PANEL_W_IN, PANEL_H_IN, PANEL_D_IN);
@@ -2275,6 +2287,7 @@ function onResize() {
     renderer.setSize(c.clientWidth, c.clientHeight);
     cssRenderer.setSize(c.clientWidth, c.clientHeight);
     gridRenderer.setSize(c.clientWidth, c.clientHeight);
+    _pgLineMat.resolution.set(c.clientWidth, c.clientHeight);
     markDirty();
 }
 
@@ -2617,9 +2630,10 @@ function buildPixelGrid(layout, d) {
             const y = d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap);
 
             /* Geometric lines — 344 vertical + 258 horizontal, rendered on gridRenderer (layer 1).
-               No texture / mipmap filtering — perfectly crisp at any distance or angle.
+               LineSegments2 fat lines with 0.1mm world-unit thickness (physical pixel pitch boundary).
                Also captured by Save Image & Recording (renderOrder 1000 > content 999). */
-            const lines = new THREE.LineSegments(_pgLineGeom, _pgLineMat);
+            const lines = new LineSegments2(_pgLineGeom, _pgLineMat);
+            lines.computeLineDistances();
             lines.layers.set(1);         // grid layer — rendered only on gridRenderer
             lines.renderOrder = 1000;    // above content overlays (999) during capture
             lines.position.set(
