@@ -519,6 +519,55 @@
         .toggle input:checked + .slider { background: #3b82f6; }
         .toggle input:checked + .slider::before { transform: translateX(20px); }
 
+        /* Brightness slider row */
+        .brightness-row {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 8px 0;
+        }
+        .brightness-row .brightness-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .brightness-row label { font-size: 14px; color: #ccc; }
+        .brightness-row .brightness-val {
+            font-size: 12px;
+            color: #88ccff;
+            font-family: 'Courier New', monospace;
+            min-width: 90px;
+            text-align: right;
+        }
+        .brightness-row input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: linear-gradient(to right, #1a1a2e, #3b82f6);
+            outline: none;
+            cursor: pointer;
+        }
+        .brightness-row input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #fff;
+            border: 2px solid #3b82f6;
+            cursor: pointer;
+        }
+        .brightness-row input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #fff;
+            border: 2px solid #3b82f6;
+            cursor: pointer;
+        }
+
         /* ── Showroom (3D) ── */
         .showroom {
             flex: 1;
@@ -537,6 +586,7 @@
 
         .webgl-container,
         .css3d-container,
+        .grid-overlay,
         .controls-overlay {
             position: absolute;
             inset: 0;
@@ -545,6 +595,14 @@
         .webgl-container { z-index: 1; }
 
         .css3d-container {
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        /* Grid overlay: transparent WebGL canvas above CSS3D content.
+           Uses dedicated renderer for distortion-free grid lines via
+           GPU mipmapping + anisotropic filtering (no CSS3D transform artifacts). */
+        .grid-overlay {
             z-index: 2;
             pointer-events: none;
         }
@@ -1411,6 +1469,13 @@
                 <span class="slider"></span>
             </label>
         </div>
+        <div class="brightness-row">
+            <div class="brightness-header">
+                <label>Brightness</label>
+                <span class="brightness-val" id="brightnessVal">100% · 1000 nits</span>
+            </div>
+            <input type="range" id="brightnessSlider" min="0" max="100" value="100" step="1">
+        </div>
     </div>
 
     <!-- Presets -->
@@ -1428,6 +1493,7 @@
     <div class="venue-bg" id="venueBg"></div>
     <div class="webgl-container" id="webglContainer"></div>
     <div class="css3d-container" id="css3dContainer"></div>
+    <div class="grid-overlay" id="gridOverlayContainer"></div>
     <div class="content-loading" id="contentLoading">
         <div class="content-loading-bar indeterminate" id="contentLoadingBar">
             <div class="content-loading-fill" id="contentLoadingFill"></div>
@@ -1515,6 +1581,7 @@ const state = {
     showAccessories: false,
     showPixelGrid: false,
     showDimensions: false,
+    brightness: 100,            // 0–100 (%) → maps to 0–1000 nits
 };
 
 let nextWindowId = 1;
@@ -1939,22 +2006,30 @@ const dimLineMat = new THREE.LineBasicMaterial({ color: 0x00bbff, depthTest: fal
    image-rendering: pixelated for crisp nearest-neighbor scaling.
    Eliminates moiré / shimmer from CSS gradient rasterization.
    640×480mm panel, 344×258 px, pitch ≈ 1.86mm. */
-const _pgScale = 10;                               // CSS pixels per LED pixel
-const _pgDivW = PANEL_PX_W * _pgScale;             // 3440 CSS px
-const _pgDivH = PANEL_PX_H * _pgScale;             // 2580 CSS px
-const _pgScaleX = IN_PER_PX_W / _pgScale;
-const _pgScaleY = IN_PER_PX_H / _pgScale;
+const _pgScale = 10;                               // texels per LED pixel in grid tile
 
-/* Pre-render a single pitch-cell tile: transparent center, 1px black edges */
-const _pgTile = (() => {
+/* WebGL grid texture — rendered on dedicated overlay (gridRenderer layer 1).
+   NearestFilter keeps grid lines crisp within 12"–108" viewing range. */
+const _pgWebGLTex = (() => {
     const c = document.createElement('canvas');
     c.width = _pgScale; c.height = _pgScale;
     const ctx = c.getContext('2d');
     ctx.fillStyle = '#000';
-    ctx.fillRect(_pgScale - 1, 0, 1, _pgScale);   // right edge (vertical line)
-    ctx.fillRect(0, _pgScale - 1, _pgScale, 1);   // bottom edge (horizontal line)
-    return 'url(' + c.toDataURL() + ')';
+    ctx.fillRect(_pgScale - 1, 0, 1, _pgScale);
+    ctx.fillRect(0, _pgScale - 1, _pgScale, 1);
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(PANEL_PX_W, PANEL_PX_H);       // 344 × 258 tiles
+    tex.minFilter = THREE.NearestFilter;             // crisp grid lines at all distances (no mipmap fade)
+    tex.magFilter = THREE.NearestFilter;            // crisp when close
+    tex.generateMipmaps = false;                    // not needed with NearestFilter
+    return tex;
 })();
+const _pgWebGLMat = new THREE.MeshBasicMaterial({
+    map: _pgWebGLTex, transparent: true, depthTest: false, side: THREE.DoubleSide
+});
+const _pgPlaneGeom = new THREE.PlaneGeometry(PANEL_W_IN, PANEL_H_IN);
 
 /* Shared geometry (identical for every panel / accessory piece) */
 const panelGeom = new THREE.BoxGeometry(PANEL_W_IN, PANEL_H_IN, PANEL_D_IN);
@@ -2045,7 +2120,7 @@ function buildMiteredPanelGeom(leftCut, rightCut) {
 }
 
 /* ── Three.js objects ── */
-let scene, camera, renderer, cssRenderer, controls;
+let scene, camera, renderer, cssRenderer, gridRenderer, controls;
 let gpuMaxTextureSize = 4096; // updated at init from GL context
 let wallGroup;
 let panelMeshes = [];
@@ -2086,6 +2161,14 @@ function init() {
     cssRenderer = new CSS3DRenderer();
     cssRenderer.setSize(w, h);
     document.getElementById('css3dContainer').appendChild(cssRenderer.domElement);
+
+    // Grid overlay renderer — transparent WebGL canvas above CSS3D.
+    // Renders only grid meshes (layer 1) with GPU mipmapping for clean lines.
+    gridRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'high-performance' });
+    gridRenderer.setPixelRatio(window.devicePixelRatio);
+    gridRenderer.setClearColor(0x000000, 0);
+    gridRenderer.setSize(w, h);
+    document.getElementById('gridOverlayContainer').appendChild(gridRenderer.domElement);
 
     // Lighting
     scene.add(new THREE.AmbientLight(0xffffff, 0.55));
@@ -2194,6 +2277,7 @@ function onResize() {
     camera.updateProjectionMatrix();
     renderer.setSize(c.clientWidth, c.clientHeight);
     cssRenderer.setSize(c.clientWidth, c.clientHeight);
+    gridRenderer.setSize(c.clientWidth, c.clientHeight);
     markDirty();
 }
 
@@ -2226,8 +2310,18 @@ function animate() {
             }
         }
     }
+    // During recording, include grid layer (1) on main renderer for VideoFrame capture
+    if (isRecording && _gridAutoVisible) camera.layers.enable(1);
     renderer.render(scene, camera);
+    if (isRecording) camera.layers.set(0);  // reset to default layer
+
     cssRenderer.render(scene, camera);
+
+    // Grid overlay: render grid meshes (layer 1) on transparent canvas above CSS3D
+    camera.layers.set(1);
+    gridRenderer.render(scene, camera);
+    camera.layers.set(0);  // restore default
+
     if (isRecording && usingMP4 && videoEncoder && videoEncoder.encodeQueueSize <= 10) {
         const now = performance.now();
         if (now - lastRecordEncode >= 33) { // cap at ~30fps
@@ -2510,7 +2604,7 @@ function buildBezelLines(layout, d, miterCuts) {
     }
 }
 
-/* ── Pixel-grid overlay (CSS3DObject — renders above CSS3D content) ── */
+/* ── Pixel-grid overlay (WebGL mesh on layer 1 — renders on dedicated grid overlay) ── */
 function buildPixelGrid(layout, d) {
     pixelGridMeshes.forEach(m => wallGroup.remove(m));
     pixelGridMeshes = [];
@@ -2525,27 +2619,21 @@ function buildPixelGrid(layout, d) {
         for (let r = 0; r < d.rows; r++) {
             const y = d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap);
 
-            const div = document.createElement('div');
-            div.style.width = _pgDivW + 'px';
-            div.style.height = _pgDivH + 'px';
-            div.style.backgroundImage = _pgTile;
-            div.style.backgroundSize = _pgScale + 'px ' + _pgScale + 'px';
-            div.style.imageRendering = 'pixelated';
-            div.style.pointerEvents = 'none';
-            div.style.position = 'relative';
-            div.style.zIndex = '9999';          // force above iframes/video in CSS3D
-            div.style.willChange = 'transform'; // own compositing layer
-
-            const obj = new CSS3DObject(div);
-            obj.scale.set(_pgScaleX, _pgScaleY, 1);
-            obj.position.set(
+            /* WebGL mesh — rendered on dedicated grid overlay (layer 1).
+               GPU mipmapping + anisotropic filtering = clean grid lines at any
+               distance/angle with no CSS3D perspective distortion.
+               Also captured by Save Image & Recording (renderOrder 1000 > content 999). */
+            const mesh = new THREE.Mesh(_pgPlaneGeom, _pgWebGLMat);
+            mesh.layers.set(1);         // grid layer — rendered only on gridRenderer
+            mesh.renderOrder = 1000;    // above content overlays (999) during capture
+            mesh.position.set(
                 col.x - zOff * sin,
                 y,
                 col.z - zOff * cos
             );
-            obj.rotation.y = col.rotY;
-            wallGroup.add(obj);
-            pixelGridMeshes.push(obj);
+            mesh.rotation.y = col.rotY;
+            wallGroup.add(mesh);
+            pixelGridMeshes.push(mesh);
         }
     }
     markDirty();
@@ -4154,6 +4242,30 @@ document.getElementById('pixelGridToggle').addEventListener('change', e => {
     markDirty();
 });
 
+/* ── Brightness (0–100% → 0–1000 nits) ── */
+function applyBrightness(pct) {
+    state.brightness = pct;
+    const frac = pct / 100;
+    // CSS filter on all content elements (normal viewing)
+    document.querySelectorAll('.css3d-content-el').forEach(el => {
+        el.style.filter = frac < 1 ? `brightness(${frac})` : '';
+    });
+    // Panel face emissive (LED glow contribution)
+    frontMat.emissiveIntensity = 0.5 * frac;
+    // Update record overlay materials if recording
+    for (const ov of recordOverlays) {
+        ov.mat.color.setRGB(frac, frac, frac);
+    }
+    // Update label
+    const nits = Math.round(pct * 10);
+    document.getElementById('brightnessVal').textContent = pct + '% \u00b7 ' + nits + ' nits';
+    markDirty();
+}
+
+document.getElementById('brightnessSlider').addEventListener('input', e => {
+    applyBrightness(parseInt(e.target.value, 10));
+});
+
 /* ── Distance meter click — toggle between display / input mode ── */
 document.getElementById('distMeter').addEventListener('click', () => {
     const el = document.getElementById('distValue');
@@ -4411,7 +4523,8 @@ function captureShowroom(targetW, targetH) {
         const worldH = visH * obj.scale.y;
 
         const geo = new THREE.PlaneGeometry(worldW, worldH);
-        const mat = new THREE.MeshBasicMaterial({ map: texture, depthTest: false });
+        const bFrac = state.brightness / 100;
+        const mat = new THREE.MeshBasicMaterial({ map: texture, depthTest: false, color: new THREE.Color(bFrac, bFrac, bFrac) });
         const mesh = new THREE.Mesh(geo, mat);
         mesh.renderOrder = 999;
         mesh.position.copy(obj.position);
@@ -4423,7 +4536,10 @@ function captureShowroom(targetW, targetH) {
     });
 
     // Render scene with content as WebGL textures (handles perspective natively)
+    // Include grid layer (1) so pixel grid appears in captured image
+    if (_gridAutoVisible) camera.layers.enable(1);
     renderer.render(scene, camera);
+    camera.layers.set(0);  // restore default
 
     const composite = document.createElement('canvas');
     composite.width = w;
@@ -4549,7 +4665,8 @@ function buildRecordOverlays() {
             uv.setXY(2, u0, v0); uv.setXY(3, u1, v0);
             uv.needsUpdate = true;
         }
-        const mat = new THREE.MeshBasicMaterial({ map: texture, depthTest: false });
+        const bFrac = state.brightness / 100;
+        const mat = new THREE.MeshBasicMaterial({ map: texture, depthTest: false, color: new THREE.Color(bFrac, bFrac, bFrac) });
         const mesh = new THREE.Mesh(geo, mat);
         mesh.renderOrder = 999;
         mesh.position.copy(obj.position);
@@ -4774,6 +4891,7 @@ function capturePreset(name) {
         doubleSided: state.doubleSided,
         showAccessories: state.showAccessories,
         showDimensions: state.showDimensions,
+        brightness: state.brightness,
         // Backward compat fields
         cols: state.cols,
         rows: state.rows,
@@ -4789,6 +4907,9 @@ function syncUIFromState() {
     document.getElementById('accessoryToggle').checked = state.showAccessories;
     document.getElementById('pixelGridToggle').checked = state.showPixelGrid;
     document.getElementById('dimensionToggle').checked = state.showDimensions;
+    document.getElementById('brightnessSlider').value = state.brightness;
+    const bNits = Math.round(state.brightness * 10);
+    document.getElementById('brightnessVal').textContent = state.brightness + '% \u00b7 ' + bNits + ' nits';
     document.getElementById('spanToggle').checked = state.spanContent;
     updateSpanUI();
     renderCornerList();
@@ -4873,6 +4994,7 @@ function applyPreset(preset) {
     state.showDimensions = preset.showDimensions;
     if (preset.cwUnit) state.cwUnit = preset.cwUnit;
     state.spanContent = preset.spanContent || false;
+    if (preset.brightness !== undefined) applyBrightness(preset.brightness);
 
     syncUIFromState();
     pruneCorners();
