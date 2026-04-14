@@ -1934,28 +1934,27 @@ const cornerFillMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b8, metalnes
 const bezelLineMat = new THREE.LineBasicMaterial({ color: 0x555560 });
 const dimLineMat = new THREE.LineBasicMaterial({ color: 0x00bbff, depthTest: false });
 
-/* Pixel-grid overlay — CSS3DObject with repeating-linear-gradient
-   Uses 10× CSS-pixel resolution for sub-mm line precision.
+/* Pixel-grid overlay — CSS3DObject with pre-rendered bitmap tile.
+   Uses a small canvas tile (one pitch cell) repeated via CSS, with
+   image-rendering: pixelated for crisp nearest-neighbor scaling.
+   Eliminates moiré / shimmer from CSS gradient rasterization.
    640×480mm panel, 344×258 px, pitch ≈ 1.86mm. */
 const _pgScale = 10;                               // CSS pixels per LED pixel
-const _pgPitchMm = 640 / PANEL_PX_W;               // 1.8605mm
-const _pgPitchPx = _pgScale;                       // 10 CSS px per pitch
 const _pgDivW = PANEL_PX_W * _pgScale;             // 3440 CSS px
 const _pgDivH = PANEL_PX_H * _pgScale;             // 2580 CSS px
-const _pgClipW = (PANEL_PX_W - 1) * _pgScale;     // 3430 — exactly 343 gradient periods
-const _pgClipH = (PANEL_PX_H - 1) * _pgScale;     // 2570 — exactly 257 gradient periods
-const _pgOffX  = (_pgDivW - _pgClipW) / 2;        // 5px centering offset
-const _pgOffY  = (_pgDivH - _pgClipH) / 2;        // 5px centering offset
 const _pgScaleX = IN_PER_PX_W / _pgScale;
 const _pgScaleY = IN_PER_PX_H / _pgScale;
 
-function _pgBackground(lineWidthMm) {
-    const lw = lineWidthMm / _pgPitchMm * _pgPitchPx;   // line width in CSS px
-    const gap = _pgPitchPx - lw;                          // transparent pixel area
-    // Line sits at the END of each period → between adjacent pixels (343 V × 257 H)
-    return 'repeating-linear-gradient(to right,transparent 0,transparent ' + gap + 'px,#000 ' + gap + 'px,#000 ' + _pgPitchPx + 'px),' +
-           'repeating-linear-gradient(to bottom,transparent 0,transparent ' + gap + 'px,#000 ' + gap + 'px,#000 ' + _pgPitchPx + 'px)';
-}
+/* Pre-render a single pitch-cell tile: transparent center, 1px black edges */
+const _pgTile = (() => {
+    const c = document.createElement('canvas');
+    c.width = _pgScale; c.height = _pgScale;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#000';
+    ctx.fillRect(_pgScale - 1, 0, 1, _pgScale);   // right edge (vertical line)
+    ctx.fillRect(0, _pgScale - 1, _pgScale, 1);   // bottom edge (horizontal line)
+    return 'url(' + c.toDataURL() + ')';
+})();
 
 /* Shared geometry (identical for every panel / accessory piece) */
 const panelGeom = new THREE.BoxGeometry(PANEL_W_IN, PANEL_H_IN, PANEL_D_IN);
@@ -2518,7 +2517,6 @@ function buildPixelGrid(layout, d) {
     if (!state.showPixelGrid) return;
 
     const zOff = -(PANEL_D_IN / 2 + 0.06);   // in front of all content layers
-    const bg = _pgBackground(0.10);
 
     for (let c = 0; c < d.cols; c++) {
         const col = layout[c];
@@ -2530,10 +2528,9 @@ function buildPixelGrid(layout, d) {
             const div = document.createElement('div');
             div.style.width = _pgDivW + 'px';
             div.style.height = _pgDivH + 'px';
-            div.style.backgroundImage = bg;
-            div.style.backgroundSize = _pgClipW + 'px 100%, 100% ' + _pgClipH + 'px';
-            div.style.backgroundRepeat = 'no-repeat';
-            div.style.backgroundPosition = _pgOffX + 'px ' + _pgOffY + 'px';
+            div.style.backgroundImage = _pgTile;
+            div.style.backgroundSize = _pgScale + 'px ' + _pgScale + 'px';
+            div.style.imageRendering = 'pixelated';
             div.style.pointerEvents = 'none';
 
             const obj = new CSS3DObject(div);
