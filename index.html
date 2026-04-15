@@ -2007,8 +2007,9 @@ const dimLineMat = new THREE.LineBasicMaterial({ color: 0x00bbff, depthTest: fal
 /* Pixel-grid overlay — physically drawn geometric lines via LineSegments2 (fat lines).
    Each panel draws 344 vertical + 258 horizontal lines (matching 344×258 LED grid).
    Both line sets originate at (0,0) in panel-local coords (top-left corner),
-   spaced at pitch = PANEL_W_IN/PANEL_PX_W ≈ 0.0730" (1.855mm).
-   LineMaterial with worldUnits:true draws at physical 0.2mm thickness (≈0.00787").
+   spaced at pitch = PANEL_W_IN/PANEL_PX_W ≈ 0.0730" (1.860mm).
+   LineMaterial with worldUnits:true draws at physical 0.36mm thickness — the real
+   inter-pixel gap on the LED panel (pitch 1.86mm − 1.5mm LED dot = 0.36mm).
    Rendered on dedicated gridRenderer (layer 1) to avoid CSS3D perspective distortion. */
 const _pgLineGeom = (() => {
     const pitchX = PANEL_W_IN / PANEL_PX_W;
@@ -2032,8 +2033,8 @@ const _pgLineGeom = (() => {
 })();
 const _pgLineMat = new LineMaterial({
     color: 0x000000,
-    worldUnits: true,           // physical thickness scales with zoom
-    linewidth: 0.2 / 25.4,      // 0.2mm expressed in inches (scene units)
+    worldUnits: true,            // physical thickness scales with zoom
+    linewidth: 0.36 / 25.4,      // 0.36mm expressed in inches (scene units) — real inter-pixel gap
     depthTest: false,
     alphaToCoverage: true,       // smooth sub-pixel edges via MSAA
     transparent: true
