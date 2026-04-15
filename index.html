@@ -2001,12 +2001,14 @@ const cornerFillMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b8, metalnes
 const bezelLineMat = new THREE.LineBasicMaterial({ color: 0x555560 });
 const dimLineMat = new THREE.LineBasicMaterial({ color: 0x00bbff, depthTest: false });
 
-/* Pixel-grid overlay — analytic shader grid (moiré-free by fwidth-based AA).
-   One PlaneGeometry per panel, rendered with a ShaderMaterial that draws 344
-   vertical + 258 horizontal lines at integer cell boundaries in panel UV space.
-   Per-fragment derivatives (fwidth) give Nyquist-correct anti-aliasing — when
-   line pitch drops below the pixel footprint, the shader blends to a uniform
-   tint instead of producing interference bands.
+/* Pixel-grid overlay — analytic shader grid with exact filtered-grid coverage.
+   One PlaneGeometry per panel, rendered with a ShaderMaterial that draws lines
+   at every integer cell boundary in panel UV space. The fragment shader uses
+   Inigo Quilez's filtered-grid integral: for each fragment it computes the
+   EXACT fraction of the pixel footprint that lies inside a line, giving
+   perfect Nyquist-correct alpha at every zoom / rotation. Unlike a smoothstep
+   filter, the integral correctly asymptotes to the line density (2h) when the
+   pixel covers many cells, so no interference bands can form.
    Line thickness: 0.36mm physical (real inter-pixel gap = 1.86mm pitch − 1.5mm LED). */
 const _pgPlaneGeom = new THREE.PlaneGeometry(PANEL_W_IN, PANEL_H_IN);
 const _pgGridMat = (() => {
@@ -2036,27 +2038,33 @@ const _pgGridMat = (() => {
             uniform vec2 uGridCells;        // (344, 258)
             uniform vec2 uHalfLineCells;    // line half-width in cell units
 
+            /* Primitive of the line indicator 1{fract(y) < 2h}.
+               F(y) counts the integrated line length from 0 to y, stepping
+               by 2h each period and smoothly within the line interval. */
+            float F(float y, float twoH) {
+                return floor(y) * twoH + min(fract(y), twoH);
+            }
+
+            /* Exact analytic line coverage for one axis, integrated over the
+               fragment's UV footprint. This is Inigo Quilez's filtered-grid
+               technique — at every density the coverage is the TRUE fraction
+               of the pixel footprint that overlaps a line, so no aliasing /
+               moiré can arise regardless of rotation or zoom. */
+            float axisCoverage(float t, float halfWidth) {
+                float d = max(fwidth(t), 1e-6);
+                float twoH = 2.0 * halfWidth;
+                float a = t - 0.5 * d + halfWidth;
+                float b = t + 0.5 * d + halfWidth;
+                return clamp((F(b, twoH) - F(a, twoH)) / d, 0.0, 1.0);
+            }
+
             void main() {
-                // Map UV into cell coordinates. Lines sit at integer positions
-                // 0..343 (x) and 0..257 (y), matching the 344×258 cell count.
                 vec2 uvPx = vUv * uGridCells;
-                vec2 nearestLine = clamp(floor(uvPx + 0.5), vec2(0.0), uGridCells - 1.0);
-                vec2 distCells = abs(uvPx - nearestLine);
-
-                // Per-fragment footprint in cell units — this is the key to
-                // moiré-free rendering. fwidth() tells us how much of the grid
-                // each pixel covers; we filter analytically against that.
-                vec2 dCells = fwidth(uvPx);
-
-                // Signed distance to line edge, in screen pixels.
-                vec2 signedDistPx = (distCells - uHalfLineCells) / max(dCells, vec2(1e-6));
-
-                // Smoothstep ~1 screen pixel across the edge.
-                vec2 axisAlpha = 1.0 - smoothstep(-0.5, 0.5, signedDistPx);
-
-                // Either axis being on-line contributes — this is the grid OR.
-                float alpha = max(axisAlpha.x, axisAlpha.y);
-                if (alpha < 0.01) discard;
+                float cx = axisCoverage(uvPx.x, uHalfLineCells.x);
+                float cy = axisCoverage(uvPx.y, uHalfLineCells.y);
+                // Probabilistic OR — fragment is on a line if X OR Y is on a line.
+                float alpha = cx + cy - cx * cy;
+                if (alpha < 0.003) discard;
                 gl_FragColor = vec4(uColor, alpha);
             }
         `,
