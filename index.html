@@ -1531,9 +1531,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
-import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
-import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
-import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 
 /* ── Constants ── */
@@ -2004,42 +2001,71 @@ const cornerFillMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b8, metalnes
 const bezelLineMat = new THREE.LineBasicMaterial({ color: 0x555560 });
 const dimLineMat = new THREE.LineBasicMaterial({ color: 0x00bbff, depthTest: false });
 
-/* Pixel-grid overlay — physically drawn geometric lines via LineSegments2 (fat lines).
-   Each panel draws 344 vertical + 258 horizontal lines (matching 344×258 LED grid).
-   Both line sets originate at (0,0) in panel-local coords (top-left corner),
-   spaced at pitch = PANEL_W_IN/PANEL_PX_W ≈ 0.0730" (1.860mm).
-   LineMaterial with worldUnits:true draws at physical 0.36mm thickness — the real
-   inter-pixel gap on the LED panel (pitch 1.86mm − 1.5mm LED dot = 0.36mm).
-   Rendered on dedicated gridRenderer (layer 1) to avoid CSS3D perspective distortion. */
-const _pgLineGeom = (() => {
-    const pitchX = PANEL_W_IN / PANEL_PX_W;
-    const pitchY = PANEL_H_IN / PANEL_PX_H;
-    const hw = PANEL_W_IN / 2;
-    const hh = PANEL_H_IN / 2;
-    const pts = [];
-    // 344 vertical lines — first at top-left corner (x=-hw), spaced by pitchX, full panel height
-    for (let i = 0; i < PANEL_PX_W; i++) {
-        const x = -hw + i * pitchX;
-        pts.push(x, hh, 0, x, -hh, 0);
-    }
-    // 258 horizontal lines — first at top-left corner (y=+hh), spaced by pitchY, full panel width
-    for (let j = 0; j < PANEL_PX_H; j++) {
-        const y = hh - j * pitchY;
-        pts.push(-hw, y, 0, hw, y, 0);
-    }
-    const geom = new LineSegmentsGeometry();
-    geom.setPositions(pts);
-    return geom;
+/* Pixel-grid overlay — analytic shader grid (moiré-free by fwidth-based AA).
+   One PlaneGeometry per panel, rendered with a ShaderMaterial that draws 344
+   vertical + 258 horizontal lines at integer cell boundaries in panel UV space.
+   Per-fragment derivatives (fwidth) give Nyquist-correct anti-aliasing — when
+   line pitch drops below the pixel footprint, the shader blends to a uniform
+   tint instead of producing interference bands.
+   Line thickness: 0.36mm physical (real inter-pixel gap = 1.86mm pitch − 1.5mm LED). */
+const _pgPlaneGeom = new THREE.PlaneGeometry(PANEL_W_IN, PANEL_H_IN);
+const _pgGridMat = (() => {
+    const cellWIn = PANEL_W_IN / PANEL_PX_W;
+    const cellHIn = PANEL_H_IN / PANEL_PX_H;
+    const lineWidthIn = 0.36 / 25.4;         // 0.36mm inter-pixel gap in inches
+    // Half-line-width expressed as a fraction of one grid cell (per axis).
+    const halfLineCellsX = (lineWidthIn / 2) / cellWIn;
+    const halfLineCellsY = (lineWidthIn / 2) / cellHIn;
+    return new THREE.ShaderMaterial({
+        uniforms: {
+            uColor:         { value: new THREE.Color(0x000000) },
+            uGridCells:     { value: new THREE.Vector2(PANEL_PX_W, PANEL_PX_H) },
+            uHalfLineCells: { value: new THREE.Vector2(halfLineCellsX, halfLineCellsY) }
+        },
+        vertexShader: /* glsl */ `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: /* glsl */ `
+            precision highp float;
+            varying vec2 vUv;
+            uniform vec3 uColor;
+            uniform vec2 uGridCells;        // (344, 258)
+            uniform vec2 uHalfLineCells;    // line half-width in cell units
+
+            void main() {
+                // Map UV into cell coordinates. Lines sit at integer positions
+                // 0..343 (x) and 0..257 (y), matching the 344×258 cell count.
+                vec2 uvPx = vUv * uGridCells;
+                vec2 nearestLine = clamp(floor(uvPx + 0.5), vec2(0.0), uGridCells - 1.0);
+                vec2 distCells = abs(uvPx - nearestLine);
+
+                // Per-fragment footprint in cell units — this is the key to
+                // moiré-free rendering. fwidth() tells us how much of the grid
+                // each pixel covers; we filter analytically against that.
+                vec2 dCells = fwidth(uvPx);
+
+                // Signed distance to line edge, in screen pixels.
+                vec2 signedDistPx = (distCells - uHalfLineCells) / max(dCells, vec2(1e-6));
+
+                // Smoothstep ~1 screen pixel across the edge.
+                vec2 axisAlpha = 1.0 - smoothstep(-0.5, 0.5, signedDistPx);
+
+                // Either axis being on-line contributes — this is the grid OR.
+                float alpha = max(axisAlpha.x, axisAlpha.y);
+                if (alpha < 0.01) discard;
+                gl_FragColor = vec4(uColor, alpha);
+            }
+        `,
+        transparent: true,
+        depthTest: false,
+        side: THREE.DoubleSide,
+        extensions: { derivatives: true }    // fwidth() — auto on WebGL2, explicit for safety
+    });
 })();
-const _pgLineMat = new LineMaterial({
-    color: 0x000000,
-    worldUnits: true,            // physical thickness scales with zoom
-    linewidth: 0.36 / 25.4,      // 0.36mm expressed in inches (scene units) — real inter-pixel gap
-    depthTest: false,
-    alphaToCoverage: true,       // smooth sub-pixel edges via MSAA
-    transparent: true
-});
-_pgLineMat.resolution.set(window.innerWidth, window.innerHeight);
 
 /* Shared geometry (identical for every panel / accessory piece) */
 const panelGeom = new THREE.BoxGeometry(PANEL_W_IN, PANEL_H_IN, PANEL_D_IN);
@@ -2288,7 +2314,6 @@ function onResize() {
     renderer.setSize(c.clientWidth, c.clientHeight);
     cssRenderer.setSize(c.clientWidth, c.clientHeight);
     gridRenderer.setSize(c.clientWidth, c.clientHeight);
-    _pgLineMat.resolution.set(c.clientWidth, c.clientHeight);
     markDirty();
 }
 
@@ -2615,7 +2640,7 @@ function buildBezelLines(layout, d, miterCuts) {
     }
 }
 
-/* ── Pixel-grid overlay (WebGL LineSegments on layer 1 — renders on dedicated grid overlay) ── */
+/* ── Pixel-grid overlay (analytic shader grid on layer 1 — moiré-free by fwidth AA) ── */
 function buildPixelGrid(layout, d) {
     pixelGridMeshes.forEach(m => wallGroup.remove(m));
     pixelGridMeshes = [];
@@ -2630,21 +2655,21 @@ function buildPixelGrid(layout, d) {
         for (let r = 0; r < d.rows; r++) {
             const y = d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap);
 
-            /* Geometric lines — 344 vertical + 258 horizontal, rendered on gridRenderer (layer 1).
-               LineSegments2 fat lines with 0.1mm world-unit thickness (physical pixel pitch boundary).
+            /* Shader grid mesh — one plane per panel, rendered on gridRenderer (layer 1).
+               The fragment shader draws all 344×258 lines analytically with fwidth-based
+               AA, so moiré patterns cannot form at any zoom / angle.
                Also captured by Save Image & Recording (renderOrder 1000 > content 999). */
-            const lines = new LineSegments2(_pgLineGeom, _pgLineMat);
-            lines.computeLineDistances();
-            lines.layers.set(1);         // grid layer — rendered only on gridRenderer
-            lines.renderOrder = 1000;    // above content overlays (999) during capture
-            lines.position.set(
+            const mesh = new THREE.Mesh(_pgPlaneGeom, _pgGridMat);
+            mesh.layers.set(1);          // grid layer — rendered only on gridRenderer
+            mesh.renderOrder = 1000;     // above content overlays (999) during capture
+            mesh.position.set(
                 col.x - zOff * sin,
                 y,
                 col.z - zOff * cos
             );
-            lines.rotation.y = col.rotY;
-            wallGroup.add(lines);
-            pixelGridMeshes.push(lines);
+            mesh.rotation.y = col.rotY;
+            wallGroup.add(mesh);
+            pixelGridMeshes.push(mesh);
         }
     }
     markDirty();
