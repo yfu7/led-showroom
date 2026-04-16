@@ -573,6 +573,73 @@
             flex: 1;
             position: relative;
             overflow: hidden;
+            min-width: 0;
+        }
+
+        /* ── Shape editor side panel (v3) ── */
+        .shape-editor {
+            width: 460px;
+            min-width: 460px;
+            background: #141414;
+            border-left: 1px solid #2a2a2a;
+            padding: 20px;
+            overflow-y: auto;
+            display: none;          /* toggled by .open */
+            flex-direction: column;
+            gap: 14px;
+        }
+        .shape-editor.open { display: flex; }
+        .shape-editor-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #2a2a2a;
+        }
+        .shape-editor-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: #aaa;
+        }
+        .shape-editor-title b { color: #93c5fd; font-weight: 500; }
+        .shape-editor-done {
+            padding: 6px 16px;
+            background: #1e3a5f;
+            border: 1px solid #3b82f6;
+            color: #93c5fd;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .shape-editor-done:hover { background: #2a4a7a; color: #dbeafe; }
+        .shape-editor-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #888;
+            padding: 0 2px;
+        }
+        .shape-editor-info b { color: #e0e0e0; font-weight: 500; }
+        .shape-editor-canvas-wrap {
+            background: #0a0a0a;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            padding: 4px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #shapeEditorCanvas {
+            display: block;
+            cursor: crosshair;
+            image-rendering: pixelated;
+        }
+        .shape-editor-hint {
+            font-size: 11px;
+            color: #666;
+            text-align: center;
+            line-height: 1.5;
         }
 
         .venue-bg {
@@ -1025,6 +1092,53 @@
             outline: none;
             min-width: 0;
         }
+        /* v3: custom shape mode controls */
+        .wall-mode-row {
+            display: flex;
+            gap: 4px;
+            margin-top: 6px;
+            width: 100%;
+        }
+        .wall-mode-btn {
+            flex: 1;
+            padding: 5px 8px;
+            background: #111;
+            border: 1px solid #333;
+            color: #999;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            font-weight: 500;
+            letter-spacing: 0.3px;
+        }
+        .wall-mode-btn:hover { background: #1a1a1a; color: #ddd; }
+        .wall-mode-btn.active {
+            background: #1e3a5f;
+            border-color: #3b82f6;
+            color: #93c5fd;
+        }
+        .wall-edit-shape-btn {
+            padding: 8px 10px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            color: #ddd;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            margin-top: 6px;
+            width: 100%;
+        }
+        .wall-edit-shape-btn:hover { background: #2a2a2a; border-color: #666; }
+        .wall-shape-info {
+            font-size: 11px;
+            color: #888;
+            margin-top: 6px;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 2px;
+        }
+        .wall-shape-info b { color: #ccc; font-weight: 500; }
 
         .no-windows-msg {
             font-size: 13px;
@@ -1534,6 +1648,22 @@
     <div class="showroom-hint" id="showroomHint">Drag to rotate · Scroll to zoom · Middle/right-click to pan</div>
 </main>
 
+<!-- v3: Custom shape editor side panel (hidden by default) -->
+<aside class="shape-editor" id="shapeEditorPanel">
+    <div class="shape-editor-header">
+        <span class="shape-editor-title">Edit Shape &mdash; <b id="shapeEditorWallName">Wall 1</b></span>
+        <button class="shape-editor-done" id="shapeEditorDone">Done</button>
+    </div>
+    <div class="shape-editor-info">
+        <span><b id="shapeEditorBBox">&mdash;</b> bounding box</span>
+        <span><b id="shapeEditorCount">&mdash;</b> panels</span>
+    </div>
+    <div class="shape-editor-canvas-wrap">
+        <canvas id="shapeEditorCanvas" width="420" height="420"></canvas>
+    </div>
+    <div class="shape-editor-hint">Click empty cell to add &middot; click filled cell to remove</div>
+</aside>
+
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -1575,7 +1705,7 @@ const state = {
     contentWindows: [],
     selectedWindowId: null,
     /* Multi-wall */
-    walls: [],              // { id, name, cols, rows, corners, contentWindows, selectedWindowId }
+    walls: [],              // { id, name, cols, rows, corners, contentWindows, selectedWindowId, shape: { mode: 'rect'|'custom', cells: Set<"c,r"> | null } }
     selectedWallId: null,
     spanContent: false,
     /* Global */
@@ -1697,6 +1827,9 @@ function addWall() {
         corners: [],
         contentWindows: [],
         selectedWindowId: null,
+        // v3: custom shape support. For 'rect' mode the cells set is null
+        // and synthesized on demand from cols×rows (see wallFilledCells).
+        shape: { mode: 'rect', cells: null },
     };
     state.walls.push(wall);
     wallContextMap.set(id, createWallRenderContext());
@@ -1708,6 +1841,345 @@ function addWall() {
     arrangeWalls();
     renderWallList();
     return wall;
+}
+
+/* ── v3: switch wall shape mode (Rect <-> Custom) ────────────────────────
+   Rect→Custom: bootstrap cells by filling the current cols×rows so the
+     wall looks identical, then user can carve cells in the editor.
+   Custom→Rect: keep bbox cols/rows, drop the custom cells (destructive).
+*/
+function switchWallMode(wallId, mode) {
+    const wall = state.walls.find(w => w.id === wallId);
+    if (!wall) return;
+    if (!wall.shape) wall.shape = { mode: 'rect', cells: null };
+    if (wall.shape.mode === mode) return;
+    if (wallId !== activeContextWallId) activateWallContext(wallId);
+
+    // Close the shape editor if we're switching away from custom on the wall
+    // it's currently editing — the editor only makes sense in custom mode.
+    if (mode === 'rect' && shapeEditor.open && shapeEditor.wallId === wallId) {
+        closeShapeEditor();
+    }
+
+    if (mode === 'custom') {
+        const cells = new Set();
+        const cols = wall.cols | 0, rows = wall.rows | 0;
+        for (let c = 0; c < cols; c++) {
+            for (let r = 0; r < rows; r++) cells.add(c + ',' + r);
+        }
+        wall.shape = { mode: 'custom', cells };
+    } else {
+        // Switching back to rect: bbox becomes the authoritative cols/rows.
+        const bbox = wallBBox(wall);
+        wall.cols = Math.max(1, bbox.cols);
+        wall.rows = Math.max(1, bbox.rows);
+        state.cols = wall.cols;
+        state.rows = wall.rows;
+        wall.shape = { mode: 'rect', cells: null };
+    }
+    invalidateLayout();
+    buildWall();
+    arrangeWalls();
+    renderWallList();
+    updateSidebarInfo();
+}
+
+/* ── v3 Shape Editor ─────────────────────────────────────────────────────
+   2D side-panel editor for custom wall shapes. Users click cells to add/
+   remove panels; the 3D scene updates live. Cells are normalized on every
+   edit (minC=0, minR=0) so the 3D render loop sees a 0-indexed cell set
+   that matches the bbox-sized wall dims. */
+const shapeEditor = {
+    open: false,
+    wallId: null,
+    gridCols: 30,
+    gridRows: 30,
+    cellPx: 14,
+    hover: null,         // { c, r } or null
+    canvas: null,
+    ctx: null,
+    listeners: null,     // { click, move, leave } — for removal on close
+};
+
+function openShapeEditor(wallId) {
+    const wall = state.walls.find(w => w.id === wallId);
+    if (!wall) return;
+
+    // If already open, tear down first so we never stack duplicate listeners.
+    // (E.g. user clicks Edit Shape, then Rectangle → Custom → Edit Shape again.
+    //  switchWallMode doesn't close the editor, so the second openShapeEditor
+    //  would otherwise attach a second mousedown handler, causing each click
+    //  to fire twice and cancel itself out.)
+    if (shapeEditor.open) closeShapeEditor();
+
+    // Force this wall into custom mode if it isn't (defensive — the button
+    // only shows in custom mode, but in case of state drift).
+    if (isRectWall(wall)) switchWallMode(wallId, 'custom');
+    if (wallId !== state.selectedWallId) selectWall(wallId);
+
+    shapeEditor.wallId = wallId;
+    shapeEditor.open = true;
+    shapeEditor.hover = null;
+
+    // Size canvas to grid
+    const c = document.getElementById('shapeEditorCanvas');
+    c.width = shapeEditor.gridCols * shapeEditor.cellPx + 1;
+    c.height = shapeEditor.gridRows * shapeEditor.cellPx + 1;
+    shapeEditor.canvas = c;
+    shapeEditor.ctx = c.getContext('2d');
+
+    // Wire up events
+    const click = e => onShapeEditorClick(e);
+    const move  = e => onShapeEditorMove(e);
+    const leave = () => { shapeEditor.hover = null; drawShapeEditor(); };
+    c.addEventListener('mousedown', click);
+    c.addEventListener('mousemove', move);
+    c.addEventListener('mouseleave', leave);
+    shapeEditor.listeners = { click, move, leave };
+
+    // Show panel + resize 3D viewport
+    document.getElementById('shapeEditorPanel').classList.add('open');
+    document.getElementById('shapeEditorWallName').textContent = wall.name;
+    updateShapeEditorInfo();
+    drawShapeEditor();
+    // Let flex layout settle, then re-fit 3D renderers
+    requestAnimationFrame(onResize);
+}
+
+function closeShapeEditor() {
+    if (!shapeEditor.open) return;
+    const c = shapeEditor.canvas;
+    if (c && shapeEditor.listeners) {
+        c.removeEventListener('mousedown', shapeEditor.listeners.click);
+        c.removeEventListener('mousemove', shapeEditor.listeners.move);
+        c.removeEventListener('mouseleave', shapeEditor.listeners.leave);
+    }
+    shapeEditor.open = false;
+    shapeEditor.wallId = null;
+    shapeEditor.hover = null;
+    shapeEditor.listeners = null;
+    document.getElementById('shapeEditorPanel').classList.remove('open');
+    requestAnimationFrame(onResize);
+}
+
+function updateShapeEditorInfo() {
+    const wall = state.walls.find(w => w.id === shapeEditor.wallId);
+    if (!wall) return;
+    const bbox = wallBBox(wall);
+    const count = wallFilledCount(wall);
+    document.getElementById('shapeEditorBBox').textContent = bbox.cols + ' \u00d7 ' + bbox.rows;
+    document.getElementById('shapeEditorCount').textContent = count;
+}
+
+function onShapeEditorMove(e) {
+    const rect = shapeEditor.canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const c = Math.floor(x / shapeEditor.cellPx);
+    const r = Math.floor(y / shapeEditor.cellPx);
+    if (c < 0 || r < 0 || c >= shapeEditor.gridCols || r >= shapeEditor.gridRows) {
+        if (shapeEditor.hover) { shapeEditor.hover = null; drawShapeEditor(); }
+        return;
+    }
+    if (!shapeEditor.hover || shapeEditor.hover.c !== c || shapeEditor.hover.r !== r) {
+        shapeEditor.hover = { c, r };
+        drawShapeEditor();
+    }
+}
+
+function onShapeEditorClick(e) {
+    const rect = shapeEditor.canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const c = Math.floor(x / shapeEditor.cellPx);
+    const r = Math.floor(y / shapeEditor.cellPx);
+    if (c < 0 || r < 0 || c >= shapeEditor.gridCols || r >= shapeEditor.gridRows) return;
+    toggleShapeCell(c, r);
+}
+
+/* Connectivity helpers (v3 Phase 5) — 4-neighbor adjacency over Set<"c,r">.
+
+   isAdjacentToSet: true if (c,r) shares a full edge with any cell in the set.
+   wouldStayContiguous: true if removing (c,r) leaves the remaining cells in
+     a single connected component (BFS from an arbitrary surviving neighbor).
+   Both are O(n) where n = |cells|; editor grids are small (≤900 cells), so
+   this is trivial. */
+function isAdjacentToSet(cells, c, r) {
+    return cells.has((c - 1) + ',' + r) ||
+           cells.has((c + 1) + ',' + r) ||
+           cells.has(c + ',' + (r - 1)) ||
+           cells.has(c + ',' + (r + 1));
+}
+
+function wouldStayContiguous(cells, c, r) {
+    // Must be a member to be removable.
+    const key = c + ',' + r;
+    if (!cells.has(key)) return true;
+    if (cells.size <= 1) return true;  // last-cell removal handled separately
+
+    // Pick a start neighbor that exists in the set (not the cell being removed).
+    let start = null;
+    const neighbors = [[c - 1, r], [c + 1, r], [c, r - 1], [c, r + 1]];
+    for (const [nc, nr] of neighbors) {
+        const k = nc + ',' + nr;
+        if (cells.has(k)) { start = k; break; }
+    }
+    // No neighbors means this cell is already an isolated speck — removing it
+    // leaves the remaining cells untouched, so contiguity is preserved.
+    if (!start) return true;
+
+    const target = cells.size - 1;
+    const seen = new Set([start]);
+    const queue = [start];
+    while (queue.length) {
+        const cur = queue.shift();
+        const i = cur.indexOf(',');
+        const cc = +cur.slice(0, i), rr = +cur.slice(i + 1);
+        const nbrs = [
+            (cc - 1) + ',' + rr,
+            (cc + 1) + ',' + rr,
+            cc + ',' + (rr - 1),
+            cc + ',' + (rr + 1),
+        ];
+        for (const nk of nbrs) {
+            if (nk === key) continue;              // skip the to-remove cell
+            if (seen.has(nk)) continue;
+            if (!cells.has(nk)) continue;
+            seen.add(nk);
+            queue.push(nk);
+        }
+    }
+    return seen.size === target;
+}
+
+/* Classify a hover target into one of:
+   'add'       — empty cell adjacent to set (legal place)
+   'no-adj'    — empty cell NOT adjacent (illegal place)
+   'remove'    — filled cell whose removal keeps the rest contiguous
+   'last'      — filled cell but it's the only one left (illegal remove)
+   'split'     — filled cell whose removal would disconnect the set
+   Used by both drawShapeEditor (hover color) and toggleShapeCell (validation). */
+function classifyShapeEdit(cells, c, r) {
+    const filled = cells.has(c + ',' + r);
+    if (filled) {
+        if (cells.size <= 1) return 'last';
+        if (!wouldStayContiguous(cells, c, r)) return 'split';
+        return 'remove';
+    }
+    if (cells.size > 0 && !isAdjacentToSet(cells, c, r)) return 'no-adj';
+    return 'add';
+}
+
+function toggleShapeCell(c, r) {
+    const wall = state.walls.find(w => w.id === shapeEditor.wallId);
+    if (!wall || !wall.shape || wall.shape.mode !== 'custom') return;
+    const cells = wall.shape.cells;
+    const action = classifyShapeEdit(cells, c, r);
+    if (action === 'last' || action === 'no-adj' || action === 'split') return;
+    const key = c + ',' + r;
+    if (action === 'remove') cells.delete(key);
+    else cells.add(key);   // action === 'add'
+    commitShapeEdit(wall);
+}
+
+function normalizeShape(wall) {
+    if (!wall.shape || !wall.shape.cells || wall.shape.cells.size === 0) return;
+    let minC = Infinity, minR = Infinity;
+    for (const key of wall.shape.cells) {
+        const i = key.indexOf(',');
+        const cc = +key.slice(0, i), rr = +key.slice(i + 1);
+        if (cc < minC) minC = cc;
+        if (rr < minR) minR = rr;
+    }
+    if (minC === 0 && minR === 0) return;
+    const next = new Set();
+    for (const key of wall.shape.cells) {
+        const i = key.indexOf(',');
+        const cc = +key.slice(0, i), rr = +key.slice(i + 1);
+        next.add((cc - minC) + ',' + (rr - minR));
+    }
+    wall.shape.cells = next;
+}
+
+/* Apply a cell edit: normalize, update bbox-derived dims, rebuild 3D,
+   refresh editor overlay info & canvas. */
+function commitShapeEdit(wall) {
+    normalizeShape(wall);
+    const bbox = wallBBox(wall);
+    wall.cols = Math.max(1, bbox.cols);
+    wall.rows = Math.max(1, bbox.rows);
+    if (wall.id === activeContextWallId) {
+        state.cols = wall.cols;
+        state.rows = wall.rows;
+    }
+    invalidateLayout();
+    buildWall();
+    renderWallList();
+    updateSidebarInfo();
+    updateShapeEditorInfo();
+    drawShapeEditor();
+}
+
+function drawShapeEditor() {
+    const { ctx, gridCols, gridRows, cellPx, hover, wallId } = shapeEditor;
+    if (!ctx) return;
+    const wall = state.walls.find(w => w.id === wallId);
+    const cells = wall && wall.shape && wall.shape.cells ? wall.shape.cells : new Set();
+    const W = gridCols * cellPx, H = gridRows * cellPx;
+
+    // Background
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0, 0, W + 1, H + 1);
+
+    // Filled cells
+    ctx.fillStyle = '#3b82f6';
+    for (const key of cells) {
+        const i = key.indexOf(',');
+        const c = +key.slice(0, i), r = +key.slice(i + 1);
+        if (c < 0 || r < 0 || c >= gridCols || r >= gridRows) continue;
+        ctx.fillRect(c * cellPx + 1, r * cellPx + 1, cellPx - 1, cellPx - 1);
+    }
+
+    // Grid lines
+    ctx.strokeStyle = '#1f1f1f';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let c = 0; c <= gridCols; c++) {
+        ctx.moveTo(c * cellPx + 0.5, 0);
+        ctx.lineTo(c * cellPx + 0.5, H);
+    }
+    for (let r = 0; r <= gridRows; r++) {
+        ctx.moveTo(0, r * cellPx + 0.5);
+        ctx.lineTo(W, r * cellPx + 0.5);
+    }
+    ctx.stroke();
+
+    // Hover highlight — color encodes legality (see classifyShapeEdit)
+    if (hover) {
+        const action = classifyShapeEdit(cells, hover.c, hover.r);
+        const x = hover.c * cellPx, y = hover.r * cellPx;
+        let fill, stroke;
+        switch (action) {
+            case 'add':    fill = 'rgba(147, 197, 253, 0.30)'; stroke = '#93c5fd'; break;   // light blue
+            case 'remove': fill = 'rgba(239, 68, 68, 0.30)';   stroke = '#ef4444'; break;   // red
+            case 'last':   fill = 'rgba(120, 120, 120, 0.35)'; stroke = '#666';    break;   // gray (can't remove last)
+            case 'no-adj': fill = 'rgba(234, 88, 12, 0.25)';   stroke = '#ea580c'; break;   // orange (not adjacent)
+            case 'split':  fill = 'rgba(234, 88, 12, 0.25)';   stroke = '#ea580c'; break;   // orange (would split)
+        }
+        ctx.fillStyle = fill;
+        ctx.fillRect(x + 1, y + 1, cellPx - 1, cellPx - 1);
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x + 1.5, y + 1.5, cellPx - 2, cellPx - 2);
+
+        // For illegal actions, draw a diagonal strike to reinforce "blocked".
+        if (action === 'last' || action === 'no-adj' || action === 'split') {
+            ctx.beginPath();
+            ctx.moveTo(x + 2, y + cellPx - 2);
+            ctx.lineTo(x + cellPx - 2, y + 2);
+            ctx.stroke();
+        }
+    }
 }
 
 function removeWall(wallId) {
@@ -1815,11 +2287,11 @@ function renderWallList() {
         entry.className = 'wall-entry' + (wall.id === state.selectedWallId ? ' selected' : '');
         entry.dataset.id = wall.id;
 
-        entry.innerHTML =
-            '<div class="wall-entry-header">' +
-            '<span class="wall-entry-name">' + escHtml(wall.name) + '</span>' +
-            (state.walls.length > 1 ? '<button class="cw-entry-delete wall-entry-delete" title="Remove">\u2715</button>' : '') +
-            '</div>' +
+        const isRect = isRectWall(wall);
+        const bbox = wallBBox(wall);
+        const filled = wallFilledCount(wall);
+
+        const rectControlsHtml =
             '<div class="wall-entry-controls">' +
             '<div class="wall-dim-group">' +
             '<span class="wall-dim-title">Columns</span>' +
@@ -1837,6 +2309,24 @@ function renderWallList() {
             '<button class="wall-dim-btn" data-wall="' + wall.id + '" data-dim="rows" data-delta="1">+</button>' +
             '</div></div>' +
             '</div>';
+
+        const customControlsHtml =
+            '<div class="wall-shape-info">' +
+            '<span><b>' + bbox.cols + ' \u00d7 ' + bbox.rows + '</b> bounding box</span>' +
+            '<span><b>' + filled + '</b> panel' + (filled === 1 ? '' : 's') + '</span>' +
+            '</div>' +
+            '<button class="wall-edit-shape-btn" data-wall="' + wall.id + '" data-action="edit-shape">Edit Shape</button>';
+
+        entry.innerHTML =
+            '<div class="wall-entry-header">' +
+            '<span class="wall-entry-name">' + escHtml(wall.name) + '</span>' +
+            (state.walls.length > 1 ? '<button class="cw-entry-delete wall-entry-delete" title="Remove">\u2715</button>' : '') +
+            '</div>' +
+            '<div class="wall-mode-row">' +
+            '<button class="wall-mode-btn' + (isRect ? ' active' : '') + '" data-wall="' + wall.id + '" data-mode="rect">Rectangle</button>' +
+            '<button class="wall-mode-btn' + (!isRect ? ' active' : '') + '" data-wall="' + wall.id + '" data-mode="custom">Custom Shape</button>' +
+            '</div>' +
+            (isRect ? rectControlsHtml : customControlsHtml);
 
         function startWallRename(nameSpan) {
             if (document.querySelector('.wall-entry-rename')) return;
@@ -1977,6 +2467,64 @@ function computeColumnLayout() {
 
     _cachedLayout = columns;
     return _cachedLayout;
+}
+
+/* ── v3: Custom shape helpers ─────────────────────────────────────────────
+   A wall's shape is either 'rect' (every bbox cell filled, authoritative
+   via cols×rows) or 'custom' (sparse cells Set). For rect walls we
+   synthesize cells on demand so the rest of the code can iterate
+   uniformly over a cell list regardless of mode. */
+
+/* Returns the currently-active wall object (the one buildWall() operates on). */
+function activeWall() {
+    return state.walls.find(w => w.id === activeContextWallId) || null;
+}
+
+function isRectWall(wall) {
+    return !wall.shape || wall.shape.mode === 'rect';
+}
+
+/* Returns a Set<"c,r"> of filled cells for this wall. For rect walls
+   this is synthesized fresh each call (small sets; no caching complexity
+   needed). For custom walls it's the authoritative Set stored on the
+   wall. Callers MUST NOT mutate the returned Set for rect walls. */
+function wallFilledCells(wall) {
+    if (isRectWall(wall)) {
+        const out = new Set();
+        const cols = wall.cols | 0, rows = wall.rows | 0;
+        for (let c = 0; c < cols; c++) {
+            for (let r = 0; r < rows; r++) out.add(c + ',' + r);
+        }
+        return out;
+    }
+    return wall.shape.cells || new Set();
+}
+
+/* Returns the bounding box of the shape in cell space.
+   { cols, rows, minC, minR } — cols/rows is the span, minC/minR is
+   the offset of the bbox origin in the cell coordinate system. */
+function wallBBox(wall) {
+    if (isRectWall(wall)) {
+        return { cols: wall.cols | 0, rows: wall.rows | 0, minC: 0, minR: 0 };
+    }
+    const cells = wall.shape.cells;
+    if (!cells || cells.size === 0) return { cols: 0, rows: 0, minC: 0, minR: 0 };
+    let minC = Infinity, minR = Infinity, maxC = -Infinity, maxR = -Infinity;
+    for (const key of cells) {
+        const i = key.indexOf(',');
+        const c = +key.slice(0, i), r = +key.slice(i + 1);
+        if (c < minC) minC = c;
+        if (r < minR) minR = r;
+        if (c > maxC) maxC = c;
+        if (r > maxR) maxR = r;
+    }
+    return { cols: maxC - minC + 1, rows: maxR - minR + 1, minC, minR };
+}
+
+/* Returns number of filled cells (panel count). */
+function wallFilledCount(wall) {
+    if (isRectWall(wall)) return (wall.cols | 0) * (wall.rows | 0);
+    return wall.shape.cells ? wall.shape.cells.size : 0;
 }
 
 /* Compute flat segments (runs of columns between corners) — memoized */
@@ -2379,13 +2927,15 @@ function checkGridAutoVisibility() {
         const saved = activeContextWallId;
         for (const wall of state.walls) {
             activateWallContext(wall.id);
-            if (shouldShow) buildPixelGrid(computeColumnLayout(), wallDims());
+            if (shouldShow) buildPixelGrid(computeColumnLayout(), wallDims(), wallFilledCells(wall));
             else _removeAllGrids();
         }
         activateWallContext(saved);
     } else {
-        if (shouldShow) buildPixelGrid(computeColumnLayout(), wallDims());
-        else _removeAllGrids();
+        if (shouldShow) {
+            const w = activeWall();
+            buildPixelGrid(computeColumnLayout(), wallDims(), w ? wallFilledCells(w) : null);
+        } else _removeAllGrids();
     }
 }
 
@@ -2506,6 +3056,11 @@ function buildWall() {
         miterCuts.push(cut);
     }
 
+    // v3: render only filled cells. For rect walls wallFilledCells returns
+    // a full rows×cols set, so behavior is identical to pre-v3.
+    const _wall = activeWall();
+    const cells = _wall ? wallFilledCells(_wall) : null;
+
     for (let c = 0; c < d.cols; c++) {
         const col = layout[c];
         const cut = miterCuts[c];
@@ -2514,6 +3069,7 @@ function buildWall() {
         if (hasMiter) customPanelGeoms.push(geom);
 
         for (let r = 0; r < d.rows; r++) {
+            if (cells && !cells.has(c + ',' + r)) continue;
             const mesh = new THREE.Mesh(geom, panelMats);
             const y = d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap);
             mesh.position.set(col.x, y, col.z);
@@ -2523,8 +3079,8 @@ function buildWall() {
         }
     }
 
-    buildBezelLines(layout, d, miterCuts);
-    buildPixelGrid(layout, d);
+    buildBezelLines(layout, d, miterCuts, cells);
+    buildPixelGrid(layout, d, cells);
     updateSidebarInfo();
     applyAllWindowRects();
     fitCameraToWall();
@@ -2543,6 +3099,10 @@ function buildAccessories() {
     markDirty();
     accessoryMeshes.forEach(m => wallGroup.remove(m));
     accessoryMeshes = [];
+
+    // v3: custom-shape walls don't render base & support accessories.
+    const _wall = activeWall();
+    if (_wall && !isRectWall(_wall)) return;
 
     const d = wallDims();
     const layout = computeColumnLayout();
@@ -2692,8 +3252,9 @@ function buildCornerFills() {
     }
 }
 
-/* Build panel edge delineating lines on the front face of each panel */
-function buildBezelLines(layout, d, miterCuts) {
+/* Build panel edge delineating lines on the front face of each panel.
+   v3: if a `cells` set is provided, unfilled cells are skipped. */
+function buildBezelLines(layout, d, miterCuts, cells) {
     bezelLineMeshes.forEach(m => { m.geometry.dispose(); wallGroup.remove(m); });
     bezelLineMeshes = [];
 
@@ -2708,6 +3269,7 @@ function buildBezelLines(layout, d, miterCuts) {
         const pts = [];
 
         for (let r = 0; r < d.rows; r++) {
+            if (cells && !cells.has(c + ',' + r)) continue;
             const y = d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap);
             const lx = -hw + lfCut, rx = hw - rfCut;
             const yt = y + hh, yb = y - hh;
@@ -2719,6 +3281,7 @@ function buildBezelLines(layout, d, miterCuts) {
             pts.push(lx, yb, lineZ,  lx, yt, lineZ);   // left edge
         }
 
+        if (pts.length === 0) continue;
         const geom = new THREE.BufferGeometry();
         geom.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
         const lines = new THREE.LineSegments(geom, bezelLineMat);
@@ -2729,8 +3292,9 @@ function buildBezelLines(layout, d, miterCuts) {
     }
 }
 
-/* ── Pixel-grid overlay (analytic shader grid on layer 1 — moiré-free by fwidth AA) ── */
-function buildPixelGrid(layout, d) {
+/* ── Pixel-grid overlay (analytic shader grid on layer 1 — moiré-free by fwidth AA) ──
+   v3: if a `cells` set is provided, unfilled cells are skipped. */
+function buildPixelGrid(layout, d, cells) {
     pixelGridMeshes.forEach(m => wallGroup.remove(m));
     pixelGridMeshes = [];
     if (!state.showPixelGrid) return;
@@ -2742,6 +3306,7 @@ function buildPixelGrid(layout, d) {
         const cos = Math.cos(col.rotY), sin = Math.sin(col.rotY);
 
         for (let r = 0; r < d.rows; r++) {
+            if (cells && !cells.has(c + ',' + r)) continue;
             const y = d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap);
 
             /* Shader grid mesh — one plane per panel, rendered on gridRenderer (layer 1).
@@ -2802,6 +3367,183 @@ function createDimSprite(text) {
     return sprite;
 }
 
+/* v3 Phase 6: extract boundary edge runs from a custom shape's cell set.
+
+   Returns an array of runs, each:
+     { axis:'h'|'v', nx, ny, perpIdx, fromIdx, toIdx }
+   where:
+     axis='h': horizontal edge at the top (ny=+1) or bottom (ny=-1) of row `perpIdx`,
+               spanning cols [fromIdx..toIdx] inclusive.
+     axis='v': vertical edge at the left (nx=-1) or right (nx=+1) of col `perpIdx`,
+               spanning rows [fromIdx..toIdx] inclusive.
+     (nx, ny) = outward normal, i.e. direction from the filled cell to the empty
+     neighbor. This works naturally for both outer boundary (normal points outside
+     the bbox) and inner holes (normal points into the hole).
+
+   A "run" is the maximal contiguous sequence of unit edges with the same normal
+   and perpendicular coord, and consecutive along-axis indices.
+*/
+function computeShapeEdgeRuns(cells) {
+    const has = k => cells.has(k);
+
+    // Per-row runs of top-facing and bottom-facing edges.
+    // Collect per-row column ranges then merge consecutive cols.
+    const rowRanges = {}; // key = perpIdx + ':' + 'top'|'bot' -> [cols]
+    const colRanges = {}; // key = perpIdx + ':' + 'left'|'right' -> [rows]
+    for (const key of cells) {
+        const i = key.indexOf(',');
+        const c = +key.slice(0, i), r = +key.slice(i + 1);
+        // 'top' edge: empty above
+        if (!has(c + ',' + (r - 1))) {
+            (rowRanges[r + ':top']  = rowRanges[r + ':top']  || []).push(c);
+        }
+        // 'bottom' edge: empty below
+        if (!has(c + ',' + (r + 1))) {
+            (rowRanges[r + ':bot']  = rowRanges[r + ':bot']  || []).push(c);
+        }
+        // 'left' edge: empty to the left
+        if (!has((c - 1) + ',' + r)) {
+            (colRanges[c + ':left'] = colRanges[c + ':left'] || []).push(r);
+        }
+        // 'right' edge: empty to the right
+        if (!has((c + 1) + ',' + r)) {
+            (colRanges[c + ':right'] = colRanges[c + ':right']|| []).push(r);
+        }
+    }
+
+    const runs = [];
+    const pushRuns = (dict, axis) => {
+        for (const key of Object.keys(dict)) {
+            const [idxStr, side] = key.split(':');
+            const perpIdx = +idxStr;
+            const list = dict[key].slice().sort((a, b) => a - b);
+            let from = list[0], prev = list[0];
+            for (let i = 1; i <= list.length; i++) {
+                const cur = list[i];
+                if (cur !== prev + 1) {
+                    // Emit run [from..prev]
+                    let nx = 0, ny = 0;
+                    if (axis === 'h') ny = (side === 'top') ? +1 : -1;
+                    else              nx = (side === 'left') ? -1 : +1;
+                    runs.push({ axis, nx, ny, perpIdx, fromIdx: from, toIdx: prev });
+                    from = cur;
+                }
+                prev = cur;
+            }
+        }
+    };
+    pushRuns(rowRanges, 'h');
+    pushRuns(colRanges, 'v');
+    return runs;
+}
+
+/* v3 Phase 6: draw dimension lines for a custom-shape wall using edge runs.
+   One dim line per run, offset outward along the edge's normal, with an inch
+   label. Shares dimMat + createDimSprite with the rect implementation. */
+function buildCustomShapeDimensions(wall, d, layout) {
+    const dimMat = dimLineMat;
+    const zFront = PANEL_D_IN / 2 + 0.15;
+    const offset = 3.0;         // inches from edge to dim line
+    const tickHalf = 0.8;
+    const extGap = 0.8;
+    const extOvershoot = 0.6;
+
+    const cells = wall.shape.cells;
+    const runs = computeShapeEdgeRuns(cells);
+
+    // Cell geometry in this wall's local X/Y (z=col.z, rotY=0 for custom — no corners).
+    // Cell (c, r):
+    //   left  X = layout[c].x - PANEL_W_IN/2
+    //   right X = layout[c].x + PANEL_W_IN/2
+    //   top   Y = d.totalH/2 - r*(PANEL_H_IN + d.gap)
+    //   bot   Y = top - PANEL_H_IN
+    const cellLeftX  = c => layout[c].x - PANEL_W_IN / 2;
+    const cellRightX = c => layout[c].x + PANEL_W_IN / 2;
+    const cellTopY   = r => d.totalH / 2 - r * (PANEL_H_IN + d.gap);
+    const cellBotY   = r => cellTopY(r) - PANEL_H_IN;
+
+    for (const run of runs) {
+        let x0, x1, y0, y1;       // edge endpoints (the line on the panel boundary)
+        let lx, ly;               // dim line endpoints (offset outward)
+        let labelX, labelY;
+        let lengthIn;
+
+        if (run.axis === 'h') {
+            // Horizontal edge on top (ny=+1) or bottom (ny=-1) of row `perpIdx`
+            const r = run.perpIdx;
+            const yEdge = run.ny > 0 ? cellTopY(r) : cellBotY(r);
+            x0 = cellLeftX(run.fromIdx);
+            x1 = cellRightX(run.toIdx);
+            y0 = y1 = yEdge;
+            const span = run.toIdx - run.fromIdx + 1;
+            lengthIn = span * PANEL_W_IN + (span - 1) * d.gap;
+            // Offset outward along Y
+            lx = yEdge + run.ny * offset;
+            // Dim line runs from x0..x1 at Y=lx
+            const pts = [];
+            // Extension lines
+            pts.push(x0, yEdge + run.ny * extGap, zFront,
+                     x0, lx + run.ny * extOvershoot, zFront);
+            pts.push(x1, yEdge + run.ny * extGap, zFront,
+                     x1, lx + run.ny * extOvershoot, zFront);
+            // Horizontal dim line
+            pts.push(x0, lx, zFront,  x1, lx, zFront);
+            // Serif ticks
+            pts.push(x0, lx - tickHalf, zFront,  x0, lx + tickHalf, zFront);
+            pts.push(x1, lx - tickHalf, zFront,  x1, lx + tickHalf, zFront);
+
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+            const lines = new THREE.LineSegments(geom, dimMat);
+            lines.renderOrder = DIMENSION_RENDER_ORDER;
+            lines.position.set(0, 0, 0);
+            wallGroup.add(lines);
+            dimensionObjects.push(lines);
+
+            const sprite = createDimSprite(lengthIn.toFixed(1) + '"');
+            labelX = (x0 + x1) / 2;
+            labelY = lx + run.ny * 1.6;
+            sprite.position.set(labelX, labelY, zFront);
+            wallGroup.add(sprite);
+            dimensionObjects.push(sprite);
+        } else {
+            // Vertical edge on left (nx=-1) or right (nx=+1) of col `perpIdx`
+            const c = run.perpIdx;
+            const xEdge = run.nx < 0 ? cellLeftX(c) : cellRightX(c);
+            y0 = cellTopY(run.fromIdx);
+            y1 = cellBotY(run.toIdx);
+            x0 = x1 = xEdge;
+            const span = run.toIdx - run.fromIdx + 1;
+            lengthIn = span * PANEL_H_IN + (span - 1) * d.gap;
+            const lxOff = xEdge + run.nx * offset;
+
+            const pts = [];
+            pts.push(xEdge + run.nx * extGap, y0, zFront,
+                     lxOff + run.nx * extOvershoot, y0, zFront);
+            pts.push(xEdge + run.nx * extGap, y1, zFront,
+                     lxOff + run.nx * extOvershoot, y1, zFront);
+            pts.push(lxOff, y0, zFront,  lxOff, y1, zFront);
+            pts.push(lxOff - tickHalf, y0, zFront,  lxOff + tickHalf, y0, zFront);
+            pts.push(lxOff - tickHalf, y1, zFront,  lxOff + tickHalf, y1, zFront);
+
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+            const lines = new THREE.LineSegments(geom, dimMat);
+            lines.renderOrder = DIMENSION_RENDER_ORDER;
+            lines.position.set(0, 0, 0);
+            wallGroup.add(lines);
+            dimensionObjects.push(lines);
+
+            const sprite = createDimSprite(lengthIn.toFixed(1) + '"');
+            labelX = lxOff + run.nx * 1.6;
+            labelY = (y0 + y1) / 2;
+            sprite.position.set(labelX, labelY, zFront);
+            wallGroup.add(sprite);
+            dimensionObjects.push(sprite);
+        }
+    }
+}
+
 function buildDimensions() {
     markDirty();
     dimensionObjects.forEach(o => {
@@ -2814,6 +3556,15 @@ function buildDimensions() {
 
     const d = wallDims();
     const layout = computeColumnLayout();
+
+    // v3 Phase 6: custom-shape walls get per-edge dimensions, not the
+    // rect bbox width+height. Rect walls keep the original segment/face logic.
+    const _wall = activeWall();
+    if (_wall && !isRectWall(_wall)) {
+        buildCustomShapeDimensions(_wall, d, layout);
+        return;
+    }
+
     const segments = computeSegments();
     const dimMat = dimLineMat;
 
@@ -3178,7 +3929,16 @@ function updateSidebarInfo() {
     const totalWIn = d.cols * PANEL_W_IN;
     const totalHIn = d.rows * PANEL_H_IN;
 
-    elTotalPanels.textContent = d.cols * d.rows;
+    // v3 Phase 7: for custom shapes, show actual filled count, not bbox count.
+    // Format "16 of 25" so both physical panels and bbox are visible.
+    const active = activeWall();
+    if (active && !isRectWall(active)) {
+        const filled = wallFilledCount(active);
+        const bbox = d.cols * d.rows;
+        elTotalPanels.textContent = filled + ' of ' + bbox;
+    } else {
+        elTotalPanels.textContent = d.cols * d.rows;
+    }
     elTotalRes.textContent = d.wallWPx + ' x ' + d.wallHPx + ' px';
     elTotalSize.textContent = totalWIn.toFixed(1) + '" x ' + totalHIn.toFixed(1) + '"';
     elTotalSizeFt.textContent = (totalWIn / 12).toFixed(1) + "' x " + (totalHIn / 12).toFixed(1) + "'";
@@ -3200,9 +3960,19 @@ function updateSidebarInfo() {
         var wIn = wd.cols * PANEL_W_IN;
         var hIn = wd.rows * PANEL_H_IN;
         var corners = wall.corners ? wall.corners.length : 0;
+        // v3 Phase 7: annotate custom walls with "custom X/Y" so users can tell
+        // from the summary at a glance that it's not a full rectangle.
+        var customNote = '';
+        if (!isRectWall(wall)) {
+            var filled = wallFilledCount(wall);
+            var total = wd.cols * wd.rows;
+            customNote = ' \u00b7 custom ' + filled + '/' + total;
+        }
         html += '<div class="wall-info-entry">';
         html += '<span class="wall-info-name">' + wall.name + '</span>: ' +
-            wd.cols + ' by ' + wd.rows + (corners > 0 ? ' \u00b7 ' + corners + ' corner' + (corners > 1 ? 's' : '') : '');
+            wd.cols + ' by ' + wd.rows +
+            (corners > 0 ? ' \u00b7 ' + corners + ' corner' + (corners > 1 ? 's' : '') : '') +
+            customNote;
         html += '<div class="wall-info-detail">' +
             wd.wallWPx + ' x ' + wd.wallHPx + ' px, ' +
             fmtFtIn(wIn) + ' x ' + fmtFtIn(hIn) +
@@ -3860,6 +4630,23 @@ function adjustWallDim(wallId, dim, newValue) {
 }
 
 document.getElementById('wallList').addEventListener('click', e => {
+    // v3: mode toggle (Rect / Custom)
+    const modeBtn = e.target.closest('.wall-mode-btn');
+    if (modeBtn) {
+        e.stopPropagation();
+        const wallId = parseInt(modeBtn.dataset.wall);
+        const mode = modeBtn.dataset.mode;
+        switchWallMode(wallId, mode);
+        return;
+    }
+    // v3: Edit Shape button
+    const editBtn = e.target.closest('.wall-edit-shape-btn');
+    if (editBtn) {
+        e.stopPropagation();
+        const wallId = parseInt(editBtn.dataset.wall);
+        openShapeEditor(wallId);
+        return;
+    }
     const btn = e.target.closest('.wall-dim-btn');
     if (!btn) return;
     e.stopPropagation();
@@ -3877,6 +4664,14 @@ document.getElementById('wallList').addEventListener('change', e => {
     const wallId = parseInt(input.dataset.wall);
     const dim = input.dataset.dim;
     adjustWallDim(wallId, dim, parseInt(input.value) || 1);
+});
+
+/* v3: Shape editor Done button + Esc to close */
+document.getElementById('shapeEditorDone').addEventListener('click', closeShapeEditor);
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && shapeEditor.open) {
+        closeShapeEditor();
+    }
 });
 
 /* ── Wall UI wiring ── */
@@ -5008,6 +5803,11 @@ function capturePreset(name) {
             rows: w.rows,
             corners: JSON.parse(JSON.stringify(w.corners)),
             contentWindows: w.contentWindows.map(cw => ({ rect: { ...cw.rect }, mode: cw.mode })),
+            // v3: custom shape. Serialize cells as sparse array for compact
+            // JSON; omit entirely for rect walls so old consumers still work.
+            shape: (w.shape && w.shape.mode === 'custom' && w.shape.cells)
+                ? { mode: 'custom', cells: Array.from(w.shape.cells) }
+                : { mode: 'rect' },
         })),
         cwUnit: state.cwUnit,
         spanContent: state.spanContent,
@@ -5059,6 +5859,10 @@ function applyPreset(preset) {
         state.walls[0].name = firstPresetWall.name || 'Wall 1';
         syncActiveWallScalars();
         state.walls[0].corners = state.corners;
+        // v3: restore custom shape if present; default to rect otherwise.
+        state.walls[0].shape = (firstPresetWall.shape && firstPresetWall.shape.mode === 'custom' && Array.isArray(firstPresetWall.shape.cells))
+            ? { mode: 'custom', cells: new Set(firstPresetWall.shape.cells) }
+            : { mode: 'rect', cells: null };
         [...state.contentWindows].forEach(w => removeContentWindow(w.id));
         if (firstPresetWall.contentWindows) {
             firstPresetWall.contentWindows.forEach(pw => {
@@ -5080,6 +5884,10 @@ function applyPreset(preset) {
             state.corners = JSON.parse(JSON.stringify(pw.corners || []));
             syncActiveWallScalars();
             wall.corners = state.corners;
+            // v3: restore custom shape if present
+            wall.shape = (pw.shape && pw.shape.mode === 'custom' && Array.isArray(pw.shape.cells))
+                ? { mode: 'custom', cells: new Set(pw.shape.cells) }
+                : { mode: 'rect', cells: null };
             [...state.contentWindows].forEach(w => removeContentWindow(w.id));
             if (pw.contentWindows) {
                 pw.contentWindows.forEach(cwp => {
