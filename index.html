@@ -4515,10 +4515,35 @@ overlay.addEventListener('mousemove', e => {
     }
 });
 
-overlay.addEventListener('mouseup', () => { isDragging = false; isDraggingContent = false; });
-overlay.addEventListener('mouseleave', () => { isDragging = false; isDraggingContent = false; });
+overlay.addEventListener('mouseup', () => {
+    isDragging = false;
+    if (isDraggingContent) {
+        isDraggingContent = false;
+        // Re-enable OrbitControls unless the user has pinned content drag mode.
+        if (!state.contentDragMode) controls.enabled = true;
+        overlay.style.cursor = '';
+    }
+});
+overlay.addEventListener('mouseleave', () => {
+    isDragging = false;
+    if (isDraggingContent) {
+        isDraggingContent = false;
+        if (!state.contentDragMode) controls.enabled = true;
+        overlay.style.cursor = '';
+    }
+});
 
-/* ── Content drag mode ── */
+/* ── Content drag mode ──
+
+   Two ways to drag a content window:
+   (1) Direct drag (always on): Click on any content window in the 3D scene to
+       select and drag it. If the window is in Stretch Fill or Scaled Fill
+       layout, it seamlessly switches to Custom Size on drag-start so the
+       drag has somewhere to move to. Clicking empty wall still rotates the
+       camera via OrbitControls.
+   (2) Exclusive drag mode (Drag Content button): Disables orbit entirely —
+       useful for precise positioning where you don't want accidental rotation.
+*/
 const dragContentBtn = document.getElementById('dragContentToggle');
 let isDraggingContent = false;
 let contentDragOffset = { x: 0, y: 0 };
@@ -4533,32 +4558,68 @@ function setContentDragMode(on) {
     dragContentBtn.classList.toggle('active', on);
     hint.textContent = on
         ? 'Click & drag to move selected content window on wall surface'
-        : 'Drag to rotate \u00b7 Scroll to zoom \u00b7 Middle/right-click to pan';
+        : 'Drag to rotate \u00b7 Scroll to zoom \u00b7 Click content window to move it';
 }
 
 dragContentBtn.addEventListener('click', () => setContentDragMode(!state.contentDragMode));
 
-overlay.addEventListener('mousedown', e => {
-    if (!state.contentDragMode || e.button !== 0) return;
-    e.stopPropagation();
-    updateMouseNDC(e);
+/* Promote a window to Custom Size layout, preserving its currently-visible rect.
+   For fill/scaled modes the on-screen rect is the full wall, so after promotion
+   the user sees no visual change — just that dragging now works. */
+function promoteWindowToCustom(win) {
+    if (win.mode === 'custom') return;
+    const { wallWPx, wallHPx } = wallDims();
+    win.mode = 'custom';
+    win.rect = { x: 0, y: 0, w: wallWPx, h: wallHPx };
+    // Sync layout tab UI
+    document.querySelectorAll('.cw-mode-tab').forEach(t =>
+        t.classList.toggle('active', t.dataset.cwmode === 'custom'));
+    const cc = document.getElementById('cwCustomControls');
+    if (cc) cc.classList.add('active');
+}
 
+/* Decide if a given mousedown should start a content drag. Returns the
+   window that will be dragged, or null if OrbitControls should handle it.
+   A drag starts when the click hits any existing window — we select it
+   (if not already) and promote to Custom if needed. In exclusive mode
+   (state.contentDragMode), we also fall back to the active window when
+   the click misses, matching the prior click-anywhere behavior. */
+function findDragTarget(e) {
+    if (e.button !== 0) return null;
+    updateMouseNDC(e);
     raycaster.setFromCamera(mouse, camera);
     const hits = raycaster.intersectObjects(panelMeshes);
-    if (hits.length === 0) return;
+    if (hits.length === 0) return null;
 
-    const hitPoint = hits[0].point;
-    const pixel = worldToWallPixel(hitPoint);
-    if (!pixel) return;
+    const pixel = worldToWallPixel(hits[0].point);
+    if (!pixel) return null;
 
-    // Check if we clicked on an existing window — select it
     const hitWin = windowAtPixel(pixel.x, pixel.y);
     if (hitWin) {
-        selectContentWindow(hitWin.id);
+        if (hitWin.id !== state.selectedWindowId) selectContentWindow(hitWin.id);
+        return { win: hitWin, pixel };
     }
+    // Exclusive mode: falling back to active window lets the user
+    // re-grab even after clicking empty wall (legacy behavior).
+    if (state.contentDragMode) {
+        const active = activeWindow();
+        if (active) return { win: active, pixel };
+    }
+    return null;
+}
 
-    const win = activeWindow();
-    if (!win || win.mode !== 'custom') return;
+overlay.addEventListener('mousedown', e => {
+    // Don't interfere with wall move mode (that handler runs first and stops the event).
+    if (state.moveMode) return;
+    const target = findDragTarget(e);
+    if (!target) return;
+
+    const { win, pixel } = target;
+    promoteWindowToCustom(win);
+    // Suspend OrbitControls during this drag so rotation doesn't fight movement.
+    controls.enabled = false;
+    e.stopPropagation();
+    e.preventDefault();
 
     contentDragOffset.x = pixel.x - win.rect.x;
     contentDragOffset.y = pixel.y - win.rect.y;
@@ -4568,7 +4629,7 @@ overlay.addEventListener('mousedown', e => {
 overlay.addEventListener('mousemove', e => {
     if (!isDraggingContent) return;
     const win = activeWindow();
-    if (!win) { isDraggingContent = false; return; }
+    if (!win) { isDraggingContent = false; controls.enabled = true; return; }
 
     updateMouseNDC(e);
     raycaster.setFromCamera(mouse, camera);
@@ -4589,6 +4650,25 @@ overlay.addEventListener('mousemove', e => {
     applyAllWindowRects();
     syncCwInputs();
     renderWindowList();
+});
+
+/* Hover cursor hint (separate from drag tracking). Show 'grab' cursor
+   when pointer is over any content window, 'grabbing' while dragging.
+   Only runs when not in an exclusive mode that already sets a cursor. */
+overlay.addEventListener('mousemove', e => {
+    if (state.moveMode || state.contentDragMode) return;
+    if (isDraggingContent) {
+        overlay.style.cursor = 'grabbing';
+        return;
+    }
+    updateMouseNDC(e);
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(panelMeshes);
+    if (hits.length === 0) { overlay.style.cursor = ''; return; }
+    const pixel = worldToWallPixel(hits[0].point);
+    if (!pixel) { overlay.style.cursor = ''; return; }
+    const hitWin = windowAtPixel(pixel.x, pixel.y);
+    overlay.style.cursor = hitWin ? 'grab' : '';
 });
 
 /* ── Save image ── */
