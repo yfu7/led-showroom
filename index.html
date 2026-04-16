@@ -1462,6 +1462,13 @@
                 <span class="slider"></span>
             </label>
         </div>
+        <div class="toggle-row" id="gpuToggleRow" style="display: none;">
+            <label>GPU Acceleration</label>
+            <label class="toggle">
+                <input type="checkbox" id="gpuToggle" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
         <div class="toggle-row">
             <label>Dimensions</label>
             <label class="toggle">
@@ -2177,6 +2184,80 @@ let pixelGridMeshes = [];
 let customPanelGeoms = [];
 let dimensionObjects = [];   // Lines + CSS3D labels for dimension annotations
 let venueObjectUrl = null;
+
+/* ── GPU detection & renderer rebuild ─────────────────────────────────────
+   Creates two throwaway WebGL contexts — one biased to high-performance,
+   one to low-power — and reads the unmasked renderer string via
+   WEBGL_debug_renderer_info. If the two strings differ, the system has
+   a switchable dual-GPU setup (discrete + integrated) and we expose a
+   toggle. Otherwise (identical strings, or extension unavailable), the
+   toggle stays hidden.
+*/
+function detectDualGPU() {
+    function probe(pref) {
+        try {
+            const c = document.createElement('canvas');
+            const gl = c.getContext('webgl2', { powerPreference: pref })
+                    || c.getContext('webgl',  { powerPreference: pref });
+            if (!gl) return null;
+            const ext = gl.getExtension('WEBGL_debug_renderer_info');
+            if (!ext) return null;
+            const r = (gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '').trim();
+            const loseCtx = gl.getExtension('WEBGL_lose_context');
+            if (loseCtx) loseCtx.loseContext();
+            return r;
+        } catch (_) { return null; }
+    }
+    const hi = probe('high-performance');
+    const lo = probe('low-power');
+    if (!hi || !lo) return null;
+    if (hi.toLowerCase() === lo.toLowerCase()) return null;
+    return { discrete: hi, integrated: lo };
+}
+
+/* Tear down the two WebGL renderers and rebuild them with a new
+   powerPreference. Three.js doesn't let you change powerPreference on
+   an existing context — it's baked in at creation — so we dispose and
+   re-create. Meshes/materials live in the scene graph and stay intact;
+   only the GL state needs rebuilding. */
+function rebuildGpuRenderers(highPerf) {
+    if (!renderer || !gridRenderer) return;
+    const showroom = document.getElementById('showroom');
+    const w = showroom.clientWidth || window.innerWidth;
+    const h = showroom.clientHeight || window.innerHeight;
+    const pref = highPerf ? 'high-performance' : 'low-power';
+
+    // Dispose old contexts + remove canvases
+    try { renderer.domElement.remove(); } catch (_) {}
+    try { renderer.dispose(); } catch (_) {}
+    try { gridRenderer.domElement.remove(); } catch (_) {}
+    try { gridRenderer.dispose(); } catch (_) {}
+
+    // Rebuild main renderer
+    renderer = new THREE.WebGLRenderer({
+        alpha: true, antialias: true, preserveDrawingBuffer: true, powerPreference: pref
+    });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setClearColor(0x000000, 0);
+    renderer.setSize(w, h);
+    document.getElementById('webglContainer').appendChild(renderer.domElement);
+
+    // Refresh max texture size (may differ between discrete/integrated)
+    const gl = renderer.getContext();
+    gpuMaxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 4096;
+    console.log('GPU max texture size (after switch):', gpuMaxTextureSize);
+
+    // Rebuild grid renderer
+    gridRenderer = new THREE.WebGLRenderer({
+        alpha: true, antialias: true, powerPreference: pref
+    });
+    gridRenderer.setPixelRatio(window.devicePixelRatio);
+    gridRenderer.setClearColor(0x000000, 0);
+    gridRenderer.setSize(w, h);
+    document.getElementById('gridOverlayContainer').appendChild(gridRenderer.domElement);
+
+    markDirty();
+}
 
 /* ── Init ── */
 function init() {
@@ -5106,6 +5187,27 @@ document.getElementById('addWindowBtn').addEventListener('click', () => addConte
 /* ── Boot ── */
 renderWindowList();
 init();
+
+/* ── GPU Acceleration toggle (only exposed on dual-GPU systems) ── */
+(() => {
+    const gpuInfo = detectDualGPU();
+    if (!gpuInfo) return;  // single-GPU (or extension blocked) — keep hidden
+    console.log('Dual GPU detected:', gpuInfo);
+    const row = document.getElementById('gpuToggleRow');
+    const toggle = document.getElementById('gpuToggle');
+    if (!row || !toggle) return;
+    row.style.display = '';
+    const saved = localStorage.getItem('useHighPerfGPU');
+    const on = saved === null ? true : saved === 'true';
+    toggle.checked = on;
+    // If user previously opted out, rebuild with low-power on load
+    if (!on) rebuildGpuRenderers(false);
+    toggle.addEventListener('change', e => {
+        const v = e.target.checked;
+        localStorage.setItem('useHighPerfGPU', v);
+        rebuildGpuRenderers(v);
+    });
+})();
 </script>
 
 </body>
