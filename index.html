@@ -2003,14 +2003,19 @@ function openShapeEditor(wallId) {
     // Rebuild wall to show ghost meshes for on-model editing
     rebuildShapeGhosts();
 
-    // Wire up events
+    // Wire up events. mousedown starts a drag-paint (mode chosen from the
+    // starting cell), mousemove paints subsequent cells, mouseup/leave clears
+    // the drag state. mouseup is wired on window so it fires even if released
+    // outside the canvas.
     const click = e => onShapeEditorClick(e);
     const move  = e => onShapeEditorMove(e);
     const leave = () => { shapeEditor.hover = null; drawShapeEditor(); };
+    const up    = () => { shapeDragMode = null; };
     c.addEventListener('mousedown', click);
     c.addEventListener('mousemove', move);
     c.addEventListener('mouseleave', leave);
-    shapeEditor.listeners = { click, move, leave };
+    window.addEventListener('mouseup', up);
+    shapeEditor.listeners = { click, move, leave, up };
 
     // Show panel + resize 3D viewport
     document.getElementById('shapeEditorPanel').classList.add('open');
@@ -2028,11 +2033,13 @@ function closeShapeEditor() {
         c.removeEventListener('mousedown', shapeEditor.listeners.click);
         c.removeEventListener('mousemove', shapeEditor.listeners.move);
         c.removeEventListener('mouseleave', shapeEditor.listeners.leave);
+        window.removeEventListener('mouseup', shapeEditor.listeners.up);
     }
     shapeEditor.open = false;
     shapeEditor.wallId = null;
     shapeEditor.hover = null;
     shapeEditor.listeners = null;
+    shapeDragMode = null;
     // Clean up ghost meshes used for on-model editing
     clearShapeGhosts();
     document.getElementById('shapeEditorPanel').classList.remove('open');
@@ -2066,19 +2073,33 @@ function canvasEventToShapeCell(e) {
 
 function onShapeEditorMove(e) {
     const cell = canvasEventToShapeCell(e);
+
+    // Hover tracking
     if (!cell) {
         if (shapeEditor.hover) { shapeEditor.hover = null; drawShapeEditor(); }
-        return;
-    }
-    if (!shapeEditor.hover || shapeEditor.hover.c !== cell.c || shapeEditor.hover.r !== cell.r) {
+    } else if (!shapeEditor.hover || shapeEditor.hover.c !== cell.c || shapeEditor.hover.r !== cell.r) {
         shapeEditor.hover = cell;
         drawShapeEditor();
+    }
+
+    // Drag-paint: while the mouse button is held and we've established a
+    // drag mode, paint cells as the mouse passes over them.
+    if (cell && shapeDragMode && (e.buttons & 1)) {
+        paintShapeCell(cell.c, cell.r);
     }
 }
 
 function onShapeEditorClick(e) {
     const cell = canvasEventToShapeCell(e);
     if (!cell) return;
+    // Establish drag mode from the starting cell's classification.
+    const wall = state.walls.find(w => w.id === shapeEditor.wallId);
+    if (wall) {
+        const action = classifyShapeEdit(wall.shape.cells, cell.c, cell.r);
+        if (action === 'add') shapeDragMode = 'add';
+        else if (action === 'remove') shapeDragMode = 'remove';
+        else shapeDragMode = null;   // illegal start — no drag
+    }
     toggleShapeCell(cell.c, cell.r);
 }
 
@@ -2165,6 +2186,32 @@ function toggleShapeCell(c, r) {
     if (action === 'remove') cells.delete(key);
     else cells.add(key);   // action === 'add'
     commitShapeEdit(wall);
+}
+
+/* Drag-paint: apply a single-direction edit (add-only or remove-only) to a
+   cell. Used by mousemove during a drag to "paint" over many cells. Returns
+   true if a change was committed, false if the cell was in the wrong state
+   or the edit was illegal (silently skipped, drag continues). */
+let shapeDragMode = null;      // 'add' | 'remove' | null
+function paintShapeCell(c, r) {
+    if (!shapeDragMode) return false;
+    const wall = state.walls.find(w => w.id === shapeEditor.wallId);
+    if (!wall || !wall.shape || wall.shape.mode !== 'custom') return false;
+    const cells = wall.shape.cells;
+    const action = classifyShapeEdit(cells, c, r);
+    // Only apply the action matching drag mode — so drag-remove skips empty
+    // cells (no re-adding), drag-add skips filled cells (no flipping back).
+    if (shapeDragMode === 'add' && action === 'add') {
+        cells.add(c + ',' + r);
+        commitShapeEdit(wall);
+        return true;
+    }
+    if (shapeDragMode === 'remove' && action === 'remove') {
+        cells.delete(c + ',' + r);
+        commitShapeEdit(wall);
+        return true;
+    }
+    return false;
 }
 
 /* On-model editing: show translucent "ghost" boxes at every empty cell that's
@@ -3253,7 +3300,10 @@ function buildWall() {
     buildPixelGrid(layout, d, cells);
     updateSidebarInfo();
     applyAllWindowRects();
-    fitCameraToWall();
+    // Skip camera refit while the shape editor is open so the view stays
+    // stable during edits (especially drag-paint, which relies on screen
+    // coords mapping consistently to cells between mouse events).
+    if (!shapeEditor.open) fitCameraToWall();
     buildAccessories();
     buildDimensions();
     // Corner fill wedges no longer needed — miter faces meet seamlessly
@@ -5485,35 +5535,60 @@ function updateMouseNDC(e) {
     mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 }
 
-/* v3: on-model shape editing — when the shape editor is open, a click in
-   the 3D scene edits the shape instead of triggering any other behavior.
-   Click a real panel → remove; click a ghost panel → add. Runs in capture
-   phase so it takes priority over content-drag / wall-move handlers. */
-overlay.addEventListener('mousedown', e => {
-    if (!shapeEditor.open || e.button !== 0) return;
-    updateMouseNDC(e);
+/* v3: on-model shape editing — when the shape editor is open, a click or
+   drag in the 3D scene edits the shape instead of rotating the camera.
+   Click a real panel → remove; click a ghost panel → add. Drag to paint
+   multiple cells at once. Runs in capture phase so it takes priority
+   over content-drag / wall-move / OrbitControls handlers on the same element. */
+function raycastShapeCell() {
     raycaster.setFromCamera(mouse, camera);
-    // Check ghosts first (they sit at empty cell positions)
-    let hitCell = null;
     const ghostHits = raycaster.intersectObjects(shapeGhostMeshes);
     if (ghostHits.length > 0) {
         const g = ghostHits[0].object;
-        if (g.userData.ghostCell) hitCell = g.userData.ghostCell;
+        if (g.userData.ghostCell) return g.userData.ghostCell;
     }
-    if (!hitCell) {
-        const panelHits = raycaster.intersectObjects(panelMeshes);
-        if (panelHits.length > 0) {
-            const m = panelHits[0].object;
-            if (m.userData.cell) hitCell = m.userData.cell;
-        }
+    const panelHits = raycaster.intersectObjects(panelMeshes);
+    if (panelHits.length > 0) {
+        const m = panelHits[0].object;
+        if (m.userData.cell) return m.userData.cell;
     }
+    return null;
+}
+
+overlay.addEventListener('mousedown', e => {
+    if (!shapeEditor.open || e.button !== 0) return;
+    updateMouseNDC(e);
+    const hitCell = raycastShapeCell();
     if (!hitCell) return;  // click on empty space — let OrbitControls rotate
+
+    // Establish drag mode from starting cell so subsequent mousemoves paint.
+    const wall = state.walls.find(w => w.id === shapeEditor.wallId);
+    if (wall) {
+        const action = classifyShapeEdit(wall.shape.cells, hitCell.c, hitCell.r);
+        if (action === 'add') shapeDragMode = 'add';
+        else if (action === 'remove') shapeDragMode = 'remove';
+        else shapeDragMode = null;
+    }
 
     // stopImmediatePropagation so OrbitControls (also listening on overlay)
     // doesn't also receive the event and start a camera rotation.
     e.stopImmediatePropagation();
     e.preventDefault();
     toggleShapeCell(hitCell.c, hitCell.r);
+}, true);
+
+/* Drag-paint in 3D: while the mouse button is held and a drag mode is set,
+   paint cells as the mouse passes over panels or ghosts. */
+overlay.addEventListener('mousemove', e => {
+    if (!shapeEditor.open || !shapeDragMode) return;
+    if ((e.buttons & 1) === 0) return;
+    updateMouseNDC(e);
+    const hitCell = raycastShapeCell();
+    if (!hitCell) return;
+    if (paintShapeCell(hitCell.c, hitCell.r)) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+    }
 }, true);
 
 overlay.addEventListener('mousedown', e => {
