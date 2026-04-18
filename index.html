@@ -1929,17 +1929,50 @@ function switchWallMode(wallId, mode) {
    remove panels; the 3D scene updates live. Cells are normalized on every
    edit (minC=0, minR=0) so the 3D render loop sees a 0-indexed cell set
    that matches the bbox-sized wall dims. */
+/* The editor canvas sizes itself to the current bbox + 1-cell padding on each
+   side (so the user can click just outside the current shape to grow it),
+   and uses the real panel aspect ratio for cells so the 2D editor visually
+   matches the 3D wall. These fields are recomputed on every commitShapeEdit. */
 const shapeEditor = {
     open: false,
     wallId: null,
-    gridCols: 30,
-    gridRows: 30,
-    cellPx: 14,
-    hover: null,         // { c, r } or null
+    padding: 1,          // cells of margin around bbox
+    gridCols: 0,         // padded cols (bbox.cols + 2*padding)
+    gridRows: 0,         // padded rows (bbox.rows + 2*padding)
+    cellWpx: 0,
+    cellHpx: 0,
+    maxCanvasW: 400,
+    maxCanvasH: 500,
+    hover: null,         // { c, r } or null — in SHAPE coords (pre-padding shift)
     canvas: null,
     ctx: null,
     listeners: null,     // { click, move, leave } — for removal on close
 };
+
+/* Recompute gridCols/gridRows/cellWpx/cellHpx from the wall's current bbox,
+   keeping the real panel aspect ratio and fitting within max canvas bounds.
+   Call this whenever the shape changes (or editor opens). */
+function layoutShapeEditor() {
+    const wall = state.walls.find(w => w.id === shapeEditor.wallId);
+    if (!wall) return;
+    const bbox = wallBBox(wall);
+    const pad = shapeEditor.padding;
+    shapeEditor.gridCols = Math.max(1, bbox.cols) + 2 * pad;
+    shapeEditor.gridRows = Math.max(1, bbox.rows) + 2 * pad;
+
+    const panelAspect = PANEL_W_IN / PANEL_H_IN;     // ~1.331
+    const maxW = shapeEditor.maxCanvasW, maxH = shapeEditor.maxCanvasH;
+    const cellHpxFromW = maxW / (shapeEditor.gridCols * panelAspect);
+    const cellHpxFromH = maxH / shapeEditor.gridRows;
+    const cellHpx = Math.max(6, Math.floor(Math.min(cellHpxFromW, cellHpxFromH)));
+    shapeEditor.cellHpx = cellHpx;
+    shapeEditor.cellWpx = Math.round(cellHpx * panelAspect);
+
+    if (shapeEditor.canvas) {
+        shapeEditor.canvas.width  = shapeEditor.gridCols * shapeEditor.cellWpx + 1;
+        shapeEditor.canvas.height = shapeEditor.gridRows * shapeEditor.cellHpx + 1;
+    }
+}
 
 function openShapeEditor(wallId) {
     const wall = state.walls.find(w => w.id === wallId);
@@ -1961,12 +1994,14 @@ function openShapeEditor(wallId) {
     shapeEditor.open = true;
     shapeEditor.hover = null;
 
-    // Size canvas to grid
+    // Size canvas to grid (bbox + padding, panel aspect ratio)
     const c = document.getElementById('shapeEditorCanvas');
-    c.width = shapeEditor.gridCols * shapeEditor.cellPx + 1;
-    c.height = shapeEditor.gridRows * shapeEditor.cellPx + 1;
     shapeEditor.canvas = c;
     shapeEditor.ctx = c.getContext('2d');
+    layoutShapeEditor();
+
+    // Rebuild wall to show ghost meshes for on-model editing
+    rebuildShapeGhosts();
 
     // Wire up events
     const click = e => onShapeEditorClick(e);
@@ -1998,6 +2033,8 @@ function closeShapeEditor() {
     shapeEditor.wallId = null;
     shapeEditor.hover = null;
     shapeEditor.listeners = null;
+    // Clean up ghost meshes used for on-model editing
+    clearShapeGhosts();
     document.getElementById('shapeEditorPanel').classList.remove('open');
     requestAnimationFrame(onResize);
 }
@@ -2011,30 +2048,38 @@ function updateShapeEditorInfo() {
     document.getElementById('shapeEditorCount').textContent = count;
 }
 
-function onShapeEditorMove(e) {
+/* Convert a canvas mouse event to shape-space cell coords.
+   The canvas draws the bbox with `padding` cells of margin on each side, so a
+   click at canvas-cell (col, row) corresponds to shape-cell (col - pad, row - pad).
+   Shape coords can be negative (e.g., clicking the left padding extends the
+   shape to the left — commitShapeEdit's normalizeShape handles the reshift). */
+function canvasEventToShapeCell(e) {
     const rect = shapeEditor.canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const c = Math.floor(x / shapeEditor.cellPx);
-    const r = Math.floor(y / shapeEditor.cellPx);
-    if (c < 0 || r < 0 || c >= shapeEditor.gridCols || r >= shapeEditor.gridRows) {
+    const canvasCol = Math.floor(x / shapeEditor.cellWpx);
+    const canvasRow = Math.floor(y / shapeEditor.cellHpx);
+    if (canvasCol < 0 || canvasRow < 0 ||
+        canvasCol >= shapeEditor.gridCols || canvasRow >= shapeEditor.gridRows) return null;
+    return { c: canvasCol - shapeEditor.padding, r: canvasRow - shapeEditor.padding };
+}
+
+function onShapeEditorMove(e) {
+    const cell = canvasEventToShapeCell(e);
+    if (!cell) {
         if (shapeEditor.hover) { shapeEditor.hover = null; drawShapeEditor(); }
         return;
     }
-    if (!shapeEditor.hover || shapeEditor.hover.c !== c || shapeEditor.hover.r !== r) {
-        shapeEditor.hover = { c, r };
+    if (!shapeEditor.hover || shapeEditor.hover.c !== cell.c || shapeEditor.hover.r !== cell.r) {
+        shapeEditor.hover = cell;
         drawShapeEditor();
     }
 }
 
 function onShapeEditorClick(e) {
-    const rect = shapeEditor.canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const c = Math.floor(x / shapeEditor.cellPx);
-    const r = Math.floor(y / shapeEditor.cellPx);
-    if (c < 0 || r < 0 || c >= shapeEditor.gridCols || r >= shapeEditor.gridRows) return;
-    toggleShapeCell(c, r);
+    const cell = canvasEventToShapeCell(e);
+    if (!cell) return;
+    toggleShapeCell(cell.c, cell.r);
 }
 
 /* Connectivity helpers (v3 Phase 5) — 4-neighbor adjacency over Set<"c,r">.
@@ -2122,6 +2167,81 @@ function toggleShapeCell(c, r) {
     commitShapeEdit(wall);
 }
 
+/* On-model editing: show translucent "ghost" boxes at every empty cell that's
+   adjacent to a filled cell, so the user can click directly in the 3D scene
+   to grow the shape. Real panels still raycast for removal. */
+const _ghostMat = new THREE.MeshBasicMaterial({
+    color: 0x3b82f6, transparent: true, opacity: 0.18, depthWrite: false,
+});
+const _ghostEdgeMat = new THREE.LineBasicMaterial({
+    color: 0x93c5fd, transparent: true, opacity: 0.6, depthWrite: false,
+});
+const _ghostBoxGeom = new THREE.BoxGeometry(PANEL_W_IN, PANEL_H_IN, PANEL_D_IN);
+const _ghostEdgeGeom = new THREE.EdgesGeometry(_ghostBoxGeom);
+
+function clearShapeGhosts() {
+    for (const g of shapeGhostMeshes) {
+        g.parent && g.parent.remove(g);
+    }
+    shapeGhostMeshes = [];
+}
+
+function rebuildShapeGhosts() {
+    clearShapeGhosts();
+    if (!shapeEditor.open) return;
+    const wall = state.walls.find(w => w.id === shapeEditor.wallId);
+    if (!wall || isRectWall(wall)) return;
+    const ctx = wallContextMap.get(wall.id);
+    if (!ctx) return;
+
+    const cells = wall.shape.cells;
+    const d = wallDims();
+    const layout = computeColumnLayout();
+    const step = PANEL_W_IN + d.gap;
+    const addPositions = new Set();
+    for (const key of cells) {
+        const i = key.indexOf(',');
+        const c = +key.slice(0, i), r = +key.slice(i + 1);
+        const nbrs = [[c-1,r],[c+1,r],[c,r-1],[c,r+1]];
+        for (const [nc, nr] of nbrs) {
+            const nk = nc + ',' + nr;
+            if (!cells.has(nk)) addPositions.add(nk);
+        }
+    }
+
+    // Position helpers: extrapolate for cells outside the current layout range
+    const cellX = c => {
+        if (c >= 0 && c < layout.length) return layout[c].x;
+        if (c < 0) return layout[0].x + c * step;
+        return layout[layout.length - 1].x + (c - layout.length + 1) * step;
+    };
+    const cellZ = c => {
+        if (c >= 0 && c < layout.length) return layout[c].z;
+        if (c < 0) return layout[0].z;
+        return layout[layout.length - 1].z;
+    };
+    const cellY = r => d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap);
+
+    for (const key of addPositions) {
+        const i = key.indexOf(',');
+        const c = +key.slice(0, i), r = +key.slice(i + 1);
+
+        // Semi-transparent body (raycast hit target)
+        const body = new THREE.Mesh(_ghostBoxGeom, _ghostMat);
+        body.position.set(cellX(c), cellY(r), cellZ(c));
+        body.userData.ghostCell = { c, r };
+        ctx.group.add(body);
+        shapeGhostMeshes.push(body);
+
+        // Wireframe outline to make ghosts visible
+        const edges = new THREE.LineSegments(_ghostEdgeGeom, _ghostEdgeMat);
+        edges.position.copy(body.position);
+        ctx.group.add(edges);
+        shapeGhostMeshes.push(edges);
+    }
+    markDirty();
+}
+
 function normalizeShape(wall) {
     if (!wall.shape || !wall.shape.cells || wall.shape.cells.size === 0) return;
     let minC = Infinity, minR = Infinity;
@@ -2154,18 +2274,27 @@ function commitShapeEdit(wall) {
     }
     invalidateLayout();
     buildWall();
+    if (shapeEditor.open && wall.id === shapeEditor.wallId) {
+        rebuildShapeGhosts();
+    }
     renderWallList();
     updateSidebarInfo();
     updateShapeEditorInfo();
+    // bbox may have changed size — re-layout canvas to fit
+    if (shapeEditor.open && wall.id === shapeEditor.wallId) layoutShapeEditor();
     drawShapeEditor();
 }
 
 function drawShapeEditor() {
-    const { ctx, gridCols, gridRows, cellPx, hover, wallId } = shapeEditor;
+    const { ctx, gridCols, gridRows, cellWpx, cellHpx, padding, hover, wallId } = shapeEditor;
     if (!ctx) return;
     const wall = state.walls.find(w => w.id === wallId);
     const cells = wall && wall.shape && wall.shape.cells ? wall.shape.cells : new Set();
-    const W = gridCols * cellPx, H = gridRows * cellPx;
+    const W = gridCols * cellWpx, H = gridRows * cellHpx;
+
+    // Convert shape-coord (c,r) to top-left canvas pixel
+    const px = c => (c + padding) * cellWpx;
+    const py = r => (r + padding) * cellHpx;
 
     // Background
     ctx.fillStyle = '#0a0a0a';
@@ -2176,8 +2305,7 @@ function drawShapeEditor() {
     for (const key of cells) {
         const i = key.indexOf(',');
         const c = +key.slice(0, i), r = +key.slice(i + 1);
-        if (c < 0 || r < 0 || c >= gridCols || r >= gridRows) continue;
-        ctx.fillRect(c * cellPx + 1, r * cellPx + 1, cellPx - 1, cellPx - 1);
+        ctx.fillRect(px(c) + 1, py(r) + 1, cellWpx - 1, cellHpx - 1);
     }
 
     // Grid lines
@@ -2185,19 +2313,19 @@ function drawShapeEditor() {
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let c = 0; c <= gridCols; c++) {
-        ctx.moveTo(c * cellPx + 0.5, 0);
-        ctx.lineTo(c * cellPx + 0.5, H);
+        ctx.moveTo(c * cellWpx + 0.5, 0);
+        ctx.lineTo(c * cellWpx + 0.5, H);
     }
     for (let r = 0; r <= gridRows; r++) {
-        ctx.moveTo(0, r * cellPx + 0.5);
-        ctx.lineTo(W, r * cellPx + 0.5);
+        ctx.moveTo(0, r * cellHpx + 0.5);
+        ctx.lineTo(W, r * cellHpx + 0.5);
     }
     ctx.stroke();
 
     // Hover highlight — color encodes legality (see classifyShapeEdit)
     if (hover) {
         const action = classifyShapeEdit(cells, hover.c, hover.r);
-        const x = hover.c * cellPx, y = hover.r * cellPx;
+        const x = px(hover.c), y = py(hover.r);
         let fill, stroke;
         switch (action) {
             case 'add':    fill = 'rgba(147, 197, 253, 0.30)'; stroke = '#93c5fd'; break;   // light blue
@@ -2207,16 +2335,16 @@ function drawShapeEditor() {
             case 'split':  fill = 'rgba(234, 88, 12, 0.25)';   stroke = '#ea580c'; break;   // orange (would split)
         }
         ctx.fillStyle = fill;
-        ctx.fillRect(x + 1, y + 1, cellPx - 1, cellPx - 1);
+        ctx.fillRect(x + 1, y + 1, cellWpx - 1, cellHpx - 1);
         ctx.strokeStyle = stroke;
         ctx.lineWidth = 1.5;
-        ctx.strokeRect(x + 1.5, y + 1.5, cellPx - 2, cellPx - 2);
+        ctx.strokeRect(x + 1.5, y + 1.5, cellWpx - 2, cellHpx - 2);
 
         // For illegal actions, draw a diagonal strike to reinforce "blocked".
         if (action === 'last' || action === 'no-adj' || action === 'split') {
             ctx.beginPath();
-            ctx.moveTo(x + 2, y + cellPx - 2);
-            ctx.lineTo(x + cellPx - 2, y + 2);
+            ctx.moveTo(x + 2, y + cellHpx - 2);
+            ctx.lineTo(x + cellWpx - 2, y + 2);
             ctx.stroke();
         }
     }
@@ -2771,6 +2899,7 @@ let bezelLineMeshes = [];
 let pixelGridMeshes = [];
 let customPanelGeoms = [];
 let dimensionObjects = [];   // Lines + CSS3D labels for dimension annotations
+let shapeGhostMeshes = [];   // Ghost panels for on-model shape editing (add-targets)
 let venueObjectUrl = null;
 
 /* ── GPU detection & renderer rebuild ─────────────────────────────────────
@@ -3114,6 +3243,7 @@ function buildWall() {
             const y = d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap);
             mesh.position.set(col.x, y, col.z);
             mesh.rotation.y = col.rotY;
+            mesh.userData.cell = { c, r };   // for shape-editor raycasting
             wallGroup.add(mesh);
             panelMeshes.push(mesh);
         }
@@ -5354,6 +5484,37 @@ function updateMouseNDC(e) {
     mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 }
+
+/* v3: on-model shape editing — when the shape editor is open, a click in
+   the 3D scene edits the shape instead of triggering any other behavior.
+   Click a real panel → remove; click a ghost panel → add. Runs in capture
+   phase so it takes priority over content-drag / wall-move handlers. */
+overlay.addEventListener('mousedown', e => {
+    if (!shapeEditor.open || e.button !== 0) return;
+    updateMouseNDC(e);
+    raycaster.setFromCamera(mouse, camera);
+    // Check ghosts first (they sit at empty cell positions)
+    let hitCell = null;
+    const ghostHits = raycaster.intersectObjects(shapeGhostMeshes);
+    if (ghostHits.length > 0) {
+        const g = ghostHits[0].object;
+        if (g.userData.ghostCell) hitCell = g.userData.ghostCell;
+    }
+    if (!hitCell) {
+        const panelHits = raycaster.intersectObjects(panelMeshes);
+        if (panelHits.length > 0) {
+            const m = panelHits[0].object;
+            if (m.userData.cell) hitCell = m.userData.cell;
+        }
+    }
+    if (!hitCell) return;  // click on empty space — let OrbitControls rotate
+
+    // stopImmediatePropagation so OrbitControls (also listening on overlay)
+    // doesn't also receive the event and start a camera rotation.
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    toggleShapeCell(hitCell.c, hitCell.r);
+}, true);
 
 overlay.addEventListener('mousedown', e => {
     if (!state.moveMode || e.button !== 0) return;
