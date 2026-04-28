@@ -3218,11 +3218,17 @@ function animate() {
         if (now - lastRecordEncode >= 33) { // cap at ~30fps
             lastRecordEncode = now;
             const timestamp = (Date.now() - recordStartTime) * 1000;
-            const frame = new VideoFrame(renderer.domElement, { timestamp });
+            // Composite venue bg + WebGL into recordComposite, encode from it.
+            const composited = compositeRecordFrame() || renderer.domElement;
+            const frame = new VideoFrame(composited, { timestamp });
             videoEncoder.encode(frame, { keyFrame: frameCount % 90 === 0 });
             frame.close();
             frameCount++;
         }
+    } else if (isRecording && !usingMP4) {
+        // WebM/MediaRecorder path needs the composite to stay current too,
+        // since it streams the composite canvas via captureStream().
+        compositeRecordFrame();
     }
 }
 
@@ -3997,6 +4003,37 @@ function clampWindowRect(win) {
     }
 }
 
+/* v3: build a CSS clip-path that masks a content layer to the wall's
+   filled-cell shape. Returns '' for rect walls (no clipping needed). The
+   path is in layer-local pixel coords; the layer is at wall-pixel offset
+   (layerWallX, layerWallY). Only cells that intersect the layer region
+   contribute, with each filled cell drawn as one rectangular subpath. */
+function buildShapeClipPath(wall, layerWallX, layerWallY, layerW, layerH) {
+    if (!wall || isRectWall(wall) || !wall.shape || !wall.shape.cells) return '';
+    const cells = wall.shape.cells;
+    const subPaths = [];
+    for (const key of cells) {
+        const i = key.indexOf(',');
+        const c = +key.slice(0, i), r = +key.slice(i + 1);
+        // Cell in wall-pixel coords
+        const cwx0 = c * PANEL_PX_W, cwy0 = r * PANEL_PX_H;
+        const cwx1 = cwx0 + PANEL_PX_W, cwy1 = cwy0 + PANEL_PX_H;
+        // Skip cells fully outside the layer's region
+        if (cwx1 <= layerWallX || cwx0 >= layerWallX + layerW ||
+            cwy1 <= layerWallY || cwy0 >= layerWallY + layerH) continue;
+        // Translate to layer-local coords (clipping to layer bounds is handled
+        // by overflow:hidden, but we clamp here too so the path stays compact)
+        const x0 = Math.max(cwx0 - layerWallX, 0);
+        const y0 = Math.max(cwy0 - layerWallY, 0);
+        const x1 = Math.min(cwx1 - layerWallX, layerW);
+        const y1 = Math.min(cwy1 - layerWallY, layerH);
+        subPaths.push('M' + x0 + ',' + y0 + 'L' + x1 + ',' + y0 +
+                      'L' + x1 + ',' + y1 + 'L' + x0 + ',' + y1 + 'Z');
+    }
+    if (subPaths.length === 0) return '';
+    return "path('" + subPaths.join('') + "')";
+}
+
 function applyWindowRect(win) {
     const rd = windowRenderData.get(win.id);
     if (!rd) return;
@@ -4010,6 +4047,7 @@ function applyWindowRect(win) {
     const cyIn = d.totalH / 2 - rect.y * IN_PER_PX_H - rect.h * IN_PER_PX_H / 2;
     const winIdx = state.contentWindows.indexOf(win);
     const zStep = 0.005;
+    const _wallForClip = activeWall();
 
     const cMap = {};
     state.corners.forEach(cn => { cMap[cn.afterCol] = cn.angle; });
@@ -4051,6 +4089,11 @@ function applyWindowRect(win) {
 
             layerEls[i].style.width = clipW + 'px';
             layerEls[i].style.height = clipH + 'px';
+            // v3: mask content to filled-cell shape on custom walls so the
+            // content doesn't bleed into voids (e.g., the hole in an arch).
+            const clipPath = buildShapeClipPath(_wallForClip, overlapLeft, rect.y, clipW, clipH);
+            layerEls[i].style.clipPath = clipPath || '';
+            layerEls[i].style.webkitClipPath = clipPath || '';
 
             const innerEl = layerEls[i].firstChild;
             if (innerEl) {
@@ -5784,8 +5827,14 @@ function captureShowroom(targetW, targetH) {
     const h = targetH || Math.round(rect.height);
 
     // Build temporary WebGL textured planes for each CSS3D content element
-    // so the WebGL renderer handles all 3D perspective natively.
+    // so the WebGL renderer handles all 3D perspective natively. For custom
+    // walls, we sub-divide each content layer into per-filled-cell planes
+    // so the saved image matches the live mask (no content in shape voids).
     const tempMeshes = [];
+    const _activeWallForCapture = activeWall();
+    const _isCustomWall = _activeWallForCapture && !isRectWall(_activeWallForCapture);
+    const _filledCells = _isCustomWall ? _activeWallForCapture.shape.cells : null;
+
     scene.traverse(obj => {
         if (!obj.element || !obj.visible) return;
         const container = obj.element;
@@ -5816,32 +5865,86 @@ function captureShowroom(targetW, targetH) {
         const cropH = Math.min(srcH - cropY, visH * scY);
         if (cropW < 1 || cropH < 1) return;
 
-        // Create cropped texture from visible portion
-        const texC = document.createElement('canvas');
-        texC.width = Math.round(cropW);
-        texC.height = Math.round(cropH);
-        try {
-            texC.getContext('2d').drawImage(drawEl, cropX, cropY, cropW, cropH, 0, 0, texC.width, texC.height);
-        } catch (e) { return; } // skip cross-origin
-
-        const texture = new THREE.CanvasTexture(texC);
-        texture.colorSpace = THREE.SRGBColorSpace;
-
         // World dimensions = CSS pixels × CSS3DObject scale
         const worldW = visW * obj.scale.x;
         const worldH = visH * obj.scale.y;
-
-        const geo = new THREE.PlaneGeometry(worldW, worldH);
         const bFrac = state.brightness / 100;
-        const mat = new THREE.MeshBasicMaterial({ map: texture, depthTest: false, color: new THREE.Color(bFrac, bFrac, bFrac) });
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.renderOrder = 999;
-        mesh.position.copy(obj.position);
-        mesh.rotation.copy(obj.rotation);
-        mesh.translateZ(0.1);
 
-        obj.parent.add(mesh);
-        tempMeshes.push({ mesh, texture, geo, mat, parent: obj.parent });
+        // Helper: build one textured plane for a sub-rect of the visible area
+        // [u0..u1, v0..v1] in [0..1] of the layer's content. Adds to tempMeshes.
+        const makePlane = (u0, v0, u1, v1) => {
+            const subSrcX = cropX + u0 * cropW;
+            const subSrcY = cropY + v0 * cropH;
+            const subSrcW = (u1 - u0) * cropW;
+            const subSrcH = (v1 - v0) * cropH;
+            if (subSrcW < 0.5 || subSrcH < 0.5) return;
+
+            const texC = document.createElement('canvas');
+            texC.width = Math.max(1, Math.round(subSrcW));
+            texC.height = Math.max(1, Math.round(subSrcH));
+            try {
+                texC.getContext('2d').drawImage(drawEl, subSrcX, subSrcY, subSrcW, subSrcH,
+                                                0, 0, texC.width, texC.height);
+            } catch (e) { return; } // cross-origin
+
+            const texture = new THREE.CanvasTexture(texC);
+            texture.colorSpace = THREE.SRGBColorSpace;
+
+            const subWorldW = (u1 - u0) * worldW;
+            const subWorldH = (v1 - v0) * worldH;
+            const geo = new THREE.PlaneGeometry(subWorldW, subWorldH);
+            const mat = new THREE.MeshBasicMaterial({
+                map: texture, depthTest: false,
+                color: new THREE.Color(bFrac, bFrac, bFrac),
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.renderOrder = 999;
+            mesh.position.copy(obj.position);
+            mesh.rotation.copy(obj.rotation);
+            // Offset position so this sub-plane sits at the correct fraction of
+            // the original layer area: original center is at (0.5, 0.5);
+            // sub-plane center is at ((u0+u1)/2, (v0+v1)/2). Offset in local
+            // X (horizontal) and Y (vertical, flipped because Y grows down in CSS).
+            const localOffX = ((u0 + u1) / 2 - 0.5) * worldW;
+            const localOffY = -((v0 + v1) / 2 - 0.5) * worldH;
+            mesh.translateX(localOffX);
+            mesh.translateY(localOffY);
+            mesh.translateZ(0.1);
+
+            obj.parent.add(mesh);
+            tempMeshes.push({ mesh, texture, geo, mat, parent: obj.parent });
+        };
+
+        if (!_isCustomWall) {
+            // Rect wall — single full plane (legacy behavior)
+            makePlane(0, 0, 1, 1);
+            return;
+        }
+
+        // Custom wall — slice the layer into per-cell sub-planes, only emitting
+        // pieces that overlap a filled cell. The layer covers the visible region
+        // [overlapLeft, rect.y] × [overlapLeft+visW, rect.y+visH] in wall pixels;
+        // we recover those bounds from the inner element's offset.
+        const layerWallX = -(parseFloat(drawEl.style.left) || 0);
+        const layerWallY = -(parseFloat(drawEl.style.top) || 0);
+        for (const key of _filledCells) {
+            const i = key.indexOf(',');
+            const c = +key.slice(0, i), r = +key.slice(i + 1);
+            const cwx0 = c * PANEL_PX_W, cwy0 = r * PANEL_PX_H;
+            const cwx1 = cwx0 + PANEL_PX_W, cwy1 = cwy0 + PANEL_PX_H;
+            // Intersect cell with this layer's visible region
+            const ix0 = Math.max(cwx0, layerWallX);
+            const iy0 = Math.max(cwy0, layerWallY);
+            const ix1 = Math.min(cwx1, layerWallX + visW);
+            const iy1 = Math.min(cwy1, layerWallY + visH);
+            if (ix1 <= ix0 || iy1 <= iy0) continue;
+            // Convert to layer-local UVs in [0..1]
+            const u0 = (ix0 - layerWallX) / visW;
+            const u1 = (ix1 - layerWallX) / visW;
+            const v0 = (iy0 - layerWallY) / visH;
+            const v1 = (iy1 - layerWallY) / visH;
+            makePlane(u0, v0, u1, v1);
+        }
     });
 
     // Render scene with content as WebGL textures (handles perspective natively)
@@ -5854,6 +5957,39 @@ function captureShowroom(targetW, targetH) {
     composite.width = w;
     composite.height = h;
     const ctx = composite.getContext('2d');
+
+    // v3: paint venue background first so the saved image looks like the
+    // live view (snipping-tool style), not just the WebGL portion. We use
+    // the computed style so both background-image (user upload) and
+    // background-color/gradient are honored.
+    const venueBgEl = document.getElementById('venueBg');
+    if (venueBgEl) {
+        const cs = getComputedStyle(venueBgEl);
+        // Solid base layer using whichever color CSS resolved to
+        ctx.fillStyle = cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)'
+            ? cs.backgroundColor : '#060608';
+        ctx.fillRect(0, 0, w, h);
+        // If a user-uploaded image is set, draw it cover-style over the fill
+        const bgImg = cs.backgroundImage;
+        const m = bgImg && bgImg.match(/url\(["']?([^"')]+)["']?\)/);
+        if (m && venueObjectUrl) {
+            try {
+                const img = new Image();
+                img.src = m[1];
+                if (img.complete && img.naturalWidth > 0) {
+                    // background-size: cover — scale to fill, center-crop
+                    const ar = img.naturalWidth / img.naturalHeight;
+                    const cAr = w / h;
+                    let dw, dh, dx, dy;
+                    if (ar > cAr) { dh = h; dw = h * ar; dx = (w - dw) / 2; dy = 0; }
+                    else          { dw = w; dh = w / ar; dx = 0; dy = (h - dh) / 2; }
+                    ctx.drawImage(img, dx, dy, dw, dh);
+                }
+            } catch (e) { /* skip if image not loaded yet */ }
+        }
+    }
+
+    // WebGL render (panels + content) on top of the venue background
     ctx.drawImage(renderer.domElement, 0, 0, w, h);
 
     // Remove temporary objects and free GPU memory
@@ -5893,7 +6029,51 @@ let frameCount = 0;
 let lastRecordEncode = 0;
 let recordOverlays = [];
 let recordVideoTextures = []; // shared VideoTextures (disposed once on teardown)
+let recordComposite = null;   // 2D canvas where venue bg + WebGL is composited per frame
+let recordCompositeCtx = null;
 const recordBtn = document.getElementById('recordBtn');
+
+/* Composite the venue background and the WebGL renderer output into the
+   record canvas. Called per frame during recording so the encoded video
+   matches the live snipping-tool view (not just the WebGL portion). */
+function compositeRecordFrame() {
+    if (!recordComposite) return null;
+    const w = recordComposite.width, h = recordComposite.height;
+    const ctx = recordCompositeCtx;
+    // Venue bg: solid fill from computed color, then user-uploaded image cover-style
+    const venueBgEl = document.getElementById('venueBg');
+    if (venueBgEl) {
+        const cs = getComputedStyle(venueBgEl);
+        ctx.fillStyle = cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)'
+            ? cs.backgroundColor : '#060608';
+        ctx.fillRect(0, 0, w, h);
+        const bgImg = cs.backgroundImage;
+        const m = bgImg && bgImg.match(/url\(["']?([^"')]+)["']?\)/);
+        if (m && venueObjectUrl) {
+            try {
+                if (!compositeRecordFrame._cachedImg || compositeRecordFrame._cachedSrc !== m[1]) {
+                    const img = new Image();
+                    img.src = m[1];
+                    compositeRecordFrame._cachedImg = img;
+                    compositeRecordFrame._cachedSrc = m[1];
+                }
+                const img = compositeRecordFrame._cachedImg;
+                if (img.complete && img.naturalWidth > 0) {
+                    const ar = img.naturalWidth / img.naturalHeight;
+                    const cAr = w / h;
+                    let dw, dh, dx, dy;
+                    if (ar > cAr) { dh = h; dw = h * ar; dx = (w - dw) / 2; dy = 0; }
+                    else          { dw = w; dh = w / ar; dx = 0; dy = (h - dh) / 2; }
+                    ctx.drawImage(img, dx, dy, dw, dh);
+                }
+            } catch (e) { /* ignore */ }
+        }
+    } else {
+        ctx.clearRect(0, 0, w, h);
+    }
+    ctx.drawImage(renderer.domElement, 0, 0, w, h);
+    return recordComposite;
+}
 
 async function saveVideoFile(blob) {
     const ext = (blob.type || '').includes('mp4') ? '.mp4' : '.webm';
@@ -5910,6 +6090,10 @@ async function saveVideoFile(blob) {
 function buildRecordOverlays() {
     teardownRecordOverlays();
     const vidTexMap = new Map(); // video element → shared VideoTexture
+    const _activeWallForRec = activeWall();
+    const _isCustomRec = _activeWallForRec && !isRectWall(_activeWallForRec);
+    const _filledCellsRec = _isCustomRec ? _activeWallForRec.shape.cells : null;
+
     scene.traverse(obj => {
         if (!obj.element || !obj.visible) return;
         const container = obj.element;
@@ -5962,27 +6146,73 @@ function buildRecordOverlays() {
             texture.colorSpace = THREE.SRGBColorSpace;
         }
 
-        const geo = new THREE.PlaneGeometry(worldW, worldH);
-        // For VideoTexture: UV-based crop (zero CPU cost, runs in shader)
-        if (isVideo) {
-            const u0 = offsetX / innerCssW;
-            const u1 = (offsetX + visW) / innerCssW;
-            const v0 = 1 - (offsetY + visH) / innerCssH;
-            const v1 = 1 - offsetY / innerCssH;
-            const uv = geo.attributes.uv;
-            uv.setXY(0, u0, v1); uv.setXY(1, u1, v1);
-            uv.setXY(2, u0, v0); uv.setXY(3, u1, v0);
-            uv.needsUpdate = true;
-        }
         const bFrac = state.brightness / 100;
-        const mat = new THREE.MeshBasicMaterial({ map: texture, depthTest: false, color: new THREE.Color(bFrac, bFrac, bFrac) });
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.renderOrder = 999;
-        mesh.position.copy(obj.position);
-        mesh.rotation.copy(obj.rotation);
-        mesh.translateZ(0.1); // push in front of panel face to prevent z-fighting
-        obj.parent.add(mesh);
-        recordOverlays.push({ mesh, texture, texCanvas, geo, mat, css3dObj: obj, parent: obj.parent, isVideo });
+
+        // Helper to build one record-overlay plane for a sub-region of the
+        // visible layer area, expressed as [u0..u1] × [v0..v1] in [0..1]
+        // (CSS3D-style, with v=0 at top).
+        const makeOverlay = (u0, v0, u1, v1) => {
+            const subWorldW = (u1 - u0) * worldW;
+            const subWorldH = (v1 - v0) * worldH;
+            if (subWorldW < 0.01 || subWorldH < 0.01) return;
+            const geo = new THREE.PlaneGeometry(subWorldW, subWorldH);
+            // UV mapping: for video texture we map into the source rect
+            // (offsetX,offsetY)..(offsetX+visW,offsetY+visH) of the video,
+            // then sub-slice by [u0..u1] × [v0..v1]. For canvas texture we
+            // map directly into the [0..1] × [0..1] of the cropped tex.
+            let uu0, uu1, vv0, vv1;
+            if (isVideo) {
+                const sx0 = (offsetX + u0 * visW) / innerCssW;
+                const sx1 = (offsetX + u1 * visW) / innerCssW;
+                const sy0 = 1 - (offsetY + v1 * visH) / innerCssH;
+                const sy1 = 1 - (offsetY + v0 * visH) / innerCssH;
+                uu0 = sx0; uu1 = sx1; vv0 = sy0; vv1 = sy1;
+            } else {
+                uu0 = u0; uu1 = u1; vv0 = 1 - v1; vv1 = 1 - v0;
+            }
+            const uv = geo.attributes.uv;
+            uv.setXY(0, uu0, vv1); uv.setXY(1, uu1, vv1);
+            uv.setXY(2, uu0, vv0); uv.setXY(3, uu1, vv0);
+            uv.needsUpdate = true;
+
+            const mat = new THREE.MeshBasicMaterial({ map: texture, depthTest: false, color: new THREE.Color(bFrac, bFrac, bFrac) });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.renderOrder = 999;
+            mesh.position.copy(obj.position);
+            mesh.rotation.copy(obj.rotation);
+            // Offset to sub-region center (X = horizontal, Y flipped because v grows down)
+            mesh.translateX(((u0 + u1) / 2 - 0.5) * worldW);
+            mesh.translateY(-((v0 + v1) / 2 - 0.5) * worldH);
+            mesh.translateZ(0.1);
+            obj.parent.add(mesh);
+            recordOverlays.push({ mesh, texture, texCanvas, geo, mat, css3dObj: obj, parent: obj.parent, isVideo });
+        };
+
+        if (!_isCustomRec) {
+            makeOverlay(0, 0, 1, 1);
+            return;
+        }
+
+        // Custom wall — emit one overlay per filled cell that intersects the
+        // visible layer region, so recorded video matches the live mask.
+        const layerWallX = -(parseFloat(drawEl.style.left) || 0);
+        const layerWallY = -(parseFloat(drawEl.style.top) || 0);
+        for (const key of _filledCellsRec) {
+            const i = key.indexOf(',');
+            const c = +key.slice(0, i), r = +key.slice(i + 1);
+            const cwx0 = c * PANEL_PX_W, cwy0 = r * PANEL_PX_H;
+            const cwx1 = cwx0 + PANEL_PX_W, cwy1 = cwy0 + PANEL_PX_H;
+            const ix0 = Math.max(cwx0, layerWallX);
+            const iy0 = Math.max(cwy0, layerWallY);
+            const ix1 = Math.min(cwx1, layerWallX + visW);
+            const iy1 = Math.min(cwy1, layerWallY + visH);
+            if (ix1 <= ix0 || iy1 <= iy0) continue;
+            const u0 = (ix0 - layerWallX) / visW;
+            const u1 = (ix1 - layerWallX) / visW;
+            const v0 = (iy0 - layerWallY) / visH;
+            const v1 = (iy1 - layerWallY) / visH;
+            makeOverlay(u0, v0, u1, v1);
+        }
     });
 }
 
@@ -6044,6 +6274,12 @@ async function startRecording() {
     recordStartTime = Date.now();
     recordedChunks = [];
     lastRecordEncode = 0;
+    // Create record-composite canvas (venue bg + WebGL) so encoded video
+    // matches the snipping-tool view, not just the WebGL portion.
+    recordComposite = document.createElement('canvas');
+    recordComposite.width = w;
+    recordComposite.height = h;
+    recordCompositeCtx = recordComposite.getContext('2d');
     buildRecordOverlays();
 
     if (typeof VideoEncoder !== 'undefined') {
@@ -6100,7 +6336,9 @@ async function startRecording() {
 
     if (!usingMP4) {
         console.log('Recording with MediaRecorder (WebM)');
-        mediaStream = canvas.captureStream(30);
+        // Record the composite canvas (venue bg + WebGL) instead of the bare
+        // WebGL canvas so the saved video matches what the user sees on screen.
+        mediaStream = recordComposite.captureStream(30);
         const mt = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
             ? 'video/webm;codecs=vp9' : 'video/webm';
         mediaRecorder = new MediaRecorder(mediaStream, { mimeType: mt, videoBitsPerSecond: 8_000_000 });
@@ -6151,6 +6389,12 @@ async function stopRecording() {
     if (mediaStream) {
         mediaStream.getTracks().forEach(t => t.stop());
         mediaStream = null;
+    }
+    recordComposite = null;
+    recordCompositeCtx = null;
+    if (compositeRecordFrame._cachedImg) {
+        compositeRecordFrame._cachedImg = null;
+        compositeRecordFrame._cachedSrc = null;
     }
 }
 
