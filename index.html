@@ -6104,12 +6104,12 @@ function captureShowroom(targetW, targetH) {
 
 document.getElementById('saveImageBtn').addEventListener('click', () => {
     const full = captureShowroom();
-    // Crop to the wall + padding so the saved image is just the model area,
-    // not the whole showroom. Padding scales with wall size (10%) with a
-    // floor so very small/zoomed-out walls still get a comfortable border.
+    // Crop to the wall + padding when there's no user-set venue background.
+    // If a venue image is set, the user is staging the wall in a real space
+    // and wants the whole showroom view preserved.
     const bbox = computeWallScreenBBox(full.width, full.height);
     let out = full;
-    if (bbox && bbox.w > 1 && bbox.h > 1) {
+    if (!venueObjectUrl && bbox && bbox.w > 1 && bbox.h > 1) {
         const padBase = Math.max(20, Math.round(Math.min(bbox.w, bbox.h) * 0.1));
         const x0 = Math.max(0, Math.floor(bbox.x - padBase));
         const y0 = Math.max(0, Math.floor(bbox.y - padBase));
@@ -6416,8 +6416,10 @@ async function startRecording() {
     lastRecordEncode = 0;
 
     // Compute wall crop (locked for the recording so encoder dims stay constant).
-    // Falls back to full canvas if no walls are visible.
-    const bbox = computeWallScreenBBox(fullW, fullH);
+    // Same as Save Image: skip the crop if a venue background is set, so the
+    // saved video preserves the full staged scene. Falls back to full canvas
+    // if no walls are visible either.
+    const bbox = (!venueObjectUrl) ? computeWallScreenBBox(fullW, fullH) : null;
     let cropX = 0, cropY = 0, cropW = fullW, cropH = fullH;
     if (bbox && bbox.w > 1 && bbox.h > 1) {
         const padBase = Math.max(20, Math.round(Math.min(bbox.w, bbox.h) * 0.1));
