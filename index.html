@@ -5856,6 +5856,57 @@ function rasterizeIframe(iframe) {
     return null;
 }
 
+/* Compute the screen-space axis-aligned bounding box of all wall meshes
+   (panels of every wall context) so saved images crop to just the model
+   area. Returns { x, y, w, h } in renderer-pixel coords, or null if no
+   panels are visible. */
+function computeWallScreenBBox(rendererW, rendererH) {
+    const cam = camera;
+    cam.updateMatrixWorld(true);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let any = false;
+    const v = new THREE.Vector3();
+    const cornerOffsets = [
+        [-1,-1,-1], [1,-1,-1], [-1,1,-1], [1,1,-1],
+        [-1,-1, 1], [1,-1, 1], [-1,1, 1], [1,1, 1],
+    ];
+    const considerMesh = (mesh) => {
+        if (!mesh.geometry) return;
+        const bb = mesh.geometry.boundingBox;
+        if (!bb) mesh.geometry.computeBoundingBox();
+        const box = mesh.geometry.boundingBox;
+        if (!box) return;
+        const cx = (box.min.x + box.max.x) / 2;
+        const cy = (box.min.y + box.max.y) / 2;
+        const cz = (box.min.z + box.max.z) / 2;
+        const hx = (box.max.x - box.min.x) / 2;
+        const hy = (box.max.y - box.min.y) / 2;
+        const hz = (box.max.z - box.min.z) / 2;
+        for (const [sx, sy, sz] of cornerOffsets) {
+            v.set(cx + sx * hx, cy + sy * hy, cz + sz * hz);
+            mesh.localToWorld(v);
+            v.project(cam);
+            const px = (v.x * 0.5 + 0.5) * rendererW;
+            const py = (-v.y * 0.5 + 0.5) * rendererH;
+            if (px < minX) minX = px;
+            if (py < minY) minY = py;
+            if (px > maxX) maxX = px;
+            if (py > maxY) maxY = py;
+            any = true;
+        }
+    };
+    // The active wall's panel meshes live in the global `panelMeshes`;
+    // other wall contexts have their own panelMeshes saved in the context.
+    if (panelMeshes) panelMeshes.forEach(considerMesh);
+    for (const ctx of wallContextMap.values()) {
+        if (ctx.panelMeshes && ctx.panelMeshes !== panelMeshes) {
+            ctx.panelMeshes.forEach(considerMesh);
+        }
+    }
+    if (!any) return null;
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
 function captureShowroom(targetW, targetH) {
     const showroom = document.getElementById('showroom');
     const rect = showroom.getBoundingClientRect();
@@ -6052,8 +6103,28 @@ function captureShowroom(targetW, targetH) {
 }
 
 document.getElementById('saveImageBtn').addEventListener('click', () => {
-    const composite = captureShowroom();
-    composite.toBlob(blob => {
+    const full = captureShowroom();
+    // Crop to the wall + padding so the saved image is just the model area,
+    // not the whole showroom. Padding scales with wall size (10%) with a
+    // floor so very small/zoomed-out walls still get a comfortable border.
+    const bbox = computeWallScreenBBox(full.width, full.height);
+    let out = full;
+    if (bbox && bbox.w > 1 && bbox.h > 1) {
+        const padBase = Math.max(20, Math.round(Math.min(bbox.w, bbox.h) * 0.1));
+        const x0 = Math.max(0, Math.floor(bbox.x - padBase));
+        const y0 = Math.max(0, Math.floor(bbox.y - padBase));
+        const x1 = Math.min(full.width,  Math.ceil(bbox.x + bbox.w + padBase));
+        const y1 = Math.min(full.height, Math.ceil(bbox.y + bbox.h + padBase));
+        const cw = x1 - x0, ch = y1 - y0;
+        if (cw > 1 && ch > 1) {
+            const cropped = document.createElement('canvas');
+            cropped.width = cw;
+            cropped.height = ch;
+            cropped.getContext('2d').drawImage(full, x0, y0, cw, ch, 0, 0, cw, ch);
+            out = cropped;
+        }
+    }
+    out.toBlob(blob => {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = 'led-showroom-' + Date.now() + '.png';
@@ -6079,22 +6150,30 @@ let recordOverlays = [];
 let recordVideoTextures = []; // shared VideoTextures (disposed once on teardown)
 let recordComposite = null;   // 2D canvas where venue bg + WebGL is composited per frame
 let recordCompositeCtx = null;
+// Wall crop, locked at recording start so encoder dimensions stay constant.
+let recordCropX = 0, recordCropY = 0, recordCropW = 0, recordCropH = 0;
+let recordSrcW = 0, recordSrcH = 0;  // full renderer canvas size, for venue bg layout
 const recordBtn = document.getElementById('recordBtn');
 
 /* Composite the venue background and the WebGL renderer output into the
    record canvas. Called per frame during recording so the encoded video
-   matches the live snipping-tool view (not just the WebGL portion). */
+   matches the live snipping-tool view (not just the WebGL portion). The
+   composite canvas is sized to the wall crop region (set at recording
+   start) so the resulting video is wall+padding, not the whole showroom. */
 function compositeRecordFrame() {
     if (!recordComposite) return null;
-    const w = recordComposite.width, h = recordComposite.height;
+    const cw = recordComposite.width, ch = recordComposite.height;
     const ctx = recordCompositeCtx;
-    // Venue bg: solid fill from computed color, then user-uploaded image cover-style
+    const sx = recordCropX, sy = recordCropY;
+    const sw = recordSrcW, sh = recordSrcH;
+
+    // Venue bg portion that aligns with the cropped region
     const venueBgEl = document.getElementById('venueBg');
     if (venueBgEl) {
         const cs = getComputedStyle(venueBgEl);
         ctx.fillStyle = cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)'
             ? cs.backgroundColor : '#060608';
-        ctx.fillRect(0, 0, w, h);
+        ctx.fillRect(0, 0, cw, ch);
         const bgImg = cs.backgroundImage;
         const m = bgImg && bgImg.match(/url\(["']?([^"')]+)["']?\)/);
         if (m && venueObjectUrl) {
@@ -6107,19 +6186,22 @@ function compositeRecordFrame() {
                 }
                 const img = compositeRecordFrame._cachedImg;
                 if (img.complete && img.naturalWidth > 0) {
+                    // background-size: cover for the FULL showroom size, then
+                    // shift by -sx, -sy so the cropped region sees the right slice.
                     const ar = img.naturalWidth / img.naturalHeight;
-                    const cAr = w / h;
+                    const sAr = sw / sh;
                     let dw, dh, dx, dy;
-                    if (ar > cAr) { dh = h; dw = h * ar; dx = (w - dw) / 2; dy = 0; }
-                    else          { dw = w; dh = w / ar; dx = 0; dy = (h - dh) / 2; }
-                    ctx.drawImage(img, dx, dy, dw, dh);
+                    if (ar > sAr) { dh = sh; dw = sh * ar; dx = (sw - dw) / 2; dy = 0; }
+                    else          { dw = sw; dh = sw / ar; dx = 0; dy = (sh - dh) / 2; }
+                    ctx.drawImage(img, dx - sx, dy - sy, dw, dh);
                 }
             } catch (e) { /* ignore */ }
         }
     } else {
-        ctx.clearRect(0, 0, w, h);
+        ctx.clearRect(0, 0, cw, ch);
     }
-    ctx.drawImage(renderer.domElement, 0, 0, w, h);
+    // WebGL output, cropped
+    ctx.drawImage(renderer.domElement, sx, sy, cw, ch, 0, 0, cw, ch);
     return recordComposite;
 }
 
@@ -6325,18 +6407,35 @@ function teardownRecordOverlays() {
 
 async function startRecording() {
     const canvas = renderer.domElement;
-    const w = canvas.width & ~1, h = canvas.height & ~1; // codecs require even dimensions
+    const fullW = canvas.width, fullH = canvas.height;
     isRecording = true;
     usingMP4 = false;
     frameCount = 0;
     recordStartTime = Date.now();
     recordedChunks = [];
     lastRecordEncode = 0;
-    // Create record-composite canvas (venue bg + WebGL) so encoded video
-    // matches the snipping-tool view, not just the WebGL portion.
+
+    // Compute wall crop (locked for the recording so encoder dims stay constant).
+    // Falls back to full canvas if no walls are visible.
+    const bbox = computeWallScreenBBox(fullW, fullH);
+    let cropX = 0, cropY = 0, cropW = fullW, cropH = fullH;
+    if (bbox && bbox.w > 1 && bbox.h > 1) {
+        const padBase = Math.max(20, Math.round(Math.min(bbox.w, bbox.h) * 0.1));
+        cropX = Math.max(0, Math.floor(bbox.x - padBase));
+        cropY = Math.max(0, Math.floor(bbox.y - padBase));
+        cropW = Math.min(fullW, Math.ceil(bbox.x + bbox.w + padBase)) - cropX;
+        cropH = Math.min(fullH, Math.ceil(bbox.y + bbox.h + padBase)) - cropY;
+    }
+    cropW = cropW & ~1;  // codecs require even dimensions
+    cropH = cropH & ~1;
+    recordCropX = cropX; recordCropY = cropY;
+    recordCropW = cropW; recordCropH = cropH;
+    recordSrcW = fullW; recordSrcH = fullH;
+    const w = cropW, h = cropH;  // alias for downstream codec config
+
     recordComposite = document.createElement('canvas');
-    recordComposite.width = w;
-    recordComposite.height = h;
+    recordComposite.width = cropW;
+    recordComposite.height = cropH;
     recordCompositeCtx = recordComposite.getContext('2d');
     buildRecordOverlays();
 
