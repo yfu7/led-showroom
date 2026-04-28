@@ -525,6 +525,23 @@
 
         .toggle-row label { font-size: 14px; color: #ccc; }
 
+        /* Sub-section that appears under the Discrete GPU toggle */
+        .hp-options {
+            margin-left: 14px;
+            padding-left: 12px;
+            border-left: 2px solid #2a2a2a;
+            margin-top: 4px;
+        }
+        .hp-options-label {
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            padding: 6px 0 2px;
+        }
+        .hp-option { padding: 4px 0; }
+        .hp-option label { font-size: 13px; }
+
         .toggle {
             position: relative;
             width: 44px;
@@ -1621,11 +1638,28 @@
             </label>
         </div>
         <div class="toggle-row" id="gpuToggleRow" style="display: none;">
-            <label>GPU Acceleration</label>
+            <label title="Use the discrete GPU (high-performance) instead of the integrated GPU">Discrete GPU</label>
             <label class="toggle">
                 <input type="checkbox" id="gpuToggle" checked>
                 <span class="slider"></span>
             </label>
+        </div>
+        <div class="hp-options" id="hpOptionsBlock" style="display: none;">
+            <div class="hp-options-label">High-performance options</div>
+            <div class="toggle-row hp-option">
+                <label title="Re-rasterize website iframes every frame while recording (CPU and GPU intensive)">Live website in recordings</label>
+                <label class="toggle">
+                    <input type="checkbox" id="hpLiveWebToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="toggle-row hp-option">
+                <label title="Render the 3D scene at 1.5x device pixel ratio for sharper edges (heavier GPU load)">Higher render quality</label>
+                <label class="toggle">
+                    <input type="checkbox" id="hpHighResToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
         </div>
         <div class="toggle-row">
             <label>Dimensions</label>
@@ -3216,6 +3250,14 @@ function animate() {
     camera.layers.set(1);
     gridRenderer.render(scene, camera);
     camera.layers.set(0);  // restore default
+
+    // Discrete-GPU-only feature: re-rasterize iframe websites each frame
+    // during recording so live website animations make it into the video.
+    // Off by default (CPU/GPU expensive). The overlapping rasterizations
+    // are throttled by per-iframe in-flight gating in refreshLiveIframeOverlays.
+    if (isRecording && window.gpuHighPerf && window.gpuLiveWebsite) {
+        refreshLiveIframeOverlays();
+    }
 
     if (isRecording && usingMP4 && videoEncoder && videoEncoder.encodeQueueSize <= 10) {
         const now = performance.now();
@@ -6155,6 +6197,59 @@ let recordCropX = 0, recordCropY = 0, recordCropW = 0, recordCropH = 0;
 let recordSrcW = 0, recordSrcH = 0;  // full renderer canvas size, for venue bg layout
 const recordBtn = document.getElementById('recordBtn');
 
+/* Live iframe refresh — only used in discrete-GPU + live-website mode.
+   Re-rasterizes each unique iframe via html2canvas at each call and
+   blits the fresh content into the shared texCanvas of every overlay
+   that uses it. Skips iframes whose previous rasterization is still in
+   flight so we never queue more than one per iframe. */
+const _liveRastInFlight = new WeakSet();
+function refreshLiveIframeOverlays() {
+    if (!recordOverlays || recordOverlays.length === 0) return;
+    if (typeof html2canvas !== 'function') return;
+    const seen = new WeakSet();
+    for (const ov of recordOverlays) {
+        if (!ov.sourceIframe || !ov.texCanvas) continue;
+        const ifr = ov.sourceIframe;
+        if (seen.has(ifr)) continue;
+        seen.add(ifr);
+        if (_liveRastInFlight.has(ifr)) continue;
+        let doc;
+        try { doc = ifr.contentDocument; } catch { continue; }
+        if (!doc || !doc.documentElement) continue;
+        _liveRastInFlight.add(ifr);
+        html2canvas(doc.documentElement, {
+            backgroundColor: '#ffffff', useCORS: true, logging: false,
+        }).then(rast => {
+            // Re-derive the crop and update every overlay sharing this iframe.
+            const visW = parseFloat(ifr.parentElement?.style.width) || 0;
+            const visH = parseFloat(ifr.parentElement?.style.height) || 0;
+            const innerCssW = parseFloat(ifr.style.width) || visW;
+            const innerCssH = parseFloat(ifr.style.height) || visH;
+            const offsetX = -(parseFloat(ifr.style.left) || 0);
+            const offsetY = -(parseFloat(ifr.style.top) || 0);
+            const srcW = rast.width, srcH = rast.height;
+            if (innerCssW < 1 || innerCssH < 1 || srcW < 1 || srcH < 1) {
+                _liveRastInFlight.delete(ifr); return;
+            }
+            const scX = srcW / innerCssW, scY = srcH / innerCssH;
+            const cropX = Math.max(0, offsetX * scX);
+            const cropY = Math.max(0, offsetY * scY);
+            const cropW = Math.min(srcW - cropX, visW * scX);
+            const cropH = Math.min(srcH - cropY, visH * scY);
+            if (cropW < 1 || cropH < 1) { _liveRastInFlight.delete(ifr); return; }
+            for (const ov2 of recordOverlays) {
+                if (ov2.sourceIframe !== ifr || !ov2.texCanvas) continue;
+                const tc = ov2.texCanvas;
+                const tx = tc.getContext('2d');
+                tx.clearRect(0, 0, tc.width, tc.height);
+                tx.drawImage(rast, cropX, cropY, cropW, cropH, 0, 0, tc.width, tc.height);
+                ov2.texture.needsUpdate = true;
+            }
+            _liveRastInFlight.delete(ifr);
+        }).catch(() => { _liveRastInFlight.delete(ifr); });
+    }
+}
+
 /* Composite the venue background and the WebGL renderer output into the
    record canvas. Called per frame during recording so the encoded video
    matches the live snipping-tool view (not just the WebGL portion). The
@@ -6232,11 +6327,12 @@ function buildRecordOverlays() {
         // textures (snapshot at startRecording time for iframes).
         let styleEl = container.querySelector('canvas') || container.querySelector('img');
         let drawEl = styleEl;
+        let sourceIframe = null;  // set if this overlay's pixels come from an iframe
         if (!styleEl) {
             const ifr = container.querySelector('iframe');
             if (ifr) {
                 const rast = rasterizeIframe(ifr);
-                if (rast) { styleEl = ifr; drawEl = rast; }
+                if (rast) { styleEl = ifr; drawEl = rast; sourceIframe = ifr; }
             }
         }
         if (!styleEl || !drawEl) return;
@@ -6325,7 +6421,15 @@ function buildRecordOverlays() {
             mesh.translateY(-((v0 + v1) / 2 - 0.5) * worldH);
             mesh.translateZ(0.1);
             obj.parent.add(mesh);
-            recordOverlays.push({ mesh, texture, texCanvas, geo, mat, css3dObj: obj, parent: obj.parent, isVideo });
+            recordOverlays.push({
+                mesh, texture, texCanvas, geo, mat, css3dObj: obj, parent: obj.parent,
+                isVideo, sourceIframe,
+                // crop info for live iframe refresh (drawing rasterized canvas into texCanvas)
+                ifrCrop: sourceIframe && texCanvas ? {
+                    sx: Math.max(0, -(parseFloat(styleEl.style.left) || 0)) ,
+                    sy: Math.max(0, -(parseFloat(styleEl.style.top)  || 0)),
+                } : null,
+            });
         };
 
         if (!_isCustomRec) {
@@ -6788,24 +6892,78 @@ document.getElementById('addWindowBtn').addEventListener('click', () => addConte
 renderWindowList();
 init();
 
-/* ── GPU Acceleration toggle (only exposed on dual-GPU systems) ── */
+/* ── GPU mode toggle + high-performance sub-options ──────────────────────
+   Only exposed on dual-GPU systems. The main toggle picks discrete vs
+   integrated. When discrete is selected, two extra checkboxes appear:
+   live website rasterization in recordings, and 1.5x supersampling. */
+window.gpuHighPerf = false;
+window.gpuLiveWebsite = false;
+window.gpuHighRes = false;
+
+function applyHighResRender(on) {
+    if (!renderer) return;
+    const baseDPR = window.devicePixelRatio || 1;
+    const dpr = on ? Math.min(baseDPR * 1.5, 4) : baseDPR;
+    renderer.setPixelRatio(dpr);
+    if (gridRenderer) gridRenderer.setPixelRatio(dpr);
+    markDirty();
+}
+
+function syncHpOptionsVisibility() {
+    const block = document.getElementById('hpOptionsBlock');
+    if (!block) return;
+    block.style.display = window.gpuHighPerf ? '' : 'none';
+}
+
 (() => {
-    const gpuInfo = detectDualGPU();
-    if (!gpuInfo) return;  // single-GPU (or extension blocked) — keep hidden
-    console.log('Dual GPU detected:', gpuInfo);
     const row = document.getElementById('gpuToggleRow');
     const toggle = document.getElementById('gpuToggle');
-    if (!row || !toggle) return;
-    row.style.display = '';
-    const saved = localStorage.getItem('useHighPerfGPU');
-    const on = saved === null ? true : saved === 'true';
-    toggle.checked = on;
-    // If user previously opted out, rebuild with low-power on load
-    if (!on) rebuildGpuRenderers(false);
+    const liveWeb = document.getElementById('hpLiveWebToggle');
+    const highRes = document.getElementById('hpHighResToggle');
+    if (!toggle) return;
+
+    // Visibility gated on dual-GPU detection (else the toggle does nothing
+    // useful — both prefs would resolve to the same physical adapter).
+    const gpuInfo = detectDualGPU();
+    if (gpuInfo) {
+        console.log('Dual GPU detected:', gpuInfo);
+        if (row) row.style.display = '';
+    }
+
+    // Load persisted state regardless of visibility, so users who previously
+    // opted into high-perf on a different machine still get the correct boot
+    // behavior. Default to discrete-on if dual-GPU detected, else off.
+    const savedHP = localStorage.getItem('useHighPerfGPU');
+    window.gpuHighPerf = savedHP === null ? !!gpuInfo : savedHP === 'true';
+    toggle.checked = window.gpuHighPerf;
+    window.gpuLiveWebsite = localStorage.getItem('gpuLiveWebsite') === 'true';
+    window.gpuHighRes = localStorage.getItem('gpuHighRes') === 'true';
+    if (liveWeb) liveWeb.checked = window.gpuLiveWebsite;
+    if (highRes) highRes.checked = window.gpuHighRes;
+
+    // Apply persisted state on load
+    if (gpuInfo && !window.gpuHighPerf) rebuildGpuRenderers(false);
+    if (window.gpuHighPerf && window.gpuHighRes) applyHighResRender(true);
+    syncHpOptionsVisibility();
+
     toggle.addEventListener('change', e => {
         const v = e.target.checked;
+        window.gpuHighPerf = v;
         localStorage.setItem('useHighPerfGPU', v);
-        rebuildGpuRenderers(v);
+        if (gpuInfo) rebuildGpuRenderers(v);
+        applyHighResRender(v && window.gpuHighRes);
+        syncHpOptionsVisibility();
+    });
+
+    if (liveWeb) liveWeb.addEventListener('change', e => {
+        window.gpuLiveWebsite = e.target.checked;
+        localStorage.setItem('gpuLiveWebsite', window.gpuLiveWebsite);
+    });
+
+    if (highRes) highRes.addEventListener('change', e => {
+        window.gpuHighRes = e.target.checked;
+        localStorage.setItem('gpuHighRes', window.gpuHighRes);
+        applyHighResRender(window.gpuHighPerf && window.gpuHighRes);
     });
 })();
 </script>
