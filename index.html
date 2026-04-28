@@ -14,6 +14,10 @@
         }
     }
     </script>
+    <!-- html2canvas: used to rasterize iframe website content into a canvas
+         for Save Image / Save Video, since browsers can't drawImage iframes.
+         Loaded as a global; consumed lazily so it doesn't block startup. -->
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" defer></script>
 
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -5820,6 +5824,38 @@ overlay.addEventListener('mousemove', e => {
 
 /* ── Save image ── */
 /* Composite capture: WebGL canvas + CSS3D content elements at their screen positions */
+/* Rasterize an iframe's same-origin document into an offscreen canvas using
+   html2canvas. Returns the canvas synchronously if already cached; otherwise
+   triggers an async render and returns a placeholder until the next call.
+   The cache is keyed by the iframe element. Since iframe content rarely
+   changes during a single capture, we accept a stale frame on first save. */
+const _iframeCanvasCache = new WeakMap();
+const _iframePending = new WeakSet();
+function rasterizeIframe(iframe) {
+    if (!iframe || typeof html2canvas !== 'function') return null;
+    let doc;
+    try { doc = iframe.contentDocument; } catch { return null; }
+    if (!doc || !doc.body) return null;
+
+    if (_iframeCanvasCache.has(iframe)) return _iframeCanvasCache.get(iframe);
+
+    if (!_iframePending.has(iframe)) {
+        _iframePending.add(iframe);
+        // Render the documentElement (not body) so html/body backgrounds are
+        // included. Uses iframe's CSS dimensions so the rasterized canvas
+        // matches the layout the wall expects.
+        html2canvas(doc.documentElement, {
+            backgroundColor: '#ffffff',
+            useCORS: true,
+            logging: false,
+        }).then(c => {
+            _iframeCanvasCache.set(iframe, c);
+            _iframePending.delete(iframe);
+        }).catch(() => { _iframePending.delete(iframe); });
+    }
+    return null;
+}
+
 function captureShowroom(targetW, targetH) {
     const showroom = document.getElementById('showroom');
     const rect = showroom.getBoundingClientRect();
@@ -5839,23 +5875,35 @@ function captureShowroom(targetW, targetH) {
         if (!obj.element || !obj.visible) return;
         const container = obj.element;
         if (!container.classList || !container.classList.contains('css3d-content-el')) return;
-        const drawEl = container.querySelector('canvas') || container.querySelector('img');
-        if (!drawEl) return;
+        // styleEl carries the CSS positioning; drawSrc is the pixel source.
+        // For canvas/img these are the same element; for iframes we read style
+        // from the iframe but draw from the rasterized snapshot canvas.
+        let styleEl = container.querySelector('canvas') || container.querySelector('img');
+        let drawSrc = styleEl;
+        if (!styleEl) {
+            const ifr = container.querySelector('iframe');
+            if (ifr) {
+                const rast = rasterizeIframe(ifr);
+                if (rast) { styleEl = ifr; drawSrc = rast; }
+            }
+        }
+        if (!styleEl || !drawSrc) return;
 
         const visW = parseFloat(container.style.width) || 0;
         const visH = parseFloat(container.style.height) || 0;
         if (visW < 1 || visH < 1) return;
 
-        // Source pixel dimensions
-        const srcW = drawEl.tagName === 'CANVAS' ? drawEl.width : (drawEl.naturalWidth || drawEl.width);
-        const srcH = drawEl.tagName === 'CANVAS' ? drawEl.height : (drawEl.naturalHeight || drawEl.height);
+        // Source pixel dimensions (from the drawable, not the style element)
+        const srcW = drawSrc.tagName === 'CANVAS' ? drawSrc.width : (drawSrc.naturalWidth || drawSrc.width);
+        const srcH = drawSrc.tagName === 'CANVAS' ? drawSrc.height : (drawSrc.naturalHeight || drawSrc.height);
         if (srcW < 1 || srcH < 1) return;
 
-        // Inner element CSS dimensions and offset (handles span-mode cropping)
-        const innerCssW = parseFloat(drawEl.style.width) || visW;
-        const innerCssH = parseFloat(drawEl.style.height) || visH;
-        const offsetX = -(parseFloat(drawEl.style.left) || 0);
-        const offsetY = -(parseFloat(drawEl.style.top) || 0);
+        // Inner element CSS dimensions and offset (handles span-mode cropping).
+        // These come from the iframe/canvas/img positioning set by applyWindowRect.
+        const innerCssW = parseFloat(styleEl.style.width) || visW;
+        const innerCssH = parseFloat(styleEl.style.height) || visH;
+        const offsetX = -(parseFloat(styleEl.style.left) || 0);
+        const offsetY = -(parseFloat(styleEl.style.top) || 0);
 
         const scX = srcW / innerCssW;
         const scY = srcH / innerCssH;
@@ -5883,7 +5931,7 @@ function captureShowroom(targetW, targetH) {
             texC.width = Math.max(1, Math.round(subSrcW));
             texC.height = Math.max(1, Math.round(subSrcH));
             try {
-                texC.getContext('2d').drawImage(drawEl, subSrcX, subSrcY, subSrcW, subSrcH,
+                texC.getContext('2d').drawImage(drawSrc, subSrcX, subSrcY, subSrcW, subSrcH,
                                                 0, 0, texC.width, texC.height);
             } catch (e) { return; } // cross-origin
 
@@ -5925,8 +5973,8 @@ function captureShowroom(targetW, targetH) {
         // pieces that overlap a filled cell. The layer covers the visible region
         // [overlapLeft, rect.y] × [overlapLeft+visW, rect.y+visH] in wall pixels;
         // we recover those bounds from the inner element's offset.
-        const layerWallX = -(parseFloat(drawEl.style.left) || 0);
-        const layerWallY = -(parseFloat(drawEl.style.top) || 0);
+        const layerWallX = -(parseFloat(styleEl.style.left) || 0);
+        const layerWallY = -(parseFloat(styleEl.style.top) || 0);
         for (const key of _filledCells) {
             const i = key.indexOf(',');
             const c = +key.slice(0, i), r = +key.slice(i + 1);
@@ -6098,19 +6146,29 @@ function buildRecordOverlays() {
         if (!obj.element || !obj.visible) return;
         const container = obj.element;
         if (!container.classList || !container.classList.contains('css3d-content-el')) return;
-        const drawEl = container.querySelector('canvas') || container.querySelector('img');
-        if (!drawEl) return;
+        // styleEl carries CSS positioning; drawEl is the pixel source for canvas
+        // textures (snapshot at startRecording time for iframes).
+        let styleEl = container.querySelector('canvas') || container.querySelector('img');
+        let drawEl = styleEl;
+        if (!styleEl) {
+            const ifr = container.querySelector('iframe');
+            if (ifr) {
+                const rast = rasterizeIframe(ifr);
+                if (rast) { styleEl = ifr; drawEl = rast; }
+            }
+        }
+        if (!styleEl || !drawEl) return;
         const visW = parseFloat(container.style.width) || 0;
         const visH = parseFloat(container.style.height) || 0;
         if (visW < 1 || visH < 1) return;
         const worldW = visW * obj.scale.x;
         const worldH = visH * obj.scale.y;
 
-        // CSS-space crop parameters
-        const innerCssW = parseFloat(drawEl.style.width) || visW;
-        const innerCssH = parseFloat(drawEl.style.height) || visH;
-        const offsetX = -(parseFloat(drawEl.style.left) || 0);
-        const offsetY = -(parseFloat(drawEl.style.top) || 0);
+        // CSS-space crop parameters (from positioning element, not draw source)
+        const innerCssW = parseFloat(styleEl.style.width) || visW;
+        const innerCssH = parseFloat(styleEl.style.height) || visH;
+        const offsetX = -(parseFloat(styleEl.style.left) || 0);
+        const offsetY = -(parseFloat(styleEl.style.top) || 0);
 
         let texture, isVideo = false, texCanvas = null;
         const vid = drawEl._vid; // source <video> if canvas renders from one
@@ -6195,8 +6253,8 @@ function buildRecordOverlays() {
 
         // Custom wall — emit one overlay per filled cell that intersects the
         // visible layer region, so recorded video matches the live mask.
-        const layerWallX = -(parseFloat(drawEl.style.left) || 0);
-        const layerWallY = -(parseFloat(drawEl.style.top) || 0);
+        const layerWallX = -(parseFloat(styleEl.style.left) || 0);
+        const layerWallY = -(parseFloat(styleEl.style.top) || 0);
         for (const key of _filledCellsRec) {
             const i = key.indexOf(',');
             const c = +key.slice(0, i), r = +key.slice(i + 1);
