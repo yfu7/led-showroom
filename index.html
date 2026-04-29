@@ -18,6 +18,10 @@
          for Save Image / Save Video, since browsers can't drawImage iframes.
          Loaded as a global; consumed lazily so it doesn't block startup. -->
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" defer></script>
+    <!-- mp4box.js: used to demux HEVC mp4 files for the WebCodecs decode
+         fallback when the browser's <video> element can't play H.265 directly.
+         Lazy-loaded; only consumed when an HEVC file is uploaded. -->
+    <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js" defer></script>
 
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -4400,6 +4404,233 @@ function releaseSharedSpanVideo(force) {
     sharedSpanVideoRefCount = 0;
 }
 
+/* HEVC playback via WebCodecs + MP4Box.js. Used when the browser's <video>
+   element can't decode H.265 directly (most Chrome on Windows without the
+   Microsoft HEVC Video Extensions) but the system DOES have a hardware
+   HEVC decoder that VideoDecoder can drive.
+
+   Returns the same shape as the regular video createContentEl: a canvas
+   with a `_vid`-shim object exposing the subset of the HTMLVideoElement
+   API the rest of the app reads (videoWidth/Height, currentTime, paused,
+   readyState, duration). The canvas auto-updates as decoded frames arrive. */
+function createHEVCContentEl(file, winId) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 16; canvas.height = 16;
+    const ctx2d = canvas.getContext('2d');
+    showLoading('Decoding HEVC… 0%', 0);
+
+    // Shim looks just enough like an HTMLVideoElement for the rest of the
+    // app (recording overlays, save image, video-canvas tracking, etc.).
+    const shim = {
+        videoWidth: 0, videoHeight: 0,
+        currentTime: 0, duration: 0,
+        paused: false, readyState: 0,
+        ended: false, error: null,
+        muted: true, loop: true,
+        play: () => Promise.resolve(),
+        pause: () => { shim.paused = true; },
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        _isHEVC: true,
+        _hwDecode: true,
+    };
+    canvas._vid = shim;
+    canvas._isSharedVid = false;
+    activeVideoCanvases.add(canvas);
+
+    let decoder = null;
+    let mp4file = null;
+    let stopped = false;
+    let nextSampleTimeUs = 0;
+    let trackInfo = null;
+    let frameQueue = [];   // pending frames awaiting display
+    let firstFrameAt = 0;  // performance.now() at first display
+    let firstPtsUs = 0;    // pts of first frame
+    let durationUs = 0;
+    let raf = 0;
+    let settled = false;
+    const settle = () => {
+        if (settled) return;
+        settled = true;
+        hideLoading();
+        if (winId != null) clearWindowLoading(winId);
+    };
+    const fail = (msg) => {
+        settle();
+        showUploadError('HEVC playback failed: ' + msg);
+    };
+
+    // Wait until MP4Box is on window (script tag is defer-loaded).
+    const waitForLib = () => new Promise(res => {
+        const tick = () => {
+            if (typeof MP4Box !== 'undefined') return res();
+            setTimeout(tick, 50);
+        };
+        tick();
+    });
+
+    (async () => {
+        if (!('VideoDecoder' in window)) {
+            fail('VideoDecoder not available in this browser.');
+            return;
+        }
+        await waitForLib();
+        if (stopped) return;
+
+        mp4file = MP4Box.createFile();
+        mp4file.onError = e => fail('mp4 parse error: ' + e);
+        mp4file.onReady = (info) => {
+            const track = info.videoTracks[0];
+            if (!track) { fail('no video track in file'); return; }
+            trackInfo = track;
+            durationUs = (info.duration / info.timescale) * 1_000_000;
+            shim.videoWidth = track.video.width;
+            shim.videoHeight = track.video.height;
+            shim.duration = durationUs / 1_000_000;
+            // Cap canvas at the GPU's max texture size — same as the regular
+            // video path. drawImage at displayLoop will scale frames to fit.
+            const MAX = gpuMaxTextureSize || 4096;
+            let cw = track.video.width, ch = track.video.height;
+            if (cw > MAX || ch > MAX) {
+                const scale = Math.min(MAX / cw, MAX / ch);
+                cw = Math.round(cw * scale);
+                ch = Math.round(ch * scale);
+            }
+            canvas.width = cw;
+            canvas.height = ch;
+
+            // Build VideoDecoder description from the avcC/hvcC sample entry box.
+            const desc = extractHEVCDescription(mp4file, track.id);
+            decoder = new VideoDecoder({
+                output: onDecoderFrame,
+                error: e => fail('decoder error: ' + e.message),
+            });
+            decoder.configure({
+                codec: track.codec,
+                description: desc,
+            });
+
+            mp4file.setExtractionOptions(track.id, null, { nbSamples: 30 });
+            mp4file.start();
+        };
+        mp4file.onSamples = (id, user, samples) => {
+            if (!decoder || stopped) return;
+            for (const s of samples) {
+                if (stopped) return;
+                try {
+                    const chunk = new EncodedVideoChunk({
+                        type: s.is_sync ? 'key' : 'delta',
+                        timestamp: (s.cts * 1_000_000) / s.timescale,
+                        duration: (s.duration * 1_000_000) / s.timescale,
+                        data: s.data,
+                    });
+                    decoder.decode(chunk);
+                } catch (e) { /* skip bad sample */ }
+            }
+        };
+
+        // Stream the file into MP4Box in chunks
+        const totalBytes = file.size;
+        const chunkSize = 4 * 1024 * 1024;
+        let offset = 0;
+        while (offset < totalBytes && !stopped) {
+            const slice = file.slice(offset, offset + chunkSize);
+            const buf = await slice.arrayBuffer();
+            buf.fileStart = offset;
+            mp4file.appendBuffer(buf);
+            offset += chunkSize;
+            const pct = Math.min(99, Math.round((offset / totalBytes) * 100));
+            if (!settled) showLoading('Decoding HEVC… ' + pct + '%', pct);
+        }
+        mp4file.flush();
+    })();
+
+    function onDecoderFrame(frame) {
+        if (stopped) { frame.close(); return; }
+        if (!settled) settle();
+        // Display frames at their pts relative to start. Drop frames that
+        // run too late so we don't drift forever.
+        if (firstFrameAt === 0) {
+            firstFrameAt = performance.now();
+            firstPtsUs = frame.timestamp;
+        }
+        frameQueue.push(frame);
+        if (!raf) raf = requestAnimationFrame(displayLoop);
+    }
+
+    function displayLoop() {
+        raf = 0;
+        if (stopped) return;
+        const now = performance.now();
+        // Wall-clock time since we started displaying, in microseconds
+        const elapsedUs = (now - firstFrameAt) * 1000;
+        // Pop and draw the latest frame whose pts has already arrived; drop
+        // older ones to stay synced
+        let drewOne = null;
+        while (frameQueue.length > 0) {
+            const f = frameQueue[0];
+            const fpts = f.timestamp - firstPtsUs;
+            if (fpts <= elapsedUs + 16_000) {
+                if (drewOne) drewOne.close();
+                drewOne = frameQueue.shift();
+            } else break;
+        }
+        if (drewOne) {
+            try {
+                ctx2d.drawImage(drewOne, 0, 0, canvas.width, canvas.height);
+                shim.currentTime = (drewOne.timestamp - firstPtsUs) / 1_000_000;
+                shim.readyState = 4;
+                markDirty();
+            } catch (e) {}
+            drewOne.close();
+        }
+        // Loop: when we approach end, restart by re-extracting from sync.
+        if (durationUs > 0 && shim.currentTime * 1_000_000 >= durationUs - 200_000 && frameQueue.length === 0) {
+            // simple loop: rewind clock so the next batch of decodes restart
+            firstFrameAt = 0; firstPtsUs = 0;
+            try {
+                if (mp4file && trackInfo) {
+                    mp4file.stop();
+                    mp4file.start();   // re-extracts samples from the start
+                }
+            } catch (_) {}
+        }
+        raf = requestAnimationFrame(displayLoop);
+    }
+
+    canvas._vidCleanup = () => {
+        stopped = true;
+        if (raf) cancelAnimationFrame(raf);
+        for (const f of frameQueue) try { f.close(); } catch (_) {}
+        frameQueue = [];
+        try { decoder && decoder.close(); } catch (_) {}
+        try { mp4file && mp4file.stop(); } catch (_) {}
+        activeVideoCanvases.delete(canvas);
+    };
+    return canvas;
+}
+
+/* Pull the avcC/hvcC sample entry description box out of the MP4Box info,
+   serialized to a Uint8Array for VideoDecoder.configure({ description }). */
+function extractHEVCDescription(mp4file, trackId) {
+    const trak = mp4file.getTrackById(trackId);
+    if (!trak) return undefined;
+    // Walk the box hierarchy: trak.mdia.minf.stbl.stsd.entries[0]
+    const entry = trak?.mdia?.minf?.stbl?.stsd?.entries?.[0];
+    if (!entry) return undefined;
+    // hvcC for HEVC, avcC for H.264
+    const cfgBox = entry.hvcC || entry.avcC;
+    if (!cfgBox) return undefined;
+    // Serialize the config box payload using MP4Box's DataStream writer.
+    const ds = new (window.DataStream || MP4Box.DataStream)();
+    ds.endianness = (window.DataStream || MP4Box.DataStream).BIG_ENDIAN;
+    cfgBox.write(ds);
+    // The first 8 bytes are box header (size + type); the description
+    // VideoDecoder wants is the payload without the box header.
+    const u8 = new Uint8Array(ds.buffer);
+    return u8.slice(8);
+}
+
 function createContentEl(type, url, winId, existingVid) {
     if (type === 'image') {
         const img = document.createElement('img');
@@ -4410,6 +4641,13 @@ function createContentEl(type, url, winId, existingVid) {
         return img;
     }
     if (type === 'video') {
+        // HEVC fallback: if upload tagged this URL for WebCodecs decoding,
+        // route it through the HEVC pipeline so users with HW HEVC decoders
+        // can still play H.265 videos that <video> can't handle natively.
+        const hevcFile = _hevcFileForUrl.get(url);
+        if (hevcFile) {
+            return createHEVCContentEl(hevcFile, winId);
+        }
         // Use off-screen video + canvas to avoid CSS 3D transform compositing issues
         const isShared = !!existingVid;
         const vid = existingVid || (() => {
@@ -5143,27 +5381,95 @@ document.querySelectorAll('.content-tab').forEach(tab => {
 });
 
 /* Upload handlers — auto-create window if none active */
+/* Quick codec sniff for video files: peek the first 256 KB for the mp4 sample
+   entry boxes. HEVC content is `hev1` / `hvc1`; H.264 is `avc1` / `avc3`;
+   AV1 is `av01`. Returns an object with which codecs we found in the file. */
+async function sniffVideoCodecs(file) {
+    try {
+        const slice = file.slice(0, 256 * 1024);
+        const buf = new Uint8Array(await slice.arrayBuffer());
+        const text = new TextDecoder('latin1').decode(buf);
+        return {
+            hevc: text.includes('hev1') || text.includes('hvc1'),
+            h264: text.includes('avc1') || text.includes('avc3'),
+            av1:  text.includes('av01'),
+            vp9:  text.includes('vp09'),
+        };
+    } catch { return null; }
+}
+
+/* Decide how to play a file given its codecs:
+   - 'video' = regular <video> element (works for everything browser supports)
+   - 'webcodecs' = use WebCodecs VideoDecoder fallback (HEVC in browsers
+     without native <video> HEVC support, still requires HW decoder)
+   - 'unsupported' = no path works on this browser. */
+function pickVideoDecodePath(codecs) {
+    if (!codecs) return 'video';
+    const v = document.createElement('video');
+    const canHEVC = !!(v.canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"')
+                    || v.canPlayType('video/mp4; codecs="hev1.1.6.L93.B0"'));
+    if (codecs.hevc && !canHEVC) {
+        if ('VideoDecoder' in window) return 'webcodecs';
+        return 'unsupported';
+    }
+    return 'video';
+}
+
+/* Lightweight toast for upload errors. Auto-dismisses after 8s; click to
+   dismiss earlier. Shows above the showroom; doesn't steal focus. */
+function showUploadError(msg) {
+    let host = document.getElementById('uploadErrorToast');
+    if (!host) {
+        host = document.createElement('div');
+        host.id = 'uploadErrorToast';
+        host.style.cssText = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); ' +
+            'background:#7a1f1f; color:#fff; padding:12px 18px; border-radius:8px; ' +
+            'max-width:560px; font-size:13px; line-height:1.5; z-index:10000; ' +
+            'box-shadow:0 4px 14px rgba(0,0,0,0.4); cursor:pointer;';
+        host.addEventListener('click', () => host.remove());
+        document.body.appendChild(host);
+    }
+    host.textContent = msg;
+    clearTimeout(showUploadError._timer);
+    showUploadError._timer = setTimeout(() => host.remove(), 8000);
+}
+
+/* Track files that should be decoded via WebCodecs instead of <video> when
+   loaded as content. Keyed by the blob URL so createContentEl knows which
+   path to take. */
+const _hevcFileForUrl = new Map();
+
 function wireUpload(zoneId, inputId, type) {
     const zone = document.getElementById(zoneId);
     const input = document.getElementById(inputId);
-    zone.addEventListener('click', () => input.click());
-    input.addEventListener('change', () => {
-        const file = input.files[0];
-        if (file) {
+    const handle = async (file) => {
+        if (!file) return;
+        if (type === 'video') {
+            const codecs = await sniffVideoCodecs(file);
+            const path = pickVideoDecodePath(codecs);
+            if (path === 'unsupported') {
+                showUploadError('This MP4 is encoded with a codec your browser can\'t decode ' +
+                    '(likely HEVC) and WebCodecs is unavailable. Re-encode to H.264 and try again.');
+                return;
+            }
+            const url = URL.createObjectURL(file);
+            // Tag the url so createContentEl uses the WebCodecs decoder for this load.
+            if (path === 'webcodecs') _hevcFileForUrl.set(url, file);
             const win = ensureActiveWindow();
-            setWindowContent(win.id, type, URL.createObjectURL(file), file.name);
+            setWindowContent(win.id, type, url, file.name);
+            return;
         }
-    });
+        const win = ensureActiveWindow();
+        setWindowContent(win.id, type, URL.createObjectURL(file), file.name);
+    };
+    zone.addEventListener('click', () => input.click());
+    input.addEventListener('change', () => handle(input.files[0]));
     zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
     zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
     zone.addEventListener('drop', e => {
         e.preventDefault();
         zone.classList.remove('dragover');
-        const file = e.dataTransfer.files[0];
-        if (file) {
-            const win = ensureActiveWindow();
-            setWindowContent(win.id, type, URL.createObjectURL(file), file.name);
-        }
+        handle(e.dataTransfer.files[0]);
     });
 }
 wireUpload('imageDropZone', 'imageInput', 'image');
@@ -6351,7 +6657,14 @@ function buildRecordOverlays() {
         let texture, isVideo = false, texCanvas = null;
         const vid = drawEl._vid; // source <video> if canvas renders from one
 
-        if (vid && vid.readyState >= 2 && vid.videoWidth > 0) {
+        // Note: HEVC playback uses a shim object for `_vid` (not a real
+        // HTMLVideoElement) and renders frames into the canvas itself.
+        // VideoTexture only works with real <video> elements, so for HEVC
+        // we fall through to the canvas-snapshot path which auto-tracks
+        // the canvas via updateRecordOverlays().
+        const isRealVideo = vid && vid.readyState >= 2 && vid.videoWidth > 0 && !vid._isHEVC;
+
+        if (isRealVideo) {
             // Video content: use THREE.VideoTexture (GPU-optimized, auto-updates)
             if (vidTexMap.has(vid)) {
                 texture = vidTexMap.get(vid);
