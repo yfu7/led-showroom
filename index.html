@@ -6458,7 +6458,7 @@ document.getElementById('saveImageBtn').addEventListener('click', () => {
     const bbox = computeWallScreenBBox(full.width, full.height);
     let out = full;
     if (!venueObjectUrl && bbox && bbox.w > 1 && bbox.h > 1) {
-        const padBase = Math.max(20, Math.round(Math.min(bbox.w, bbox.h) * 0.1));
+        const padBase = Math.max(40, Math.round(Math.min(bbox.w, bbox.h) * 0.2));
         const x0 = Math.max(0, Math.floor(bbox.x - padBase));
         const y0 = Math.max(0, Math.floor(bbox.y - padBase));
         const x1 = Math.min(full.width,  Math.ceil(bbox.x + bbox.w + padBase));
@@ -6839,7 +6839,7 @@ async function startRecording() {
     const bbox = (!venueObjectUrl) ? computeWallScreenBBox(fullW, fullH) : null;
     let cropX = 0, cropY = 0, cropW = fullW, cropH = fullH;
     if (bbox && bbox.w > 1 && bbox.h > 1) {
-        const padBase = Math.max(20, Math.round(Math.min(bbox.w, bbox.h) * 0.1));
+        const padBase = Math.max(40, Math.round(Math.min(bbox.w, bbox.h) * 0.2));
         cropX = Math.max(0, Math.floor(bbox.x - padBase));
         cropY = Math.max(0, Math.floor(bbox.y - padBase));
         cropW = Math.min(fullW, Math.ceil(bbox.x + bbox.w + padBase)) - cropX;
