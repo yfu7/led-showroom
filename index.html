@@ -2481,7 +2481,15 @@ function removeWall(wallId) {
     accessoryMeshes.forEach(m => wallGroup.remove(m));
     cornerFillMeshes.forEach(m => { if (m.geometry) m.geometry.dispose(); wallGroup.remove(m); });
     bezelLineMeshes.forEach(m => { if (m.geometry) m.geometry.dispose(); wallGroup.remove(m); });
-    pixelGridMeshes.forEach(m => wallGroup.remove(m));
+    pixelGridMeshes.forEach(m => {
+        wallGroup.remove(m);
+        if (m.material && m.material._isPixelGridMat) {
+            const t = m.material.uniforms?.uMaskTex?.value;
+            if (t) t.dispose();
+            m.material.dispose();
+        }
+        if (m.geometry) m.geometry.dispose();
+    });
     dimensionObjects.forEach(o => wallGroup.remove(o));
     scene.remove(wallGroup);
     wallContextMap.delete(wallId);
@@ -2854,20 +2862,37 @@ const dimLineMat = new THREE.LineBasicMaterial({ color: 0x00bbff, depthTest: fal
    filter, the integral correctly asymptotes to the line density (2h) when the
    pixel covers many cells, so no interference bands can form.
    Line thickness: 0.36mm physical (real inter-pixel gap = 1.86mm pitch − 1.5mm LED). */
-const _pgPlaneGeom = new THREE.PlaneGeometry(PANEL_W_IN, PANEL_H_IN);
-const _pgGridMat = (() => {
-    const cellWIn = PANEL_W_IN / PANEL_PX_W;
-    const cellHIn = PANEL_H_IN / PANEL_PX_H;
-    const lineWidthIn = 0.36 / 25.4;         // 0.36mm inter-pixel gap in inches
-    // Half-line-width expressed as a fraction of one grid cell (per axis).
+/* Build a pixel-grid material parameterized by the segment's cell grid.
+   Each segment of a wall (a straight run of panels — could be the whole
+   wall, or a piece between two corners) gets ONE material and ONE plane.
+   The shader draws lines uniformly across the entire segment, including
+   over the bezel gaps between panels, so there's no visible delineation.
+   A per-panel-cell mask texture lets custom shapes punch out empty cells.
+
+   uGridCells = (cols*344, rows*258)  -- total grid cells in this segment
+   uPanelCells = (cols, rows)         -- panel cell count, for mask lookup
+   uMaskTex (sampler2D, optional)     -- RED 8-bit per (col, row); >0.5 = filled
+   uUseMask (0|1)                     -- 1 if uMaskTex is bound
+*/
+function makePixelGridMat(cols, rows, gapIn, maskTex) {
+    const PIXEL_PX_W = cols * PANEL_PX_W;
+    const PIXEL_PX_H = rows * PANEL_PX_H;
+    const totalWIn = cols * PANEL_W_IN + (cols - 1) * gapIn;
+    const totalHIn = rows * PANEL_H_IN + (rows - 1) * gapIn;
+    const cellWIn = totalWIn / PIXEL_PX_W;
+    const cellHIn = totalHIn / PIXEL_PX_H;
+    const lineWidthIn = 0.36 / 25.4;
     const halfLineCellsX = (lineWidthIn / 2) / cellWIn;
     const halfLineCellsY = (lineWidthIn / 2) / cellHIn;
     return new THREE.ShaderMaterial({
         uniforms: {
             uColor:         { value: new THREE.Color(0x000000) },
-            uGridCells:     { value: new THREE.Vector2(PANEL_PX_W, PANEL_PX_H) },
+            uGridCells:     { value: new THREE.Vector2(PIXEL_PX_W, PIXEL_PX_H) },
             uHalfLineCells: { value: new THREE.Vector2(halfLineCellsX, halfLineCellsY) },
-            uOpacity:       { value: 1.0 }   // fades in over a 3 ft band approaching the threshold
+            uOpacity:       { value: 1.0 },
+            uPanelCells:    { value: new THREE.Vector2(cols, rows) },
+            uMaskTex:       { value: maskTex || null },
+            uUseMask:       { value: maskTex ? 1 : 0 },
         },
         vertexShader: /* glsl */ `
             varying vec2 vUv;
@@ -2880,22 +2905,16 @@ const _pgGridMat = (() => {
             precision highp float;
             varying vec2 vUv;
             uniform vec3 uColor;
-            uniform vec2 uGridCells;        // (344, 258)
+            uniform vec2 uGridCells;        // (cols*344, rows*258)
             uniform vec2 uHalfLineCells;    // line half-width in cell units
             uniform float uOpacity;         // global fade for distance-based fade-in
+            uniform vec2 uPanelCells;       // (cols, rows) — for mask lookup
+            uniform sampler2D uMaskTex;     // per-panel-cell mask (1 channel)
+            uniform float uUseMask;
 
-            /* Primitive of the line indicator 1{fract(y) < 2h}.
-               F(y) counts the integrated line length from 0 to y, stepping
-               by 2h each period and smoothly within the line interval. */
             float F(float y, float twoH) {
                 return floor(y) * twoH + min(fract(y), twoH);
             }
-
-            /* Exact analytic line coverage for one axis, integrated over the
-               fragment's UV footprint. This is Inigo Quilez's filtered-grid
-               technique — at every density the coverage is the TRUE fraction
-               of the pixel footprint that overlaps a line, so no aliasing /
-               moiré can arise regardless of rotation or zoom. */
             float axisCoverage(float t, float halfWidth) {
                 float d = max(fwidth(t), 1e-6);
                 float twoH = 2.0 * halfWidth;
@@ -2905,10 +2924,16 @@ const _pgGridMat = (() => {
             }
 
             void main() {
+                // For custom shapes: kill fragments inside unfilled panel cells.
+                if (uUseMask > 0.5) {
+                    vec2 cellId = floor(vUv * uPanelCells);
+                    vec2 sampleUv = (cellId + 0.5) / uPanelCells;
+                    if (texture2D(uMaskTex, sampleUv).r < 0.5) discard;
+                }
+
                 vec2 uvPx = vUv * uGridCells;
                 float cx = axisCoverage(uvPx.x, uHalfLineCells.x);
                 float cy = axisCoverage(uvPx.y, uHalfLineCells.y);
-                // Probabilistic OR — fragment is on a line if X OR Y is on a line.
                 float alpha = (cx + cy - cx * cy) * uOpacity;
                 if (alpha < 0.003) discard;
                 gl_FragColor = vec4(uColor, alpha);
@@ -2917,9 +2942,39 @@ const _pgGridMat = (() => {
         transparent: true,
         depthTest: false,
         side: THREE.DoubleSide,
-        extensions: { derivatives: true }    // fwidth() — auto on WebGL2, explicit for safety
+        extensions: { derivatives: true }
     });
-})();
+}
+
+/* Build a small RED-format texture (cols × rows pixels) marking which
+   panel cells are filled. Used by makePixelGridMat to mask out voids
+   on custom-shape walls. Returns null if `cells` covers every position
+   (fully rect; no mask needed). */
+function buildCellMaskTex(cells, startCol, endCol, rows) {
+    const cols = endCol - startCol + 1;
+    let needMask = false;
+    for (let r = 0; r < rows && !needMask; r++) {
+        for (let c = 0; c < cols && !needMask; c++) {
+            if (!cells.has((c + startCol) + ',' + r)) needMask = true;
+        }
+    }
+    if (!needMask) return null;
+    const data = new Uint8Array(cols * rows);
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            // DataTexture is bottom-up by default in WebGL; flip Y so row 0 = top.
+            const tr = rows - 1 - r;
+            data[tr * cols + c] = cells.has((c + startCol) + ',' + r) ? 255 : 0;
+        }
+    }
+    const tex = new THREE.DataTexture(data, cols, rows, THREE.RedFormat, THREE.UnsignedByteType);
+    tex.minFilter = THREE.NearestFilter;
+    tex.magFilter = THREE.NearestFilter;
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    return tex;
+}
 
 /* Shared geometry (identical for every panel / accessory piece) */
 const panelGeom = new THREE.BoxGeometry(PANEL_W_IN, PANEL_H_IN, PANEL_D_IN);
@@ -3230,7 +3285,14 @@ function checkGridAutoVisibility() {
         opacity = Math.min(1, Math.max(0,
             (fadeStart - camDist) / GRID_FADE_BAND_IN));
     }
-    _pgGridMat.uniforms.uOpacity.value = opacity;
+    // Push opacity to every per-segment material (each wall context may
+    // have its own grid meshes; iterate the active wall's array — corner
+    // walls have one material per segment, all need the same opacity).
+    for (const m of pixelGridMeshes) {
+        if (m.material && m.material.uniforms && m.material.uniforms.uOpacity) {
+            m.material.uniforms.uOpacity.value = opacity;
+        }
+    }
 
     if (inBand === _gridAutoVisible) {
         // Still in (or out of) band — just push the opacity update
@@ -3255,7 +3317,15 @@ function checkGridAutoVisibility() {
 }
 
 function _removeAllGrids() {
-    pixelGridMeshes.forEach(m => wallGroup.remove(m));
+    pixelGridMeshes.forEach(m => {
+        wallGroup.remove(m);
+        if (m.material && m.material._isPixelGridMat) {
+            const t = m.material.uniforms?.uMaskTex?.value;
+            if (t) t.dispose();
+            m.material.dispose();
+        }
+        if (m.geometry) m.geometry.dispose();
+    });
     pixelGridMeshes = [];
     markDirty();
 }
@@ -3628,36 +3698,69 @@ function buildBezelLines(layout, d, miterCuts, cells) {
 /* ── Pixel-grid overlay (analytic shader grid on layer 1 — moiré-free by fwidth AA) ──
    v3: if a `cells` set is provided, unfilled cells are skipped. */
 function buildPixelGrid(layout, d, cells) {
-    pixelGridMeshes.forEach(m => wallGroup.remove(m));
+    // Dispose old grid resources first (per-mesh material + mask texture)
+    pixelGridMeshes.forEach(m => {
+        wallGroup.remove(m);
+        if (m.material && m.material._isPixelGridMat) {
+            const t = m.material.uniforms?.uMaskTex?.value;
+            if (t) t.dispose();
+            m.material.dispose();
+        }
+        if (m.geometry) m.geometry.dispose();
+    });
     pixelGridMeshes = [];
     if (!state.showPixelGrid) return;
 
     const zOff = -(PANEL_D_IN / 2 + 0.06);   // in front of all content layers
+    const segments = computeSegments();      // one straight run between corners
 
-    for (let c = 0; c < d.cols; c++) {
-        const col = layout[c];
-        const cos = Math.cos(col.rotY), sin = Math.sin(col.rotY);
+    // Synthesize a `cells` Set if the caller didn't pass one (rect wall).
+    const filledCells = cells || (() => {
+        const s = new Set();
+        for (let c = 0; c < d.cols; c++)
+            for (let r = 0; r < d.rows; r++) s.add(c + ',' + r);
+        return s;
+    })();
 
-        for (let r = 0; r < d.rows; r++) {
-            if (cells && !cells.has(c + ',' + r)) continue;
-            const y = d.totalH / 2 - PANEL_H_IN / 2 - r * (PANEL_H_IN + d.gap);
+    /* One textured plane per segment, sized to the segment's full bbox
+       (including the bezel gaps between its panels). The grid shader
+       draws lines uniformly across the entire plane — so adjacent
+       panels share continuous grid lines with no visible delineation. */
+    for (const seg of segments) {
+        const segCols = seg.endCol - seg.startCol + 1;
+        const segW = segCols * PANEL_W_IN + (segCols - 1) * d.gap;
+        const segH = d.rows * PANEL_H_IN + (d.rows - 1) * d.gap;
 
-            /* Shader grid mesh — one plane per panel, rendered on gridRenderer (layer 1).
-               The fragment shader draws all 344×258 lines analytically with fwidth-based
-               AA, so moiré patterns cannot form at any zoom / angle.
-               Also captured by Save Image & Recording (renderOrder 1000 > content 999). */
-            const mesh = new THREE.Mesh(_pgPlaneGeom, _pgGridMat);
-            mesh.layers.set(1);          // grid layer — rendered only on gridRenderer
-            mesh.renderOrder = 1000;     // above content overlays (999) during capture
-            mesh.position.set(
-                col.x - zOff * sin,
-                y,
-                col.z - zOff * cos
-            );
-            mesh.rotation.y = col.rotY;
-            wallGroup.add(mesh);
-            pixelGridMeshes.push(mesh);
+        // Skip if this segment has no filled cells (all empty under a custom shape)
+        let anyFilled = false;
+        for (let c = seg.startCol; c <= seg.endCol && !anyFilled; c++) {
+            for (let r = 0; r < d.rows && !anyFilled; r++) {
+                if (filledCells.has(c + ',' + r)) anyFilled = true;
+            }
         }
+        if (!anyFilled) continue;
+
+        const maskTex = buildCellMaskTex(filledCells, seg.startCol, seg.endCol, d.rows);
+        const mat = makePixelGridMat(segCols, d.rows, d.gap, maskTex);
+        mat._isPixelGridMat = true;
+        const geom = new THREE.PlaneGeometry(segW, segH);
+
+        // Center of segment in world coords — average of its two end columns'
+        // positions (they share the same rotY since this is one segment).
+        const firstCol = layout[seg.startCol];
+        const lastCol = layout[seg.endCol];
+        const cx = (firstCol.x + lastCol.x) / 2;
+        const cz = (firstCol.z + lastCol.z) / 2;
+        const rotY = firstCol.rotY;
+        const sin = Math.sin(rotY), cos = Math.cos(rotY);
+
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.layers.set(1);
+        mesh.renderOrder = 1000;
+        mesh.position.set(cx - zOff * sin, 0, cz - zOff * cos);
+        mesh.rotation.y = rotY;
+        wallGroup.add(mesh);
+        pixelGridMeshes.push(mesh);
     }
     markDirty();
 }
