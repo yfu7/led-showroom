@@ -1759,7 +1759,7 @@
         </div>
     </div>
 
-    <div class="showroom-hint" id="showroomHint">Drag to rotate · Scroll to zoom · Middle/right-click to pan</div>
+    <div class="showroom-hint" id="showroomHint">Drag to pan · Scroll to zoom · Middle-drag to rotate</div>
 </main>
 
 <!-- v3: Custom shape editor side panel (hidden by default) -->
@@ -3152,9 +3152,12 @@ function init() {
     controls.minDistance = 12;  // 1 ft
     controls.maxDistance = 5000;
     controls.target.set(0, 0, 0);
+    // Swapped from the OrbitControls default: left = pan, middle = rotate.
+    // Feels more like 2D pan + zoom for primary navigation; rotation is the
+    // less-common gesture and lives on middle-drag.
     controls.mouseButtons = {
-        LEFT: THREE.MOUSE.ROTATE,
-        MIDDLE: THREE.MOUSE.PAN,
+        LEFT: THREE.MOUSE.PAN,
+        MIDDLE: THREE.MOUSE.ROTATE,
         RIGHT: THREE.MOUSE.PAN
     };
     controls.addEventListener('change', markDirty);
@@ -6020,7 +6023,7 @@ function setMoveMode(on) {
     moveToggleBtn.classList.toggle('active', on);
     hint.textContent = on
         ? 'Drag to position wall \u00b7 Scroll to zoom'
-        : 'Drag to rotate \u00b7 Scroll to zoom \u00b7 Middle/right-click to pan';
+        : 'Drag to pan \u00b7 Scroll to zoom \u00b7 Middle-drag to rotate';
 }
 
 function updatePositionInfo() {
@@ -6170,7 +6173,7 @@ function setContentDragMode(on) {
     dragContentBtn.classList.toggle('active', on);
     hint.textContent = on
         ? 'Click & drag to move selected content window on wall surface'
-        : 'Drag to rotate \u00b7 Scroll to zoom \u00b7 Click content window to move it';
+        : 'Drag to pan \u00b7 Scroll to zoom \u00b7 Click content window to move it';
 }
 
 dragContentBtn.addEventListener('click', () => setContentDragMode(!state.contentDragMode));
