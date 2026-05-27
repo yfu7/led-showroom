@@ -529,6 +529,30 @@
 
         .toggle-row label { font-size: 14px; color: #ccc; }
 
+        /* Pixel Grid row: select + toggle, gapped, right-aligned */
+        .pixel-grid-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .pg-dist-select {
+            background: #1a1a1a;
+            color: #ccc;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 4px 6px;
+            font-size: 12px;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23888' d='M0 0l5 6 5-6z'/></svg>");
+            background-repeat: no-repeat;
+            background-position: right 6px center;
+            padding-right: 20px;
+        }
+        .pg-dist-select:hover { border-color: #555; }
+        .pg-dist-select:focus { outline: none; border-color: #3b82f6; }
+
         /* Sub-section that appears under the Discrete GPU toggle */
         .hp-options {
             margin-left: 14px;
@@ -1636,10 +1660,18 @@
         </div>
         <div class="toggle-row">
             <label>Pixel Grid</label>
-            <label class="toggle">
-                <input type="checkbox" id="pixelGridToggle">
-                <span class="slider"></span>
-            </label>
+            <div class="pixel-grid-controls">
+                <select id="pixelGridDistSelect" class="pg-dist-select" title="Distance at which the pixel grid auto-appears">
+                    <option value="72">6 ft</option>
+                    <option value="96">8 ft</option>
+                    <option value="120">10 ft</option>
+                    <option value="144">12 ft</option>
+                </select>
+                <label class="toggle">
+                    <input type="checkbox" id="pixelGridToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
         </div>
         <div class="toggle-row" id="gpuToggleRow" style="display: none;">
             <label title="Use the discrete GPU (high-performance) instead of the integrated GPU">Discrete GPU</label>
@@ -3138,8 +3170,10 @@ function init() {
 let sceneDirty = true;
 function markDirty() { sceneDirty = true; }
 
-/* ── Distance-to-wall meter & auto pixel-grid threshold ── */
-const GRID_DIST_THRESHOLD = 72;  // 6 ft in inches — grid lines only render within this range
+/* ── Distance-to-wall meter & auto pixel-grid threshold ──
+   User-selectable visibility distance (6/8/10/12 ft). Mutable so the select
+   in the View Options panel can change it at runtime. */
+let GRID_DIST_THRESHOLD = 72;    // 6 ft in inches by default — overridden by UI
 let _prevDistIn = -1;            // last displayed distance in inches (avoid DOM thrash)
 let _gridAutoVisible = false;    // tracks whether grid is currently auto-shown
 
@@ -4478,10 +4512,10 @@ function createHEVCContentEl(file, winId) {
         if (stopped) return;
 
         mp4file = MP4Box.createFile();
-        mp4file.onError = e => fail('mp4 parse error: ' + e);
-        mp4file.onReady = (info) => {
+        mp4file.onError = e => fail('MP4 parse error: ' + e);
+        mp4file.onReady = async (info) => {
             const track = info.videoTracks[0];
-            if (!track) { fail('no video track in file'); return; }
+            if (!track) { fail('No video track found in file.'); return; }
             trackInfo = track;
             durationUs = (info.duration / info.timescale) * 1_000_000;
             shim.videoWidth = track.video.width;
@@ -4500,15 +4534,53 @@ function createHEVCContentEl(file, winId) {
             canvas.height = ch;
 
             // Build VideoDecoder description from the avcC/hvcC sample entry box.
-            const desc = extractHEVCDescription(mp4file, track.id);
+            let desc;
+            try { desc = extractHEVCDescription(mp4file, track.id); }
+            catch (e) {
+                fail('Could not read codec config from this MP4: ' + (e.message || e) +
+                     '. The file may be HEVC but malformed; re-encoding to H.264 should fix it.');
+                return;
+            }
+
+            // Try several codec string variants — some files have unusual tier/level
+            // values and Chrome can be strict about exact match.
+            const codecVariants = [
+                track.codec,                          // e.g. 'hvc1.1.6.L93.B0'
+                track.codec?.replace('hev1', 'hvc1'),
+                track.codec?.replace('hvc1', 'hev1'),
+                'hvc1.1.6.L93.B0',                   // Main profile, Main tier, level 4.1
+                'hvc1.2.4.L120.B0',                  // Main 10 profile
+                'hev1.1.6.L93.B0',
+            ].filter((v, i, a) => v && a.indexOf(v) === i);
+
+            let chosenCodec = null;
+            for (const codecStr of codecVariants) {
+                try {
+                    const sup = await VideoDecoder.isConfigSupported({
+                        codec: codecStr, description: desc,
+                    });
+                    if (sup.supported) { chosenCodec = codecStr; break; }
+                } catch (_) { /* try next */ }
+            }
+            if (!chosenCodec) {
+                fail('No HEVC hardware decoder available for this file. On Chrome ' +
+                     'this usually means the OS doesn\'t expose an HEVC decoder. ' +
+                     'Either install the Microsoft HEVC Video Extensions or ' +
+                     're-encode the file to H.264.');
+                return;
+            }
+
             decoder = new VideoDecoder({
                 output: onDecoderFrame,
-                error: e => fail('decoder error: ' + e.message),
+                error: e => fail('Decoder error: ' + (e.message || e) +
+                                 ' (codec=' + chosenCodec + ')'),
             });
-            decoder.configure({
-                codec: track.codec,
-                description: desc,
-            });
+            try {
+                decoder.configure({ codec: chosenCodec, description: desc });
+            } catch (e) {
+                fail('Decoder configure failed: ' + (e.message || e));
+                return;
+            }
 
             mp4file.setExtractionOptions(track.id, null, { nbSamples: 30 });
             mp4file.start();
@@ -4611,19 +4683,41 @@ function createHEVCContentEl(file, winId) {
 }
 
 /* Pull the avcC/hvcC sample entry description box out of the MP4Box info,
-   serialized to a Uint8Array for VideoDecoder.configure({ description }). */
+   serialized to a Uint8Array for VideoDecoder.configure({ description }).
+   MP4Box exposes DataStream under several names depending on the bundle
+   variant — check all the known ones so this works whether the file was
+   loaded as mp4box.all.min.js (window.DataStream), the module build
+   (MP4Box.DataStream), or the new MP4BoxStream alias. */
+function getMP4BoxDataStream() {
+    if (typeof window !== 'undefined') {
+        if (window.DataStream) return window.DataStream;
+        if (window.MP4BoxStream) return window.MP4BoxStream;
+    }
+    if (typeof MP4Box !== 'undefined') {
+        if (MP4Box.DataStream) return MP4Box.DataStream;
+        if (MP4Box.MP4BoxStream) return MP4Box.MP4BoxStream;
+    }
+    return null;
+}
+
 function extractHEVCDescription(mp4file, trackId) {
     const trak = mp4file.getTrackById(trackId);
-    if (!trak) return undefined;
-    // Walk the box hierarchy: trak.mdia.minf.stbl.stsd.entries[0]
-    const entry = trak?.mdia?.minf?.stbl?.stsd?.entries?.[0];
-    if (!entry) return undefined;
-    // hvcC for HEVC, avcC for H.264
-    const cfgBox = entry.hvcC || entry.avcC;
-    if (!cfgBox) return undefined;
+    if (!trak) throw new Error('Track not found');
+    // Walk the box hierarchy: trak.mdia.minf.stbl.stsd.entries[N]
+    const entries = trak?.mdia?.minf?.stbl?.stsd?.entries;
+    if (!entries || !entries.length) throw new Error('No sample entries');
+    let cfgBox = null;
+    for (const e of entries) {
+        if (e.hvcC) { cfgBox = e.hvcC; break; }
+        if (e.avcC) { cfgBox = e.avcC; break; }
+    }
+    if (!cfgBox) throw new Error('No hvcC/avcC config box in sample entry');
+    const DS = getMP4BoxDataStream();
+    if (!DS) throw new Error('MP4Box DataStream not available');
+    if (typeof cfgBox.write !== 'function')
+        throw new Error('Config box has no write() method (MP4Box build mismatch)');
     // Serialize the config box payload using MP4Box's DataStream writer.
-    const ds = new (window.DataStream || MP4Box.DataStream)();
-    ds.endianness = (window.DataStream || MP4Box.DataStream).BIG_ENDIAN;
+    const ds = new DS(undefined, 0, DS.BIG_ENDIAN);
     cfgBox.write(ds);
     // The first 8 bytes are box header (size + type); the description
     // VideoDecoder wants is the payload without the box header.
@@ -5809,6 +5903,25 @@ document.getElementById('pixelGridToggle').addEventListener('change', e => {
     _gridAutoVisible = false;   // reset so checkGridAutoVisibility re-evaluates
     markDirty();
 });
+
+/* Pixel grid distance threshold — choose 6/8/10/12 ft. Persisted across
+   reloads. Changing it forces an immediate re-evaluation so the grid
+   appears/disappears without waiting for the camera to move. */
+(() => {
+    const sel = document.getElementById('pixelGridDistSelect');
+    if (!sel) return;
+    const saved = parseInt(localStorage.getItem('pixelGridDistIn'));
+    if (saved && [72, 96, 120, 144].includes(saved)) GRID_DIST_THRESHOLD = saved;
+    sel.value = String(GRID_DIST_THRESHOLD);
+    sel.addEventListener('change', () => {
+        const v = parseInt(sel.value) | 0;
+        if (![72, 96, 120, 144].includes(v)) return;
+        GRID_DIST_THRESHOLD = v;
+        localStorage.setItem('pixelGridDistIn', String(v));
+        _gridAutoVisible = false;  // re-evaluate next animate frame
+        markDirty();
+    });
+})();
 
 /* ── Brightness (0–100% → 0–1000 nits) ── */
 function applyBrightness(pct) {
