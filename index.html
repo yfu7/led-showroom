@@ -3288,11 +3288,15 @@ function checkGridAutoVisibility() {
     // Push opacity to every per-segment material (each wall context may
     // have its own grid meshes; iterate the active wall's array — corner
     // walls have one material per segment, all need the same opacity).
+    let opacityChanged = false;
     for (const m of pixelGridMeshes) {
         if (m.material && m.material.uniforms && m.material.uniforms.uOpacity) {
+            if (m.material.uniforms.uOpacity.value !== opacity) opacityChanged = true;
             m.material.uniforms.uOpacity.value = opacity;
         }
     }
+    // Re-apply brightness so the grid-coverage compensation tracks the fade.
+    if (opacityChanged) applyBrightness(state.brightness);
 
     if (inBand === _gridAutoVisible) {
         // Still in (or out of) band — just push the opacity update
@@ -3314,6 +3318,13 @@ function checkGridAutoVisibility() {
             buildPixelGrid(computeColumnLayout(), wallDims(), w ? wallFilledCells(w) : null);
         } else _removeAllGrids();
     }
+    // Newly built materials default to uOpacity=1.0 from the factory; set
+    // the current band opacity on them, then re-apply brightness so the
+    // grid-darkening compensation reflects the new state.
+    for (const m of pixelGridMeshes) {
+        if (m.material?.uniforms?.uOpacity) m.material.uniforms.uOpacity.value = opacity;
+    }
+    applyBrightness(state.brightness);
 }
 
 function _removeAllGrids() {
@@ -6050,18 +6061,40 @@ document.getElementById('pixelGridToggle').addEventListener('change', e => {
 })();
 
 /* ── Brightness (0–100% → 0–1000 nits) ── */
+/* Grid coverage compensation: when the pixel grid is drawn at full
+   opacity, dark grid lines cover ~35% of the panel area (0.36mm line
+   width / 1.86mm pitch on both axes \u2192 1 - (1-0.194)^2). To keep the
+   apparent brightness constant whether the grid is visible or not, we
+   multiply the content brightness by 1 / (1 - GRID_COVERAGE * gridOpacity).
+   The compensation scales with the fade-in band so the boost ramps
+   smoothly as the grid appears. */
+const GRID_COVERAGE = 0.351;
+
+function gridBrightnessCompensation() {
+    // Look up the current opacity from any active grid material (they all
+    // share the same value). Falls back to 0 if no grid is built.
+    let op = 0;
+    for (const m of pixelGridMeshes) {
+        const u = m.material?.uniforms?.uOpacity;
+        if (u) { op = u.value; break; }
+    }
+    return 1 / Math.max(0.001, 1 - GRID_COVERAGE * op);
+}
+
 function applyBrightness(pct) {
     state.brightness = pct;
     const frac = pct / 100;
+    // Compensate for grid darkening so apparent brightness stays constant
+    const adj = frac * gridBrightnessCompensation();
     // CSS filter on all content elements (normal viewing)
     document.querySelectorAll('.css3d-content-el').forEach(el => {
-        el.style.filter = frac < 1 ? `brightness(${frac})` : '';
+        el.style.filter = Math.abs(adj - 1) < 0.005 ? '' : `brightness(${adj})`;
     });
-    // Panel face emissive (LED glow contribution)
-    frontMat.emissiveIntensity = 0.5 * frac;
+    // Panel face emissive (LED glow contribution) \u2014 also boosted while grid is on
+    frontMat.emissiveIntensity = 0.5 * adj;
     // Update record overlay materials if recording
     for (const ov of recordOverlays) {
-        ov.mat.color.setRGB(frac, frac, frac);
+        ov.mat.color.setRGB(adj, adj, adj);
     }
     // Update label
     const nits = Math.round(pct * 10);
