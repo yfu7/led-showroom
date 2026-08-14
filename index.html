@@ -553,6 +553,72 @@
         .pg-dist-select:hover { border-color: #555; }
         .pg-dist-select:focus { outline: none; border-color: #3b82f6; }
 
+        /* Venue Space (3D) controls */
+        .vs-dims-row {
+            display: flex;
+            gap: 8px;
+            margin: 10px 0;
+        }
+        .vs-dim {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .vs-dim input[type="number"] {
+            width: 100%;
+            padding: 6px 8px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 13px;
+            text-align: center;
+        }
+        .vs-dim input[type="number"]:focus { outline: none; border-color: #3b82f6; }
+        .vs-surfaces { margin-top: 8px; }
+        .vs-surface-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 0;
+        }
+        .vs-surface-name {
+            flex: 1;
+            font-size: 13px;
+            color: #ccc;
+        }
+        .vs-surface-row.has-media .vs-surface-name { color: #3b82f6; }
+        .vs-pick {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            color: #ccc;
+            border-radius: 6px;
+            padding: 4px 12px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .vs-pick:hover { border-color: #3b82f6; color: #fff; }
+        .vs-clear {
+            background: none;
+            border: 1px solid #444;
+            color: #888;
+            border-radius: 6px;
+            width: 24px;
+            height: 24px;
+            font-size: 14px;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .vs-clear:hover { border-color: #ef4444; color: #ef4444; }
+        .vs-clear.hidden { display: none; }
+        .vs-hint {
+            font-size: 11px;
+            color: #666;
+            margin-top: 10px;
+            line-height: 1.5;
+        }
+
         /* Sub-section that appears under the Discrete GPU toggle */
         .hp-options {
             margin-left: 14px;
@@ -1618,6 +1684,69 @@
             <input type="color" id="bgColorPicker" value="#0a0a0f" style="width:40px;height:28px;padding:0;border:1px solid #333;border-radius:6px;background:#0a0a0a;cursor:pointer;">
         </div>
         <button class="venue-clear hidden" id="venueClearBtn">Clear Background</button>
+    </div>
+
+    <!-- Venue Space (3D room from photos) -->
+    <div class="section">
+        <div class="section-title">Venue Space (3D)</div>
+        <div class="toggle-row">
+            <label title="Build a proportional 3D room from photos — navigate it like a floating camera">Enable Space</label>
+            <label class="toggle">
+                <input type="checkbox" id="venueSpaceToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+        <div id="venueSpaceControls" style="display:none">
+            <div class="vs-dims-row">
+                <div class="vs-dim">
+                    <span class="cw-label">Width ft</span>
+                    <input type="number" id="vsWidthFt" min="4" max="500" value="40">
+                </div>
+                <div class="vs-dim">
+                    <span class="cw-label">Height ft</span>
+                    <input type="number" id="vsHeightFt" min="4" max="100" value="13">
+                </div>
+                <div class="vs-dim">
+                    <span class="cw-label">Depth ft</span>
+                    <input type="number" id="vsDepthFt" min="4" max="500" value="30">
+                </div>
+            </div>
+            <div class="vs-dims-row">
+                <div class="vs-dim">
+                    <span class="cw-label">LED wall from back (ft)</span>
+                    <input type="number" id="vsWallFromBack" min="0" max="100" value="2" step="0.5">
+                </div>
+            </div>
+            <div class="vs-surfaces">
+                <div class="vs-surface-row" data-surface="back">
+                    <span class="vs-surface-name">Back Wall</span>
+                    <button class="vs-pick" data-surface="back">Set</button>
+                    <button class="vs-clear hidden" data-surface="back">&times;</button>
+                </div>
+                <div class="vs-surface-row" data-surface="floor">
+                    <span class="vs-surface-name">Floor</span>
+                    <button class="vs-pick" data-surface="floor">Set</button>
+                    <button class="vs-clear hidden" data-surface="floor">&times;</button>
+                </div>
+                <div class="vs-surface-row" data-surface="left">
+                    <span class="vs-surface-name">Left Wall</span>
+                    <button class="vs-pick" data-surface="left">Set</button>
+                    <button class="vs-clear hidden" data-surface="left">&times;</button>
+                </div>
+                <div class="vs-surface-row" data-surface="right">
+                    <span class="vs-surface-name">Right Wall</span>
+                    <button class="vs-pick" data-surface="right">Set</button>
+                    <button class="vs-clear hidden" data-surface="right">&times;</button>
+                </div>
+                <div class="vs-surface-row" data-surface="ceiling">
+                    <span class="vs-surface-name">Ceiling</span>
+                    <button class="vs-pick" data-surface="ceiling">Set</button>
+                    <button class="vs-clear hidden" data-surface="ceiling">&times;</button>
+                </div>
+            </div>
+            <input type="file" id="vsSurfaceInput" accept="image/*,video/mp4,video/webm" style="display:none">
+            <div class="vs-hint">Photos or videos map onto each surface at real scale. Drag to pan, scroll to zoom, middle-drag to rotate &mdash; proportions stay true.</div>
+        </div>
     </div>
 
     <!-- View Options -->
@@ -3500,6 +3629,9 @@ function buildWall() {
     if (!shapeEditor.open) fitCameraToWall();
     buildAccessories();
     buildDimensions();
+    // Venue space room tracks the wall's floor line; rebuild if enabled.
+    // (window indirection avoids TDZ ordering issues at init.)
+    if (window.__rebuildVenueSpace) window.__rebuildVenueSpace();
     // Corner fill wedges no longer needed — miter faces meet seamlessly
     if (isRecording) buildRecordOverlays();
 }
@@ -6001,6 +6133,245 @@ document.getElementById('bgColorPicker').addEventListener('input', e => {
     venueBg.style.background = e.target.value;
 });
 
+/* ── Venue Space (3D room from photos) ────────────────────────────────────
+   Builds a proportional room around the LED wall: five planes (back wall,
+   floor, left/right walls, ceiling) at real-world scale, each optionally
+   textured with an uploaded photo or video. With OrbitControls this gives
+   the "floating camera in the space" feel — zoom, pan, and rotation all
+   stay proportional because the room is real-size in scene units (inches).
+
+   The room bottom-aligns with the active LED wall (floor at wall bottom)
+   and the wall sits `wallFromBackFt` in front of the back surface. */
+const venueSpace = {
+    enabled: false,
+    widthFt: 40, heightFt: 13, depthFt: 30,
+    wallFromBackFt: 2,
+    // surface name -> { url, type: 'image'|'video', name, videoEl }
+    media: { back: null, floor: null, left: null, right: null, ceiling: null },
+};
+let venueSpaceGroup = null;    // THREE.Group holding the room planes
+let _vsPickTarget = null;      // which surface the file input is picking for
+
+function disposeVenueSpace() {
+    if (!venueSpaceGroup) return;
+    venueSpaceGroup.traverse(o => {
+        if (o.isMesh) {
+            if (o.material) {
+                if (o.material.map) o.material.map.dispose();
+                o.material.dispose();
+            }
+            if (o.geometry) o.geometry.dispose();
+        }
+    });
+    scene.remove(venueSpaceGroup);
+    venueSpaceGroup = null;
+    markDirty();
+}
+
+/* Pause + release any video elements driving surface textures */
+function _vsStopVideo(m) {
+    if (m && m.videoEl) {
+        try { m.videoEl.pause(); } catch (_) {}
+        m.videoEl = null;
+    }
+}
+
+function buildVenueSpace() {
+    disposeVenueSpace();
+    if (!venueSpace.enabled) return;
+
+    const W = venueSpace.widthFt * 12;
+    const H = venueSpace.heightFt * 12;
+    const D = venueSpace.depthFt * 12;
+    const wallBackIn = venueSpace.wallFromBackFt * 12;
+
+    // Floor sits at the bottom of the active LED wall
+    const d = wallDims();
+    const floorY = -d.totalH / 2;
+    // Back wall plane sits behind the LED wall
+    const backZ = -(PANEL_D_IN / 2) - wallBackIn;
+
+    venueSpaceGroup = new THREE.Group();
+
+    const mkMat = (surfName, fallbackColor) => {
+        const m = venueSpace.media[surfName];
+        if (m && m.type === 'image') {
+            const tex = new THREE.TextureLoader().load(m.url, () => markDirty());
+            tex.colorSpace = THREE.SRGBColorSpace;
+            return new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+        }
+        if (m && m.type === 'video') {
+            let vid = m.videoEl;
+            if (!vid) {
+                vid = document.createElement('video');
+                vid.muted = true; vid.loop = true; vid.playsInline = true;
+                vid.src = m.url;
+                vid.play().catch(() => {});
+                m.videoEl = vid;
+            }
+            const tex = new THREE.VideoTexture(vid);
+            tex.colorSpace = THREE.SRGBColorSpace;
+            return new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+        }
+        return new THREE.MeshBasicMaterial({ color: fallbackColor, side: THREE.DoubleSide });
+    };
+
+    const addPlane = (w, h, mat, px, py, pz, rx, ry) => {
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+        mesh.position.set(px, py, pz);
+        if (rx) mesh.rotation.x = rx;
+        if (ry) mesh.rotation.y = ry;
+        mesh.renderOrder = -1;   // draw behind wall + content
+        venueSpaceGroup.add(mesh);
+    };
+
+    const midY = floorY + H / 2;
+    const midZ = backZ + D / 2;
+
+    // Back wall (faces +z toward camera)
+    addPlane(W, H, mkMat('back', 0x1c1c20), 0, midY, backZ, 0, 0);
+    // Floor (faces up)
+    addPlane(W, D, mkMat('floor', 0x141416), 0, floorY, midZ, -Math.PI / 2, 0);
+    // Ceiling (faces down)
+    addPlane(W, D, mkMat('ceiling', 0x0e0e10), 0, floorY + H, midZ, Math.PI / 2, 0);
+    // Left wall (faces +x inward)
+    addPlane(D, H, mkMat('left', 0x18181b), -W / 2, midY, midZ, 0, Math.PI / 2);
+    // Right wall (faces -x inward)
+    addPlane(D, H, mkMat('right', 0x18181b), W / 2, midY, midZ, 0, -Math.PI / 2);
+
+    scene.add(venueSpaceGroup);
+    markDirty();
+}
+
+/* UI wiring */
+(() => {
+    const toggle = document.getElementById('venueSpaceToggle');
+    const vsPanel = document.getElementById('venueSpaceControls');
+    const input = document.getElementById('vsSurfaceInput');
+    if (!toggle) return;
+
+    // buildWall calls this indirection to keep the room floor aligned when
+    // the LED wall's height changes (TDZ-safe across init ordering).
+    window.__rebuildVenueSpace = () => { if (venueSpace.enabled) buildVenueSpace(); };
+
+    // Small programmatic API — lets scripts / future sample-space presets
+    // drive the venue space without the file picker.
+    window.venueSpaceAPI = {
+        enable(dims) {
+            if (dims) {
+                if (dims.widthFt)  { venueSpace.widthFt = dims.widthFt;   document.getElementById('vsWidthFt').value = dims.widthFt; }
+                if (dims.heightFt) { venueSpace.heightFt = dims.heightFt; document.getElementById('vsHeightFt').value = dims.heightFt; }
+                if (dims.depthFt)  { venueSpace.depthFt = dims.depthFt;   document.getElementById('vsDepthFt').value = dims.depthFt; }
+                if (dims.wallFromBackFt != null) { venueSpace.wallFromBackFt = dims.wallFromBackFt; document.getElementById('vsWallFromBack').value = dims.wallFromBackFt; }
+            }
+            venueSpace.enabled = true;
+            toggle.checked = true;
+            vsPanel.style.display = '';
+            buildVenueSpace();
+        },
+        disable() {
+            venueSpace.enabled = false;
+            toggle.checked = false;
+            vsPanel.style.display = 'none';
+            disposeVenueSpace();
+        },
+        setSurface(surf, url, type) {
+            if (!(surf in venueSpace.media)) return false;
+            const old = venueSpace.media[surf];
+            if (old) { _vsStopVideo(old); if (old.url.startsWith('blob:')) URL.revokeObjectURL(old.url); }
+            venueSpace.media[surf] = { url, type: type || 'image', name: url.split('/').pop() };
+            const row = document.querySelector('.vs-surface-row[data-surface="' + surf + '"]');
+            if (row) {
+                row.classList.add('has-media');
+                row.querySelector('.vs-clear').classList.remove('hidden');
+                row.querySelector('.vs-pick').textContent = 'Change';
+            }
+            if (venueSpace.enabled) buildVenueSpace();
+            return true;
+        },
+        state() { return { enabled: venueSpace.enabled, widthFt: venueSpace.widthFt, heightFt: venueSpace.heightFt, depthFt: venueSpace.depthFt, media: Object.fromEntries(Object.entries(venueSpace.media).map(([k, v]) => [k, v ? v.type : null])) }; },
+        debug() {
+            const g = venueSpaceGroup;
+            return {
+                groupExists: !!g,
+                inScene: !!(g && g.parent === scene),
+                children: g ? g.children.map(m => ({
+                    pos: m.position.toArray().map(v => Math.round(v)),
+                    hasMap: !!(m.material && m.material.map),
+                    mapLoaded: !!(m.material && m.material.map && m.material.map.image),
+                    visible: m.visible,
+                })) : [],
+                camera: { pos: camera.position.toArray().map(v => Math.round(v)), target: controls.target.toArray().map(v => Math.round(v)) },
+            };
+        },
+    };
+
+    toggle.addEventListener('change', () => {
+        venueSpace.enabled = toggle.checked;
+        vsPanel.style.display = venueSpace.enabled ? '' : 'none';
+        buildVenueSpace();
+    });
+
+    const dims = [
+        ['vsWidthFt', 'widthFt'], ['vsHeightFt', 'heightFt'],
+        ['vsDepthFt', 'depthFt'], ['vsWallFromBack', 'wallFromBackFt'],
+    ];
+    for (const [id, key] of dims) {
+        document.getElementById(id).addEventListener('change', e => {
+            const v = parseFloat(e.target.value);
+            if (isFinite(v) && v >= 0) {
+                venueSpace[key] = v;
+                if (venueSpace.enabled) buildVenueSpace();
+            }
+        });
+    }
+
+    document.querySelectorAll('.vs-pick').forEach(btn => {
+        btn.addEventListener('click', () => {
+            _vsPickTarget = btn.dataset.surface;
+            input.click();
+        });
+    });
+
+    input.addEventListener('change', () => {
+        const file = input.files[0];
+        input.value = '';
+        if (!file || !_vsPickTarget) return;
+        const surf = _vsPickTarget;
+        _vsPickTarget = null;
+        const old = venueSpace.media[surf];
+        if (old) { _vsStopVideo(old); URL.revokeObjectURL(old.url); }
+        venueSpace.media[surf] = {
+            url: URL.createObjectURL(file),
+            type: file.type.startsWith('video') ? 'video' : 'image',
+            name: file.name,
+        };
+        const row = document.querySelector('.vs-surface-row[data-surface="' + surf + '"]');
+        if (row) {
+            row.classList.add('has-media');
+            row.querySelector('.vs-clear').classList.remove('hidden');
+            row.querySelector('.vs-pick').textContent = 'Change';
+        }
+        if (venueSpace.enabled) buildVenueSpace();
+    });
+
+    document.querySelectorAll('.vs-clear').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const surf = btn.dataset.surface;
+            const old = venueSpace.media[surf];
+            if (old) { _vsStopVideo(old); URL.revokeObjectURL(old.url); }
+            venueSpace.media[surf] = null;
+            const row = document.querySelector('.vs-surface-row[data-surface="' + surf + '"]');
+            if (row) {
+                row.classList.remove('has-media');
+                btn.classList.add('hidden');
+                row.querySelector('.vs-pick').textContent = 'Set';
+            }
+            if (venueSpace.enabled) buildVenueSpace();
+        });
+    });
+})();
+
 /* View options */
 document.getElementById('doubleSidedToggle').addEventListener('change', e => {
     state.doubleSided = e.target.checked;
@@ -6729,7 +7100,10 @@ document.getElementById('saveImageBtn').addEventListener('click', () => {
     // and wants the whole showroom view preserved.
     const bbox = computeWallScreenBBox(full.width, full.height);
     let out = full;
-    if (!venueObjectUrl && bbox && bbox.w > 1 && bbox.h > 1) {
+    // Keep the full showroom view when the user staged a venue background
+    // image or an enabled 3D venue space — the surroundings are the point.
+    const _staged = venueObjectUrl || venueSpace.enabled;
+    if (!_staged && bbox && bbox.w > 1 && bbox.h > 1) {
         const padBase = Math.max(40, Math.round(Math.min(bbox.w, bbox.h) * 0.2));
         const x0 = Math.max(0, Math.floor(bbox.x - padBase));
         const y0 = Math.max(0, Math.floor(bbox.y - padBase));
@@ -7108,7 +7482,7 @@ async function startRecording() {
     // Same as Save Image: skip the crop if a venue background is set, so the
     // saved video preserves the full staged scene. Falls back to full canvas
     // if no walls are visible either.
-    const bbox = (!venueObjectUrl) ? computeWallScreenBBox(fullW, fullH) : null;
+    const bbox = (!venueObjectUrl && !venueSpace.enabled) ? computeWallScreenBBox(fullW, fullH) : null;
     let cropX = 0, cropY = 0, cropW = fullW, cropH = fullH;
     if (bbox && bbox.w > 1 && bbox.h > 1) {
         const padBase = Math.max(40, Math.round(Math.min(bbox.w, bbox.h) * 0.2));

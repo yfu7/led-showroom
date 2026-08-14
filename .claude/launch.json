@@ -4,7 +4,7 @@
     {
       "name": "led-showroom",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["D:/Projects/Code/led-showroom/server.js"],
+      "runtimeArgs": ["F:/Projects/Code/led-showroom/server.js"],
       "port": 3000
     }
   ]
