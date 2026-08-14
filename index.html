@@ -619,6 +619,45 @@
             line-height: 1.5;
         }
 
+        /* Stage deck list entries */
+        .stage-entry {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 8px;
+            background: #141414;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        .stage-entry-name {
+            flex: 1;
+            font-size: 13px;
+            color: #ccc;
+        }
+        .stage-entry select {
+            background: #0a0a0a;
+            color: #ccc;
+            border: 1px solid #333;
+            border-radius: 5px;
+            padding: 4px 6px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .stage-entry select:focus { outline: none; border-color: #3b82f6; }
+        .stage-entry-delete {
+            background: none;
+            border: 1px solid #444;
+            color: #888;
+            border-radius: 6px;
+            width: 24px;
+            height: 24px;
+            font-size: 14px;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .stage-entry-delete:hover { border-color: #ef4444; color: #ef4444; }
+
         /* Sub-section that appears under the Discrete GPU toggle */
         .hp-options {
             margin-left: 14px;
@@ -1747,6 +1786,14 @@
             <input type="file" id="vsSurfaceInput" accept="image/*,video/mp4,video/webm" style="display:none">
             <div class="vs-hint">Photos or videos map onto each surface at real scale. Drag to pan, scroll to zoom, middle-drag to rotate &mdash; proportions stay true.</div>
         </div>
+    </div>
+
+    <!-- Stages (4x4 ft platform decks) -->
+    <div class="section">
+        <div class="section-title">Stages</div>
+        <div id="stageList"></div>
+        <button class="add-corner-btn" id="addStageBtn">+ Add 4&times;4 Stage</button>
+        <div class="vs-hint">4&times;4 ft decks. Drag a stage in the 3D view to place it; set deck height per stage.</div>
     </div>
 
     <!-- View Options -->
@@ -3629,9 +3676,10 @@ function buildWall() {
     if (!shapeEditor.open) fitCameraToWall();
     buildAccessories();
     buildDimensions();
-    // Venue space room tracks the wall's floor line; rebuild if enabled.
-    // (window indirection avoids TDZ ordering issues at init.)
+    // Venue space room + stages track the wall's floor line; rebuild if
+    // present. (window indirection avoids TDZ ordering issues at init.)
     if (window.__rebuildVenueSpace) window.__rebuildVenueSpace();
+    if (window.__rebuildStages) window.__rebuildStages();
     // Corner fill wedges no longer needed — miter faces meet seamlessly
     if (isRecording) buildRecordOverlays();
 }
@@ -6370,6 +6418,187 @@ function buildVenueSpace() {
             if (venueSpace.enabled) buildVenueSpace();
         });
     });
+})();
+
+/* ── Stages (4x4 ft platform decks at varying heights) ────────────────────
+   Each stage is a 48"x48" deck rendered as a solid box with a black top
+   and dark skirt, resting on the floor line (bottom of the LED wall, same
+   plane the venue space floor uses). Drag a stage in the 3D view to place
+   it; height is selectable per stage from standard deck heights. */
+const STAGE_SIZE_IN = 48;
+const STAGE_HEIGHTS = [8, 16, 24, 32, 40, 48];   // standard riser heights (inches)
+const stages = [];          // { id, x, z, heightIn }
+let stageIdCounter = 0;
+let stageGroup = null;      // THREE.Group of stage meshes
+let stageMeshes = [];       // hit-test list; mesh.userData.stageId
+const _stageTopMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9, metalness: 0 });
+const _stageSkirtMat = new THREE.MeshStandardMaterial({ color: 0x242428, roughness: 0.95, metalness: 0 });
+const _stageEdgeMat = new THREE.LineBasicMaterial({ color: 0x4a4a52 });
+
+function stagesFloorY() {
+    const d = wallDims();
+    return -d.totalH / 2;
+}
+
+function disposeStages() {
+    if (!stageGroup) return;
+    stageGroup.traverse(o => {
+        if (o.isMesh || o.isLineSegments) {
+            if (o.geometry) o.geometry.dispose();
+        }
+    });
+    scene.remove(stageGroup);
+    stageGroup = null;
+    stageMeshes = [];
+    markDirty();
+}
+
+function buildStages() {
+    disposeStages();
+    if (stages.length === 0) return;
+    const floorY = stagesFloorY();
+    stageGroup = new THREE.Group();
+    for (const st of stages) {
+        const h = st.heightIn;
+        const geom = new THREE.BoxGeometry(STAGE_SIZE_IN, h, STAGE_SIZE_IN);
+        // Material per face: +x,-x,+y(top),-y(bottom),+z,-z
+        const mats = [_stageSkirtMat, _stageSkirtMat, _stageTopMat, _stageSkirtMat, _stageSkirtMat, _stageSkirtMat];
+        const mesh = new THREE.Mesh(geom, mats);
+        mesh.position.set(st.x, floorY + h / 2, st.z);
+        mesh.userData.stageId = st.id;
+        stageGroup.add(mesh);
+        stageMeshes.push(mesh);
+
+        const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom), _stageEdgeMat);
+        edges.position.copy(mesh.position);
+        stageGroup.add(edges);
+    }
+    scene.add(stageGroup);
+    markDirty();
+}
+
+function renderStageList() {
+    const list = document.getElementById('stageList');
+    if (!list) return;
+    list.innerHTML = '';
+    stages.forEach((st, i) => {
+        const entry = document.createElement('div');
+        entry.className = 'stage-entry';
+        const opts = STAGE_HEIGHTS.map(h =>
+            '<option value="' + h + '"' + (h === st.heightIn ? ' selected' : '') + '>' + h + '"</option>').join('');
+        entry.innerHTML =
+            '<span class="stage-entry-name">Stage ' + (i + 1) + '</span>' +
+            '<select data-stage="' + st.id + '" title="Deck height">' + opts + '</select>' +
+            '<button class="stage-entry-delete" data-stage="' + st.id + '" title="Remove stage">&times;</button>';
+        list.appendChild(entry);
+    });
+}
+
+(() => {
+    const addBtn = document.getElementById('addStageBtn');
+    if (!addBtn) return;
+
+    // Keep stage bases glued to the floor line when the wall resizes.
+    window.__rebuildStages = () => { if (stages.length) buildStages(); };
+
+    addBtn.addEventListener('click', () => {
+        const d = wallDims();
+        // Place new stages in front of the wall, staggered right so several
+        // stacked add-clicks don't overlap.
+        const st = {
+            id: ++stageIdCounter,
+            x: (stages.length % 2 === 0 ? 1 : -1) * Math.ceil(stages.length / 2) * (STAGE_SIZE_IN + 12),
+            z: PANEL_D_IN / 2 + 60,
+            heightIn: 24,
+        };
+        stages.push(st);
+        renderStageList();
+        buildStages();
+    });
+
+    document.getElementById('stageList').addEventListener('change', e => {
+        const sel = e.target.closest('select[data-stage]');
+        if (!sel) return;
+        const st = stages.find(s => s.id === parseInt(sel.dataset.stage));
+        if (st) {
+            st.heightIn = parseInt(sel.value) || 24;
+            buildStages();
+        }
+    });
+
+    document.getElementById('stageList').addEventListener('click', e => {
+        const btn = e.target.closest('.stage-entry-delete');
+        if (!btn) return;
+        const idx = stages.findIndex(s => s.id === parseInt(btn.dataset.stage));
+        if (idx >= 0) {
+            stages.splice(idx, 1);
+            renderStageList();
+            buildStages();
+        }
+    });
+
+    /* Drag stages on the floor plane. Capture-phase so OrbitControls on the
+       same element doesn't rotate/pan while moving a stage. Wiring is
+       deferred to after module evaluation because `overlay` is a const
+       declared later in the file (TDZ). */
+    let dragStage = null;
+    const dragPlaneY = new THREE.Plane();
+    const dragHit = new THREE.Vector3();
+    const dragOff = new THREE.Vector3();
+
+    setTimeout(() => {
+    overlay.addEventListener('mousedown', e => {
+        if (e.button !== 0 || stageMeshes.length === 0) return;
+        if (shapeEditor.open) return;             // shape editing has priority
+        updateMouseNDC(e);
+        raycaster.setFromCamera(mouse, camera);
+        const hits = raycaster.intersectObjects(stageMeshes);
+        if (hits.length === 0) return;
+        const mesh = hits[0].object;
+        dragStage = stages.find(s => s.id === mesh.userData.stageId);
+        if (!dragStage) return;
+        // Horizontal plane at the stage's base for stable dragging
+        dragPlaneY.set(new THREE.Vector3(0, 1, 0), -stagesFloorY());
+        if (raycaster.ray.intersectPlane(dragPlaneY, dragHit)) {
+            dragOff.set(dragHit.x - dragStage.x, 0, dragHit.z - dragStage.z);
+        } else {
+            dragOff.set(0, 0, 0);
+        }
+        controls.enabled = false;
+        e.stopImmediatePropagation();
+        e.preventDefault();
+    }, true);
+
+    overlay.addEventListener('mousemove', e => {
+        if (!dragStage) return;
+        if ((e.buttons & 1) === 0) { dragStage = null; controls.enabled = true; return; }
+        updateMouseNDC(e);
+        raycaster.setFromCamera(mouse, camera);
+        if (raycaster.ray.intersectPlane(dragPlaneY, dragHit)) {
+            dragStage.x = dragHit.x - dragOff.x;
+            dragStage.z = dragHit.z - dragOff.z;
+            // Reposition the dragged stage's mesh + edge lines in place
+            // (children are interleaved [mesh, edges] per stage, in order).
+            const floorY = stagesFloorY();
+            let k = 0;
+            for (const st of stages) {
+                const mesh = stageGroup.children[k++];
+                const edge = stageGroup.children[k++];
+                if (st.id === dragStage.id && mesh && edge) {
+                    mesh.position.set(st.x, floorY + st.heightIn / 2, st.z);
+                    edge.position.copy(mesh.position);
+                }
+            }
+            markDirty();
+        }
+        e.stopImmediatePropagation();
+        e.preventDefault();
+    }, true);
+
+    window.addEventListener('mouseup', () => {
+        if (dragStage) { dragStage = null; controls.enabled = true; }
+    });
+    }, 0);
 })();
 
 /* View options */
