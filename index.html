@@ -10,7 +10,8 @@
         "imports": {
             "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
             "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-            "mp4-muxer": "https://cdn.jsdelivr.net/npm/mp4-muxer@5/build/mp4-muxer.mjs"
+            "mp4-muxer": "https://cdn.jsdelivr.net/npm/mp4-muxer@5/build/mp4-muxer.mjs",
+            "gaussian-splats-3d": "https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.7/build/gaussian-splats-3d.module.min.js"
         }
     }
     </script>
@@ -657,6 +658,25 @@
             cursor: pointer;
         }
         .stage-entry-delete:hover { border-color: #ef4444; color: #ef4444; }
+
+        /* Splat generation progress */
+        .vs-splat-divider {
+            border-top: 1px solid #2a2a2a;
+            margin-top: 14px;
+        }
+        .splat-progress-bar {
+            height: 6px;
+            background: #1a1a1a;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .splat-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: #3b82f6;
+            border-radius: 3px;
+            transition: width 0.4s;
+        }
 
         /* Sub-section that appears under the Discrete GPU toggle */
         .hp-options {
@@ -1785,6 +1805,35 @@
             </div>
             <input type="file" id="vsSurfaceInput" accept="image/*,video/mp4,video/webm" style="display:none">
             <div class="vs-hint">Photos or videos map onto each surface at real scale. Drag to pan, scroll to zoom, middle-drag to rotate &mdash; proportions stay true.</div>
+        </div>
+
+        <div class="vs-splat-divider"></div>
+        <div class="hp-options-label" style="padding-top:8px">Splat Space (photoreal 3D)</div>
+        <button class="add-corner-btn" id="splatLoadBtn" style="margin-top:8px">Load Splat (.ply / .splat)</button>
+        <input type="file" id="splatFileInput" accept=".ply,.splat,.ksplat" style="display:none">
+        <div id="splatGenBlock" style="display:none; margin-top:10px">
+            <select id="splatVideoSelect" class="pg-dist-select" style="width:100%; margin-bottom:8px"></select>
+            <button class="add-corner-btn" id="splatGenBtn">Generate Splat from Video</button>
+            <div id="splatProgress" style="display:none; margin-top:8px">
+                <div class="splat-progress-bar"><div class="splat-progress-fill" id="splatProgressFill"></div></div>
+                <div class="vs-hint" id="splatProgressText" style="margin-top:6px"></div>
+                <button class="add-corner-btn" id="splatCancelBtn" style="margin-top:6px">Cancel</button>
+            </div>
+        </div>
+        <div id="splatAlign" style="display:none; margin-top:10px">
+            <div class="vs-dims-row">
+                <div class="vs-dim"><span class="cw-label">Scale %</span><input type="number" id="spScale" value="100" min="1" max="10000" step="5"></div>
+                <div class="vs-dim"><span class="cw-label">Rotate Y&deg;</span><input type="number" id="spRotY" value="0" step="5"></div>
+                <div class="vs-dim"><span class="cw-label">Height in</span><input type="number" id="spPosY" value="0" step="6"></div>
+            </div>
+            <div class="vs-dims-row">
+                <div class="vs-dim"><span class="cw-label">Level X&deg;</span><input type="number" id="spRotX" value="0" step="1"></div>
+                <div class="vs-dim"><span class="cw-label">Level Z&deg;</span><input type="number" id="spRotZ" value="0" step="1"></div>
+                <div class="vs-dim"><span class="cw-label">X in</span><input type="number" id="spPosX" value="0" step="6"></div>
+                <div class="vs-dim"><span class="cw-label">Z in</span><input type="number" id="spPosZ" value="0" step="6"></div>
+            </div>
+            <button class="add-corner-btn" id="splatClearBtn">Remove Splat</button>
+            <div class="vs-hint">Align the reconstruction to real scale: set Scale so a known feature measures true (back wall 13 ft), then level and position.</div>
         </div>
     </div>
 
@@ -3540,6 +3589,10 @@ function animate() {
         if (recordOverlays.length > 0) updateRecordOverlays();
         sceneDirty = true; // always render during recording
     }
+    // Gaussian splat viewer re-sorts asynchronously as the camera moves;
+    // render continuously while one is loaded so sorted results present.
+    // (window flag avoids TDZ on splatState during the first frames.)
+    if (window.__splatActive) sceneDirty = true;
     if (!sceneDirty) return;
     sceneDirty = false;
     // Update distance meter & auto-toggle pixel grid
@@ -6417,6 +6470,176 @@ function buildVenueSpace() {
             }
             if (venueSpace.enabled) buildVenueSpace();
         });
+    });
+})();
+
+/* ── Splat Space (photoreal 3D from Gaussian splats) ─────────────────────
+   Loads a trained Gaussian splat (.ply/.splat/.ksplat) into the scene via
+   @mkkellogg/gaussian-splats-3d's DropInViewer — a THREE.Group that
+   composites with everything else (LED wall, stages, venue planes) and
+   navigates with the same floating camera. Alignment inputs let the user
+   scale/level/position the arbitrary-scale COLMAP reconstruction into
+   real-world inches.
+
+   Generation: if the local server (server.js) exposes the splat pipeline
+   endpoints, a "Generate from video" flow appears — ffmpeg → COLMAP →
+   Brush run locally on the user's GPU with progress polling. On static
+   deploys (Vercel) those endpoints don't exist and only file-load shows. */
+const splatState = { viewer: null, lib: null, loadedName: null };
+
+async function _splatLib() {
+    if (!splatState.lib) {
+        splatState.lib = await import('gaussian-splats-3d');
+    }
+    return splatState.lib;
+}
+
+async function loadSplat(urlOrFile, name) {
+    const lib = await _splatLib();
+    removeSplat();
+    let url = urlOrFile, format;
+    const lower = (name || String(urlOrFile)).toLowerCase();
+    if (lower.endsWith('.ksplat')) format = lib.SceneFormat.KSplat;
+    else if (lower.endsWith('.splat')) format = lib.SceneFormat.Splat;
+    else format = lib.SceneFormat.Ply;
+
+    const viewer = new lib.DropInViewer({
+        sharedMemoryForWorkers: false,     // avoids COOP/COEP header requirements
+        gpuAcceleratedSort: false,
+        freeIntermediateSplatData: true,
+    });
+    await viewer.addSplatScene(url, {
+        format,
+        showLoadingUI: false,
+        progressiveLoad: false,
+    });
+    scene.add(viewer);
+    splatState.viewer = viewer;
+    splatState.loadedName = name || 'splat';
+    window.__splatActive = true;   // animate loop renders continuously for sorting
+    applySplatAlignment();
+    document.getElementById('splatAlign').style.display = '';
+    markDirty();
+}
+
+function removeSplat() {
+    if (!splatState.viewer) return;
+    try { scene.remove(splatState.viewer); } catch (_) {}
+    try { splatState.viewer.dispose && splatState.viewer.dispose(); } catch (_) {}
+    splatState.viewer = null;
+    splatState.loadedName = null;
+    window.__splatActive = false;
+    document.getElementById('splatAlign').style.display = 'none';
+    markDirty();
+}
+
+function applySplatAlignment() {
+    const v = splatState.viewer;
+    if (!v) return;
+    const g = id => parseFloat(document.getElementById(id).value) || 0;
+    const s = Math.max(0.01, g('spScale') / 100);
+    v.scale.setScalar(s);
+    v.rotation.set(
+        g('spRotX') * Math.PI / 180,
+        g('spRotY') * Math.PI / 180,
+        g('spRotZ') * Math.PI / 180
+    );
+    v.position.set(g('spPosX'), g('spPosY'), g('spPosZ'));
+    markDirty();
+}
+
+(() => {
+    const loadBtn = document.getElementById('splatLoadBtn');
+    const fileInput = document.getElementById('splatFileInput');
+    if (!loadBtn) return;
+
+    loadBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+        const f = fileInput.files[0];
+        fileInput.value = '';
+        if (!f) return;
+        loadSplat(URL.createObjectURL(f), f.name).catch(e => {
+            showUploadError('Splat load failed: ' + e.message);
+        });
+    });
+
+    ['spScale', 'spRotY', 'spRotX', 'spRotZ', 'spPosX', 'spPosY', 'spPosZ'].forEach(id => {
+        document.getElementById(id).addEventListener('change', applySplatAlignment);
+        document.getElementById(id).addEventListener('input', applySplatAlignment);
+    });
+    document.getElementById('splatClearBtn').addEventListener('click', removeSplat);
+
+    // ── Local generation flow (only when server.js pipeline is present) ──
+    const genBlock = document.getElementById('splatGenBlock');
+    const sel = document.getElementById('splatVideoSelect');
+    const genBtn = document.getElementById('splatGenBtn');
+    const prog = document.getElementById('splatProgress');
+    const fill = document.getElementById('splatProgressFill');
+    const ptext = document.getElementById('splatProgressText');
+    let pollTimer = null;
+
+    const STAGE_LABELS = {
+        starting: 'Starting…', frames: 'Extracting frames',
+        features: 'COLMAP: detecting features', match: 'COLMAP: matching frames',
+        map: 'COLMAP: solving camera poses', train: 'Training splat',
+        done: 'Done', error: 'Failed',
+    };
+
+    fetch('/api/splat/videos').then(r => r.ok ? r.json() : null).then(info => {
+        if (!info || !info.available) return;   // static deploy or tools missing
+        genBlock.style.display = '';
+        sel.innerHTML = info.videos.map(v =>
+            '<option value="' + v.rel + '">' + v.rel + ' (' + v.sizeMB + ' MB)</option>').join('')
+            || '<option disabled>No videos found in led-showroom-spaces</option>';
+    }).catch(() => {});
+
+    function pollStatus() {
+        fetch('/api/splat/status').then(r => r.json()).then(({ job }) => {
+            if (!job) return;
+            fill.style.width = (job.pct || 0) + '%';
+            const mins = Math.floor(job.elapsedSec / 60), secs = job.elapsedSec % 60;
+            ptext.textContent = (STAGE_LABELS[job.stage] || job.stage) + ' — ' + (job.pct || 0) + '% · ' +
+                mins + 'm' + String(secs).padStart(2, '0') + 's';
+            if (job.stage === 'done' && job.ply) {
+                clearInterval(pollTimer); pollTimer = null;
+                prog.style.display = 'none';
+                genBtn.disabled = false;
+                loadSplat(job.ply, job.ply).catch(e => showUploadError('Splat load failed: ' + e.message));
+            } else if (job.stage === 'error') {
+                clearInterval(pollTimer); pollTimer = null;
+                prog.style.display = 'none';
+                genBtn.disabled = false;
+                if (job.error !== 'cancelled') showUploadError('Splat generation failed: ' + (job.error || 'unknown'));
+            }
+        }).catch(() => {});
+    }
+
+    genBtn.addEventListener('click', () => {
+        const file = sel.value;
+        if (!file) return;
+        genBtn.disabled = true;
+        prog.style.display = '';
+        fill.style.width = '0%';
+        ptext.textContent = 'Starting…';
+        fetch('/api/splat/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file, steps: 20000 }),
+        }).then(r => r.json()).then(resp => {
+            if (resp.error) {
+                showUploadError(resp.error);
+                genBtn.disabled = false; prog.style.display = 'none';
+                return;
+            }
+            pollTimer = setInterval(pollStatus, 2000);
+        }).catch(e => {
+            showUploadError('Could not start: ' + e.message);
+            genBtn.disabled = false; prog.style.display = 'none';
+        });
+    });
+
+    document.getElementById('splatCancelBtn').addEventListener('click', () => {
+        fetch('/api/splat/cancel', { method: 'POST' }).catch(() => {});
     });
 })();
 
