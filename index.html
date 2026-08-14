@@ -6553,6 +6553,9 @@ function applySplatAlignment() {
     const fileInput = document.getElementById('splatFileInput');
     if (!loadBtn) return;
 
+    // Programmatic hook (scripted demos / testing)
+    window.splatAPI = { load: loadSplat, remove: removeSplat, state: () => ({ loaded: !!splatState.viewer, name: splatState.loadedName }) };
+
     loadBtn.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', () => {
         const f = fileInput.files[0];
