@@ -674,6 +674,17 @@
             border-color: #3b82f6;
             color: #3b82f6;
         }
+        .stage-entry-scale {
+            width: 54px;
+            padding: 4px 4px;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 5px;
+            color: #ccc;
+            font-size: 12px;
+            text-align: center;
+        }
+        .stage-entry-scale:focus { outline: none; border-color: #3b82f6; }
 
         /* Splat generation progress */
         .vs-splat-divider {
@@ -1856,9 +1867,13 @@
     <!-- Stages (4x4 ft platform decks) -->
     <div class="section">
         <div class="section-title">Stages</div>
+        <div class="toggle-row" id="stagesGlobalRow" style="display:none">
+            <label title="Scales every stage together (multiplies each stage's own scale)">All Stages Scale %</label>
+            <input type="number" id="stagesGlobalScale" value="100" min="10" max="1000" step="5" class="stage-entry-scale" style="width:70px">
+        </div>
         <div id="stageList"></div>
         <button class="add-corner-btn" id="addStageBtn">+ Add 4&times;4 Stage</button>
-        <div class="vs-hint">4&times;4 ft decks. Drag a stage in the 3D view to place it; set deck height per stage.</div>
+        <div class="vs-hint">4&times;4 ft decks. Drag a stage in the 3D view to place it; set deck height and scale per stage, or scale all together. Attach the LED to ride a deck at its back edge.</div>
     </div>
 
     <!-- View Options -->
@@ -6675,8 +6690,16 @@ function applySplatAlignment() {
    it; height is selectable per stage from standard deck heights. */
 const STAGE_SIZE_IN = 48;
 const STAGE_HEIGHTS = [8, 16, 24, 32, 40, 48];   // standard riser heights (inches)
-const stages = [];          // { id, x, z, heightIn }
+const stages = [];          // { id, x, z, heightIn, scale }
+let stagesGlobalScale = 1;  // collective multiplier on every stage's own scale
 let stageIdCounter = 0;
+
+/* Effective uniform scale for one stage (its own scale x the collective).
+   Applied to footprint AND height so decks can be proportion-matched
+   against an arbitrary-scale venue backdrop photo. */
+function stageTotalScale(st) {
+    return Math.max(0.05, (st.scale || 1) * stagesGlobalScale);
+}
 let stageGroup = null;      // THREE.Group of stage meshes
 let stageMeshes = [];       // hit-test list; mesh.userData.stageId
 const _stageTopMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9, metalness: 0 });
@@ -6707,17 +6730,20 @@ function buildStages() {
     const floorY = stagesFloorY();
     stageGroup = new THREE.Group();
     for (const st of stages) {
+        const total = stageTotalScale(st);
         const h = st.heightIn;
         const geom = new THREE.BoxGeometry(STAGE_SIZE_IN, h, STAGE_SIZE_IN);
         // Material per face: +x,-x,+y(top),-y(bottom),+z,-z
         const mats = [_stageSkirtMat, _stageSkirtMat, _stageTopMat, _stageSkirtMat, _stageSkirtMat, _stageSkirtMat];
         const mesh = new THREE.Mesh(geom, mats);
-        mesh.position.set(st.x, floorY + h / 2, st.z);
+        mesh.scale.setScalar(total);
+        mesh.position.set(st.x, floorY + (h * total) / 2, st.z);
         mesh.userData.stageId = st.id;
         stageGroup.add(mesh);
         stageMeshes.push(mesh);
 
         const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom), _stageEdgeMat);
+        edges.scale.setScalar(total);
         edges.position.copy(mesh.position);
         stageGroup.add(edges);
     }
@@ -6740,7 +6766,8 @@ function renderStageList() {
         entry.innerHTML =
             '<span class="stage-entry-name">Stage ' + (i + 1) + '</span>' +
             '<button class="stage-entry-attach' + (attached ? ' active' : '') + '" data-stage="' + st.id + '" ' +
-                'title="' + (attached ? 'LED wall rides this deck — click to detach' : 'Put the LED wall on this deck') + '">LED</button>' +
+                'title="' + (attached ? 'LED wall rides this deck — click to detach' : 'Put the LED wall on this deck (at the back edge)') + '">LED</button>' +
+            '<input type="number" class="stage-entry-scale" data-stage="' + st.id + '" value="' + Math.round((st.scale || 1) * 100) + '" min="10" max="1000" step="5" title="Scale %">' +
             '<select data-stage="' + st.id + '" title="Deck height">' + opts + '</select>' +
             '<button class="stage-entry-delete" data-stage="' + st.id + '" title="Remove stage">&times;</button>';
         list.appendChild(entry);
@@ -6763,14 +6790,19 @@ function syncWallPlatform(source) {
         markDirty();
         return;
     }
+    const total = stageTotalScale(st);
+    const halfDeck = (STAGE_SIZE_IN * total) / 2;
+    // The LED wall stands at the BACK edge of the deck (audience area in
+    // front): wall back face flush with the deck's rear edge.
+    const wallBackOffset = halfDeck - PANEL_D_IN / 2;
     if (source === 'wall') {
         st.x = wallGroup.position.x;
-        st.z = wallGroup.position.z;
+        st.z = wallGroup.position.z + wallBackOffset;   // deck extends forward
     } else {
         wallGroup.position.x = st.x;
-        wallGroup.position.z = st.z;
+        wallGroup.position.z = st.z - wallBackOffset;   // wall at rear edge
     }
-    wallGroup.position.y = st.heightIn;
+    wallGroup.position.y = st.heightIn * total;
     // Reposition this stage's mesh + edges ([mesh, edges] interleaved)
     if (stageGroup) {
         const floorY = stagesFloorY();
@@ -6779,7 +6811,7 @@ function syncWallPlatform(source) {
             const mesh = stageGroup.children[k++];
             const edge = stageGroup.children[k++];
             if (s.id === st.id && mesh && edge) {
-                mesh.position.set(s.x, floorY + s.heightIn / 2, s.z);
+                mesh.position.set(s.x, floorY + (s.heightIn * stageTotalScale(s)) / 2, s.z);
                 edge.position.copy(mesh.position);
             }
         }
@@ -6795,6 +6827,11 @@ window.__syncWallPlatform = syncWallPlatform;
     // Keep stage bases glued to the floor line when the wall resizes.
     window.__rebuildStages = () => { if (stages.length) buildStages(); };
 
+    const globalRow = document.getElementById('stagesGlobalRow');
+    const syncGlobalRowVisibility = () => {
+        globalRow.style.display = stages.length > 1 ? '' : 'none';
+    };
+
     addBtn.addEventListener('click', () => {
         const d = wallDims();
         // Place new stages in front of the wall, staggered right so several
@@ -6804,20 +6841,39 @@ window.__syncWallPlatform = syncWallPlatform;
             x: (stages.length % 2 === 0 ? 1 : -1) * Math.ceil(stages.length / 2) * (STAGE_SIZE_IN + 12),
             z: PANEL_D_IN / 2 + 60,
             heightIn: 24,
+            scale: 1,
         };
         stages.push(st);
         renderStageList();
+        syncGlobalRowVisibility();
         buildStages();
     });
 
+    document.getElementById('stagesGlobalScale').addEventListener('change', e => {
+        const v = parseFloat(e.target.value);
+        if (isFinite(v) && v >= 10) {
+            stagesGlobalScale = v / 100;
+            buildStages();
+        }
+    });
+
     document.getElementById('stageList').addEventListener('change', e => {
+        const scaleInp = e.target.closest('.stage-entry-scale');
+        if (scaleInp && scaleInp.dataset.stage) {
+            const st = stages.find(s => s.id === parseInt(scaleInp.dataset.stage));
+            const v = parseFloat(scaleInp.value);
+            if (st && isFinite(v) && v >= 10) {
+                st.scale = v / 100;
+                buildStages();
+            }
+            return;
+        }
         const sel = e.target.closest('select[data-stage]');
         if (!sel) return;
         const st = stages.find(s => s.id === parseInt(sel.dataset.stage));
         if (st) {
             st.heightIn = parseInt(sel.value) || 24;
             buildStages();
-            if (st.id === ledAttachedStageId) syncWallPlatform('stage');
         }
     });
 
@@ -6840,6 +6896,7 @@ window.__syncWallPlatform = syncWallPlatform;
             }
             stages.splice(idx, 1);
             renderStageList();
+            syncGlobalRowVisibility();
             buildStages();
         }
     });
@@ -6892,7 +6949,7 @@ window.__syncWallPlatform = syncWallPlatform;
                 const mesh = stageGroup.children[k++];
                 const edge = stageGroup.children[k++];
                 if (st.id === dragStage.id && mesh && edge) {
-                    mesh.position.set(st.x, floorY + st.heightIn / 2, st.z);
+                    mesh.position.set(st.x, floorY + (st.heightIn * stageTotalScale(st)) / 2, st.z);
                     edge.position.copy(mesh.position);
                 }
             }
