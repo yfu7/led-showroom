@@ -658,6 +658,22 @@
             cursor: pointer;
         }
         .stage-entry-delete:hover { border-color: #ef4444; color: #ef4444; }
+        .stage-entry-attach {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            color: #888;
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 11px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .stage-entry-attach:hover { border-color: #3b82f6; color: #ccc; }
+        .stage-entry-attach.active {
+            background: rgba(59, 130, 246, 0.15);
+            border-color: #3b82f6;
+            color: #3b82f6;
+        }
 
         /* Splat generation progress */
         .vs-splat-divider {
@@ -6700,6 +6716,8 @@ function buildStages() {
         stageGroup.add(edges);
     }
     scene.add(stageGroup);
+    // Re-impose the platform relationship after a rebuild
+    if (ledAttachedStageId) syncWallPlatform('stage');
     markDirty();
 }
 
@@ -6712,13 +6730,57 @@ function renderStageList() {
         entry.className = 'stage-entry';
         const opts = STAGE_HEIGHTS.map(h =>
             '<option value="' + h + '"' + (h === st.heightIn ? ' selected' : '') + '>' + h + '"</option>').join('');
+        const attached = st.id === ledAttachedStageId;
         entry.innerHTML =
             '<span class="stage-entry-name">Stage ' + (i + 1) + '</span>' +
+            '<button class="stage-entry-attach' + (attached ? ' active' : '') + '" data-stage="' + st.id + '" ' +
+                'title="' + (attached ? 'LED wall rides this deck — click to detach' : 'Put the LED wall on this deck') + '">LED</button>' +
             '<select data-stage="' + st.id + '" title="Deck height">' + opts + '</select>' +
             '<button class="stage-entry-delete" data-stage="' + st.id + '" title="Remove stage">&times;</button>';
         list.appendChild(entry);
     });
 }
+
+/* ── LED wall ↔ stage attachment ──
+   When attached, the wall rides the deck: wallGroup lifts by the deck
+   height and the deck centers under the wall. Either element remains
+   individually adjustable — dragging the deck carries the wall, moving
+   the wall carries the deck, changing deck height re-lifts the wall.
+   source: 'wall' = wall moved, stage follows; 'stage' = stage moved/
+   attached, wall follows. */
+let ledAttachedStageId = null;
+
+function syncWallPlatform(source) {
+    const st = stages.find(s => s.id === ledAttachedStageId);
+    if (!st) {
+        if (wallGroup) wallGroup.position.y = 0;
+        markDirty();
+        return;
+    }
+    if (source === 'wall') {
+        st.x = wallGroup.position.x;
+        st.z = wallGroup.position.z;
+    } else {
+        wallGroup.position.x = st.x;
+        wallGroup.position.z = st.z;
+    }
+    wallGroup.position.y = st.heightIn;
+    // Reposition this stage's mesh + edges ([mesh, edges] interleaved)
+    if (stageGroup) {
+        const floorY = stagesFloorY();
+        let k = 0;
+        for (const s of stages) {
+            const mesh = stageGroup.children[k++];
+            const edge = stageGroup.children[k++];
+            if (s.id === st.id && mesh && edge) {
+                mesh.position.set(s.x, floorY + s.heightIn / 2, s.z);
+                edge.position.copy(mesh.position);
+            }
+        }
+    }
+    markDirty();
+}
+window.__syncWallPlatform = syncWallPlatform;
 
 (() => {
     const addBtn = document.getElementById('addStageBtn');
@@ -6749,14 +6811,27 @@ function renderStageList() {
         if (st) {
             st.heightIn = parseInt(sel.value) || 24;
             buildStages();
+            if (st.id === ledAttachedStageId) syncWallPlatform('stage');
         }
     });
 
     document.getElementById('stageList').addEventListener('click', e => {
+        const attachBtn = e.target.closest('.stage-entry-attach');
+        if (attachBtn) {
+            const id = parseInt(attachBtn.dataset.stage);
+            ledAttachedStageId = (ledAttachedStageId === id) ? null : id;
+            renderStageList();
+            syncWallPlatform('stage');
+            return;
+        }
         const btn = e.target.closest('.stage-entry-delete');
         if (!btn) return;
         const idx = stages.findIndex(s => s.id === parseInt(btn.dataset.stage));
         if (idx >= 0) {
+            if (stages[idx].id === ledAttachedStageId) {
+                ledAttachedStageId = null;
+                if (wallGroup) wallGroup.position.y = 0;
+            }
             stages.splice(idx, 1);
             renderStageList();
             buildStages();
@@ -6815,6 +6890,8 @@ function renderStageList() {
                     edge.position.copy(mesh.position);
                 }
             }
+            // Attached LED wall rides along with its deck
+            if (dragStage.id === ledAttachedStageId) syncWallPlatform('stage');
             markDirty();
         }
         e.stopImmediatePropagation();
@@ -6823,6 +6900,34 @@ function renderStageList() {
 
     window.addEventListener('mouseup', () => {
         if (dragStage) { dragStage = null; controls.enabled = true; }
+    });
+
+    /* Per-element camera focus: double-click a stage deck or the LED wall
+       to make it the orbit target — scroll-zoom then dives into that
+       element on its own. Double-click empty space to refocus the wall. */
+    overlay.addEventListener('dblclick', e => {
+        updateMouseNDC(e);
+        raycaster.setFromCamera(mouse, camera);
+        const stageHits = raycaster.intersectObjects(stageMeshes);
+        if (stageHits.length > 0) {
+            const mesh = stageHits[0].object;
+            controls.target.copy(mesh.position);
+            controls.update();
+            markDirty();
+            return;
+        }
+        const panelHits = raycaster.intersectObjects(panelMeshes);
+        if (panelHits.length > 0) {
+            // Focus the wall as a whole (its group origin = wall center)
+            controls.target.copy(wallGroup.position);
+            controls.update();
+            markDirty();
+            return;
+        }
+        // Empty space: refocus the wall center (default behavior)
+        controls.target.copy(wallGroup.position);
+        controls.update();
+        markDirty();
     });
     }, 0);
 })();
@@ -7017,7 +7122,8 @@ moveToggleBtn.addEventListener('click', () => setMoveMode(!state.moveMode));
 
 centerBtn.addEventListener('click', () => {
     wallGroup.position.set(0, 0, 0);
-    controls.target.set(0, 0, 0);
+    if (window.__syncWallPlatform) window.__syncWallPlatform('wall');
+    controls.target.set(0, wallGroup.position.y, 0);
     controls.update();
     updatePositionInfo();
 });
@@ -7107,6 +7213,8 @@ overlay.addEventListener('mousemove', e => {
     raycaster.setFromCamera(mouse, camera);
     if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
         wallGroup.position.copy(dragIntersect.sub(dragOffset));
+        // Attached stage deck follows the wall (and re-imposes platform lift)
+        if (window.__syncWallPlatform) window.__syncWallPlatform('wall');
         controls.target.copy(wallGroup.position);
         updatePositionInfo();
     }
