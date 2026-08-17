@@ -1769,6 +1769,18 @@
             <label>Background Color</label>
             <input type="color" id="bgColorPicker" value="#0a0a0f" style="width:40px;height:28px;padding:0;border:1px solid #333;border-radius:6px;background:#0a0a0a;cursor:pointer;">
         </div>
+        <div class="config-row" style="margin-top:10px">
+            <label title="Match the 3D camera's field of view to the photo's focal length so wall perspective lines up with the photo's sightlines">Camera FOV <span id="fovVal" style="color:#3b82f6">40&deg;</span></label>
+            <input type="range" id="fovSlider" min="8" max="110" value="40" step="1" style="flex:1; margin-left:10px">
+        </div>
+        <div class="toggle-row">
+            <label title="Freeze orbit/zoom so the matched perspective can't be disturbed — use Move mode to place the wall">Lock View</label>
+            <label class="toggle">
+                <input type="checkbox" id="lockViewToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+        <div class="vs-hint">FOV auto-sets from the photo's EXIF focal length when available. Fine-tune until the wall's perspective matches the photo's sightlines, then Lock View and position the wall with Move.</div>
         <button class="venue-clear hidden" id="venueClearBtn">Clear Background</button>
     </div>
 
@@ -2771,9 +2783,17 @@ function selectWall(wallId) {
 }
 
 function arrangeWalls() {
+    /* Walls the user has positioned by hand (wall.pos set via Move mode)
+       keep their custom position; the auto-arranger only slots walls that
+       haven't been moved. Center (with the wall active) clears wall.pos to
+       return a wall to its auto slot. */
     if (state.walls.length <= 1) {
-        const ctx = wallContextMap.get(state.walls[0]?.id);
-        if (ctx) ctx.group.position.set(0, 0, 0);
+        const wall = state.walls[0];
+        const ctx = wallContextMap.get(wall?.id);
+        if (ctx) {
+            if (wall && wall.pos) ctx.group.position.set(wall.pos.x, wall.pos.y, wall.pos.z);
+            else ctx.group.position.set(0, 0, 0);
+        }
         return;
     }
     const saved = activeContextWallId;
@@ -2784,7 +2804,7 @@ function arrangeWalls() {
         activateWallContext(wall.id);
         const b = wallBounds();
         const d = wallDims();
-        infos.push({ id: wall.id, w: b.w, h: d.totalH });
+        infos.push({ id: wall.id, w: b.w, h: d.totalH, pos: wall.pos || null });
         totalW += b.w;
         maxH = Math.max(maxH, d.totalH);
     }
@@ -2793,10 +2813,14 @@ function arrangeWalls() {
     for (const info of infos) {
         const ctx = wallContextMap.get(info.id);
         if (ctx) {
-            ctx.group.position.x = x + info.w / 2;
-            // Bottom-align: shift shorter walls down so all bottoms are at the same Y
-            ctx.group.position.y = -(maxH - info.h) / 2;
-            ctx.group.position.z = 0;
+            if (info.pos) {
+                ctx.group.position.set(info.pos.x, info.pos.y, info.pos.z);
+            } else {
+                ctx.group.position.x = x + info.w / 2;
+                // Bottom-align: shift shorter walls down so all bottoms are at the same Y
+                ctx.group.position.y = -(maxH - info.h) / 2;
+                ctx.group.position.z = 0;
+            }
         }
         x += info.w + WALL_GAP_IN;
     }
@@ -4436,7 +4460,11 @@ function allWallsBounds() {
     return { w: isFinite(totalW) ? totalW : 100, h: totalH || 50, depth: maxDepth || 2, cx, cy };
 }
 
-function fitCameraToWall() {
+function fitCameraToWall(force) {
+    // Once the user has established their own view (orbit/zoom/pan or a
+    // restored session view), rebuilds must not stomp it. Explicit view
+    // actions (Reset button) pass force=true.
+    if (!force && window.__userViewDirty) return;
     const b = allWallsBounds();
     const fov = camera.fov * Math.PI / 180;
     const aspect = camera.aspect;
@@ -6246,7 +6274,85 @@ function setVenue(file) {
     // (a fresh Image() at capture time is never .complete synchronously).
     window.__venueBgImage = new Image();
     window.__venueBgImage.src = venueObjectUrl;
+    // Perspective match: derive the camera FOV from the photo's EXIF
+    // focal length (35mm-equivalent) so the wall's vanishing lines agree
+    // with the photo's sightlines. Runs async; slider stays manual override.
+    readExifFocal35(file).then(f35 => {
+        if (!f35 || f35 < 5) return;
+        const applyWhenLoaded = () => {
+            const img = window.__venueBgImage;
+            if (!img) return;
+            const portrait = img.naturalHeight > img.naturalWidth;
+            // 35mm frame is 36x24mm; vertical half-height depends on orientation
+            const halfMM = portrait ? 18 : 12;
+            const vfov = 2 * Math.atan(halfMM / f35) * 180 / Math.PI;
+            setVenueCameraFov(Math.round(Math.max(8, Math.min(110, vfov))));
+        };
+        if (window.__venueBgImage && window.__venueBgImage.complete) applyWhenLoaded();
+        else if (window.__venueBgImage) window.__venueBgImage.onload = applyWhenLoaded;
+    }).catch(() => {});
 }
+
+/* Minimal JPEG EXIF reader for FocalLengthIn35mmFilm (tag 0xA405). */
+async function readExifFocal35(file) {
+    try {
+        const buf = new Uint8Array(await file.slice(0, 256 * 1024).arrayBuffer());
+        const dv = new DataView(buf.buffer);
+        if (dv.getUint16(0) !== 0xFFD8) return null;   // not a JPEG
+        let off = 2;
+        while (off + 4 < buf.length) {
+            if (buf[off] !== 0xFF) break;
+            const marker = buf[off + 1];
+            const size = dv.getUint16(off + 2);
+            if (marker === 0xE1 &&
+                String.fromCharCode(buf[off+4], buf[off+5], buf[off+6], buf[off+7]) === 'Exif') {
+                const tiff = off + 10;
+                const little = dv.getUint16(tiff) === 0x4949;
+                const g16 = o => dv.getUint16(o, little);
+                const g32 = o => dv.getUint32(o, little);
+                const ifd0 = tiff + g32(tiff + 4);
+                let exifPtr = 0;
+                const n = g16(ifd0);
+                for (let i = 0; i < n; i++) {
+                    const e = ifd0 + 2 + i * 12;
+                    if (g16(e) === 0x8769) exifPtr = tiff + g32(e + 8);
+                }
+                if (!exifPtr || exifPtr > buf.length - 2) return null;
+                const m = g16(exifPtr);
+                for (let i = 0; i < m; i++) {
+                    const e = exifPtr + 2 + i * 12;
+                    if (e + 12 > buf.length) break;
+                    if (g16(e) === 0xA405) return g16(e + 8);
+                }
+                return null;
+            }
+            off += 2 + size;
+        }
+    } catch (_) {}
+    return null;
+}
+
+/* Set the camera FOV (perspective match) and reflect it in the slider. */
+function setVenueCameraFov(v) {
+    camera.fov = v;
+    camera.updateProjectionMatrix();
+    const slider = document.getElementById('fovSlider');
+    const label = document.getElementById('fovVal');
+    if (slider) slider.value = v;
+    if (label) label.innerHTML = v + '&deg;';
+    markDirty();
+    if (window.__schedulePersistView) window.__schedulePersistView();
+}
+
+document.getElementById('fovSlider').addEventListener('input', e => {
+    setVenueCameraFov(parseInt(e.target.value, 10) || 40);
+});
+
+document.getElementById('lockViewToggle').addEventListener('change', e => {
+    window.__viewLocked = e.target.checked;
+    controls.enabled = !e.target.checked;
+    if (window.__schedulePersistView) window.__schedulePersistView();
+});
 
 venueZone.addEventListener('click', () => venueInput.click());
 venueInput.addEventListener('change', () => {
@@ -6786,7 +6892,12 @@ let ledAttachedStageId = null;
 function syncWallPlatform(source) {
     const st = stages.find(s => s.id === ledAttachedStageId);
     if (!st) {
-        if (wallGroup) wallGroup.position.y = 0;
+        if (wallGroup) {
+            wallGroup.position.y = 0;
+            // Keep any persisted custom position in step with the drop
+            const awd = state.walls.find(w => w.id === activeContextWallId);
+            if (awd && awd.pos) { awd.pos.y = 0; if (window.__schedulePersistView) window.__schedulePersistView(); }
+        }
         markDirty();
         return;
     }
@@ -6803,6 +6914,13 @@ function syncWallPlatform(source) {
         wallGroup.position.z = st.z - wallBackOffset;   // wall at rear edge
     }
     wallGroup.position.y = st.heightIn * total;
+    // The attached pair's position is intentional — record it as the wall's
+    // custom position so arrangeWalls/reloads keep it.
+    const aw = state.walls.find(w => w.id === activeContextWallId);
+    if (aw) {
+        aw.pos = { x: wallGroup.position.x, y: wallGroup.position.y, z: wallGroup.position.z };
+        if (window.__schedulePersistView) window.__schedulePersistView();
+    }
     // Reposition this stage's mesh + edges ([mesh, edges] interleaved)
     if (stageGroup) {
         const floorY = stagesFloorY();
@@ -7144,12 +7262,24 @@ document.getElementById('dimensionToggle').addEventListener('change', e => {
     }
 });
 
-/* View buttons */
-document.getElementById('viewFront').addEventListener('click', () => setCameraView('front'));
-document.getElementById('view34').addEventListener('click', () => setCameraView('34'));
+/* View buttons. Front / 3-4 are deliberate views — they persist like any
+   user view. Reset is the "purposeful reset": returns to the auto-fit
+   default and re-enables auto-fitting on future rebuilds. */
+document.getElementById('viewFront').addEventListener('click', () => {
+    setCameraView('front');
+    window.__userViewDirty = true;
+    if (window.__schedulePersistView) window.__schedulePersistView();
+});
+document.getElementById('view34').addEventListener('click', () => {
+    setCameraView('34');
+    window.__userViewDirty = true;
+    if (window.__schedulePersistView) window.__schedulePersistView();
+});
 document.getElementById('viewReset').addEventListener('click', () => {
     wallGroup.rotation.set(0, 0, 0);
     setCameraView('front');
+    window.__userViewDirty = false;
+    if (window.__schedulePersistView) window.__schedulePersistView();
 });
 
 /* ── Move mode ── */
@@ -7184,11 +7314,16 @@ function updatePositionInfo() {
 moveToggleBtn.addEventListener('click', () => setMoveMode(!state.moveMode));
 
 centerBtn.addEventListener('click', () => {
-    wallGroup.position.set(0, 0, 0);
+    // Purposeful reset: clear this wall's custom position so the
+    // auto-arranger re-slots it (origin for a single wall).
+    const aw = state.walls.find(w => w.id === activeContextWallId);
+    if (aw) aw.pos = null;
+    arrangeWalls();
     if (window.__syncWallPlatform) window.__syncWallPlatform('wall');
-    controls.target.set(0, wallGroup.position.y, 0);
+    controls.target.copy(wallGroup.position);
     controls.update();
     updatePositionInfo();
+    if (window.__schedulePersistView) window.__schedulePersistView();
 });
 
 function updateMouseNDC(e) {
@@ -7278,12 +7413,17 @@ overlay.addEventListener('mousemove', e => {
         wallGroup.position.copy(dragIntersect.sub(dragOffset));
         // Attached stage deck follows the wall (and re-imposes platform lift)
         if (window.__syncWallPlatform) window.__syncWallPlatform('wall');
+        // Record as this wall's custom position so the auto-arranger leaves
+        // it alone and it persists across reloads.
+        const aw = state.walls.find(w => w.id === activeContextWallId);
+        if (aw) aw.pos = { x: wallGroup.position.x, y: wallGroup.position.y, z: wallGroup.position.z };
         controls.target.copy(wallGroup.position);
         updatePositionInfo();
     }
 });
 
 overlay.addEventListener('mouseup', () => {
+    if (isDragging && window.__schedulePersistView) window.__schedulePersistView();
     isDragging = false;
     if (isDraggingContent) {
         isDraggingContent = false;
@@ -8466,6 +8606,74 @@ document.getElementById('addWindowBtn').addEventListener('click', () => addConte
 /* ── Boot ── */
 renderWindowList();
 init();
+
+/* ── View persistence: camera + per-wall positions ────────────────────────
+   The camera (position/zoom/target) and any hand-positioned walls persist
+   to localStorage and restore on load. "Purposeful reset" clears them:
+   the view Reset button returns to auto-fit; Center re-slots the active
+   wall. Runs after init() so camera/controls/walls all exist. */
+const VIEW_KEY = 'led-showroom-view';
+let _persistViewTimer = null;
+
+function persistViewState() {
+    try {
+        localStorage.setItem(VIEW_KEY, JSON.stringify({
+            cam: {
+                px: camera.position.x, py: camera.position.y, pz: camera.position.z,
+                tx: controls.target.x, ty: controls.target.y, tz: controls.target.z,
+            },
+            fov: camera.fov,
+            lock: !!window.__viewLocked,
+            userView: !!window.__userViewDirty,
+            walls: state.walls.map(w => w.pos ? { x: w.pos.x, y: w.pos.y, z: w.pos.z } : null),
+        }));
+    } catch (_) { /* storage full/blocked — persistence is best-effort */ }
+}
+window.__schedulePersistView = () => {
+    clearTimeout(_persistViewTimer);
+    _persistViewTimer = setTimeout(persistViewState, 400);
+};
+
+(function restoreViewState() {
+    let data = null;
+    try { data = JSON.parse(localStorage.getItem(VIEW_KEY)); } catch (_) {}
+    if (!data) return;
+    if (Array.isArray(data.walls)) {
+        let anyPos = false;
+        data.walls.forEach((p, i) => {
+            if (p && state.walls[i] && [p.x, p.y, p.z].every(isFinite)) {
+                state.walls[i].pos = { x: +p.x, y: +p.y, z: +p.z };
+                anyPos = true;
+            }
+        });
+        if (anyPos) arrangeWalls();
+    }
+    if (data.cam && data.userView) {
+        const c = data.cam;
+        if ([c.px, c.py, c.pz, c.tx, c.ty, c.tz].every(isFinite)) {
+            camera.position.set(c.px, c.py, c.pz);
+            controls.target.set(c.tx, c.ty, c.tz);
+            controls.update();
+            window.__userViewDirty = true;   // rebuilds must not stomp the restored view
+        }
+    }
+    // FOV is scene calibration (photo focal-length match) — restore always
+    if (isFinite(data.fov) && data.fov >= 8 && data.fov <= 110) {
+        setVenueCameraFov(Math.round(data.fov));
+    }
+    if (data.lock) {
+        window.__viewLocked = true;
+        controls.enabled = false;
+        const t = document.getElementById('lockViewToggle');
+        if (t) t.checked = true;
+    }
+    markDirty();
+})();
+
+// User-initiated orbit/zoom/pan marks the view as custom; every camera
+// change (user or programmatic) refreshes the stored state.
+controls.addEventListener('start', () => { window.__userViewDirty = true; });
+controls.addEventListener('change', () => { if (window.__schedulePersistView) window.__schedulePersistView(); });
 
 /* ── GPU mode toggle + high-performance sub-options ──────────────────────
    Only exposed on dual-GPU systems. The main toggle picks discrete vs
