@@ -7458,8 +7458,10 @@ overlay.addEventListener('mousemove', e => {
         // Attached stage deck follows if the active wall is among the moved
         if (_moveTargets.some(t => t.wall.id === activeContextWallId)) {
             if (window.__syncWallPlatform) window.__syncWallPlatform('wall');
-            controls.target.copy(wallGroup.position);
         }
+        // Deliberately DO NOT touch controls.target here: moving a wall must
+        // never change the camera or the measured distance-to-wall — zoom
+        // (scroll) is the only thing that changes distance in Move mode.
         updatePositionInfo();
         markDirty();
     }
