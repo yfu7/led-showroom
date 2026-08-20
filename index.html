@@ -2833,7 +2833,10 @@ function arrangeWalls() {
             rightmost = wall.pos.x + dm.w / 2;
         }
         const ctx = wallContextMap.get(wall.id);
-        if (ctx) ctx.group.position.set(wall.pos.x, wall.pos.y, wall.pos.z);
+        if (ctx) {
+            ctx.group.position.set(wall.pos.x, wall.pos.y, wall.pos.z);
+            ctx.group.rotation.set(0, wall.rotY || 0, 0);
+        }
     }
 
     if (saved) activateWallContext(saved);
@@ -4496,7 +4499,10 @@ function fitCameraToWall(force) {
 
     controls.target.set(b.cx, b.cy || 0, 0);
     camera.position.set(b.cx, b.cy || 0, dist);
-    for (const ctx of wallContextMap.values()) ctx.group.rotation.set(0, 0, 0);
+    for (const w of state.walls) {
+        const c = wallContextMap.get(w.id);
+        if (c) c.group.rotation.set(0, w.rotY || 0, 0);   // clear auto-rotate, keep wall yaw
+    }
     controls.update();
 }
 
@@ -4512,7 +4518,10 @@ function setCameraView(view) {
 
     const cy = b.cy || 0;
     controls.target.set(b.cx, cy, 0);
-    for (const ctx of wallContextMap.values()) ctx.group.rotation.set(0, 0, 0);
+    for (const w of state.walls) {
+        const c = wallContextMap.get(w.id);
+        if (c) c.group.rotation.set(0, w.rotY || 0, 0);   // clear auto-rotate, keep wall yaw
+    }
 
     if (view === 'front') {
         camera.position.set(b.cx, cy, dist);
@@ -6928,24 +6937,30 @@ function syncWallPlatform(source) {
     const total = stageTotalScale(st);
     const halfDeck = (STAGE_SIZE_IN * total) / 2;
     // The LED wall stands at the BACK edge of the deck (audience area in
-    // front): wall back face flush with the deck's rear edge.
+    // front): wall back face flush with the deck's rear edge. The offset
+    // follows the wall's yaw so a rotated wall keeps its deck squarely
+    // in front of it.
+    const aw = state.walls.find(w => w.id === activeContextWallId);
+    const ry = (aw && aw.rotY) || 0;
     const wallBackOffset = halfDeck - PANEL_D_IN / 2;
+    const offX = Math.sin(ry) * wallBackOffset;
+    const offZ = Math.cos(ry) * wallBackOffset;
     if (source === 'wall') {
-        st.x = wallGroup.position.x;
-        st.z = wallGroup.position.z + wallBackOffset;   // deck extends forward
+        st.x = wallGroup.position.x + offX;
+        st.z = wallGroup.position.z + offZ;             // deck extends forward
     } else {
-        wallGroup.position.x = st.x;
-        wallGroup.position.z = st.z - wallBackOffset;   // wall at rear edge
+        wallGroup.position.x = st.x - offX;
+        wallGroup.position.z = st.z - offZ;             // wall at rear edge
     }
     wallGroup.position.y = st.heightIn * total;
     // The attached pair's position is intentional — record it as the wall's
     // custom position so arrangeWalls/reloads keep it.
-    const aw = state.walls.find(w => w.id === activeContextWallId);
     if (aw) {
         aw.pos = { x: wallGroup.position.x, y: wallGroup.position.y, z: wallGroup.position.z };
         if (window.__schedulePersistView) window.__schedulePersistView();
     }
-    // Reposition this stage's mesh + edges ([mesh, edges] interleaved)
+    // Reposition this stage's mesh + edges ([mesh, edges] interleaved);
+    // the attached deck also rotates with the wall.
     if (stageGroup) {
         const floorY = stagesFloorY();
         let k = 0;
@@ -6954,7 +6969,9 @@ function syncWallPlatform(source) {
             const edge = stageGroup.children[k++];
             if (s.id === st.id && mesh && edge) {
                 mesh.position.set(s.x, floorY + (s.heightIn * stageTotalScale(s)) / 2, s.z);
+                mesh.rotation.y = ry;
                 edge.position.copy(mesh.position);
+                edge.rotation.y = ry;
             }
         }
     }
@@ -7326,7 +7343,7 @@ function setMoveMode(on) {
     overlay.classList.toggle('move-mode', on);
     moveToggleBtn.classList.toggle('active', on);
     hint.textContent = on
-        ? 'Drag to move the checked walls (blue) \u00b7 Scroll to zoom'
+        ? 'Drag to move the checked walls (blue) \u00b7 Middle-drag to rotate them \u00b7 Scroll to zoom'
         : 'Drag to pan \u00b7 Scroll to zoom \u00b7 Middle-drag to rotate';
 }
 
@@ -7440,6 +7457,48 @@ overlay.addEventListener('mousedown', e => {
             return ctx ? { wall: w, group: ctx.group, start: ctx.group.position.clone() } : null;
         }).filter(Boolean);
         if (_moveTargets.length > 0) isDragging = true;
+    }
+});
+
+/* Move mode: MIDDLE-drag (scroll-wheel button) rotates the checked walls
+   around their own Y axis — each wall spins in place on the wall object
+   (wall.rotY), horizontal drag distance sets the angle. */
+let _rotTargets = null;
+let _rotStartX = 0;
+
+overlay.addEventListener('mousedown', e => {
+    if (!state.moveMode || e.button !== 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const checked = state.walls.filter(w => w.moveChecked);
+    const targets = checked.length > 0
+        ? checked
+        : state.walls.filter(w => w.id === activeContextWallId);
+    _rotTargets = targets.map(w => {
+        const ctx = wallContextMap.get(w.id);
+        return ctx ? { wall: w, group: ctx.group, start: (w.rotY || 0) } : null;
+    }).filter(Boolean);
+    _rotStartX = e.clientX;
+});
+
+overlay.addEventListener('mousemove', e => {
+    if (!_rotTargets) return;
+    if ((e.buttons & 4) === 0) { _rotTargets = null; return; }
+    const d = (e.clientX - _rotStartX) * 0.005;   // rad per px of horizontal drag
+    for (const t of _rotTargets) {
+        t.wall.rotY = t.start + d;
+        t.group.rotation.y = t.wall.rotY;
+    }
+    if (_rotTargets.some(t => t.wall.id === activeContextWallId) && window.__syncWallPlatform) {
+        window.__syncWallPlatform('wall');
+    }
+    markDirty();
+});
+
+window.addEventListener('mouseup', e => {
+    if (_rotTargets && e.button === 1) {
+        _rotTargets = null;
+        if (window.__schedulePersistView) window.__schedulePersistView();
     }
 });
 
@@ -8674,7 +8733,7 @@ function persistViewState() {
             fov: camera.fov,
             lock: !!window.__viewLocked,
             userView: !!window.__userViewDirty,
-            walls: state.walls.map(w => w.pos ? { x: CL(w.pos.x), y: CL(w.pos.y), z: CL(w.pos.z) } : null),
+            walls: state.walls.map(w => w.pos ? { x: CL(w.pos.x), y: CL(w.pos.y), z: CL(w.pos.z), r: +((w.rotY || 0).toFixed(4)) } : null),
         }));
     } catch (_) { /* storage full/blocked — persistence is best-effort */ }
 }
@@ -8697,6 +8756,7 @@ window.__schedulePersistView = () => {
         data.walls.forEach((p, i) => {
             if (p && state.walls[i] && [p.x, p.y, p.z].every(sane)) {
                 state.walls[i].pos = { x: +p.x, y: +p.y, z: +p.z };
+                if (isFinite(p.r) && Math.abs(p.r) < 100) state.walls[i].rotY = +p.r;
                 anyPos = true;
             }
         });
