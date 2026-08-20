@@ -7328,11 +7328,10 @@ function setMoveMode(on) {
     state.moveMode = on;
     controls.enableRotate = !on;
     controls.enablePan = !on;
-    controls.enableZoom = !on;   // scroll moves the wall in Z while in Move mode
     overlay.classList.toggle('move-mode', on);
     moveToggleBtn.classList.toggle('active', on);
     hint.textContent = on
-        ? 'Drag a wall to move it in X/Y \u00b7 Scroll to move it in depth (Z)'
+        ? 'Drag a wall to move it (grabs the wall under the cursor) \u00b7 Scroll to zoom'
         : 'Drag to pan \u00b7 Scroll to zoom \u00b7 Middle-drag to rotate';
 }
 
@@ -7443,13 +7442,9 @@ overlay.addEventListener('mousedown', e => {
         selectWall(hitWallId);   // switches wallGroup to the grabbed wall
     }
 
-    // X/Y-only movement with stable sensitivity at any camera angle:
-    // intersect a CAMERA-FACING plane through the wall (never edge-on to
-    // the view ray, so no grazing-angle blowups), then apply only the X/Y
-    // components of the drag delta. Z stays put; scroll adjusts it.
     const camDir = new THREE.Vector3();
     camera.getWorldDirection(camDir);
-    dragPlane.setFromNormalAndCoplanarPoint(camDir.negate(), wallGroup.position);
+    dragPlane.setFromNormalAndCoplanarPoint(camDir.clone().negate(), wallGroup.position);
 
     if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
         dragOffset.copy(dragIntersect).sub(wallGroup.position);
@@ -7457,35 +7452,13 @@ overlay.addEventListener('mousedown', e => {
     }
 });
 
-/* Move mode: scroll wheel moves the grabbed wall in depth (Z). Capture
-   phase + stopImmediatePropagation keeps OrbitControls' zoom out of it
-   (enableZoom is also off in move mode, belt and braces). */
-overlay.addEventListener('wheel', e => {
-    if (!state.moveMode) return;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    // ~12in per standard notch (deltaY 100), clamped so high-resolution
-    // wheels / trackpads with large or rapid deltas can't rocket the wall.
-    const dz = Math.max(-12, Math.min(12, -e.deltaY * 0.12));
-    wallGroup.position.z += dz;
-    if (window.__syncWallPlatform) window.__syncWallPlatform('wall');
-    const aw = state.walls.find(w => w.id === activeContextWallId);
-    if (aw) aw.pos = { x: wallGroup.position.x, y: wallGroup.position.y, z: wallGroup.position.z };
-    updatePositionInfo();
-    markDirty();
-    if (window.__schedulePersistView) window.__schedulePersistView();
-}, { passive: false, capture: true });
-
 overlay.addEventListener('mousemove', e => {
     if (!isDragging) return;
     updateMouseNDC(e);
 
     raycaster.setFromCamera(mouse, camera);
     if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
-        // Apply only X/Y of the drag; depth (Z) is scroll-controlled.
-        const p = dragIntersect.sub(dragOffset);
-        wallGroup.position.x = p.x;
-        wallGroup.position.y = p.y;
+        wallGroup.position.copy(dragIntersect.sub(dragOffset));
         // Attached stage deck follows the wall (and re-imposes platform lift)
         if (window.__syncWallPlatform) window.__syncWallPlatform('wall');
         // Record as this wall's custom position so the auto-arranger leaves
