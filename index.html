@@ -1240,6 +1240,17 @@
         }
         .wall-entry:hover { background: #1a1a1a; border-color: #555; }
         .wall-entry.selected { background: #1e3a5f; border-color: #3b82f6; }
+        /* Move-selection: same blue highlight as .selected, driven by the
+           per-wall checkbox; multiple walls can be checked at once. */
+        .wall-entry.move-checked { background: #1e3a5f; border-color: #3b82f6; }
+        .wall-entry.move-checked .wall-entry-name { color: #93c5fd; }
+        .wall-move-check {
+            width: 15px;
+            height: 15px;
+            accent-color: #3b82f6;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
         .wall-entry-name {
             flex: 1;
             font-size: 13px;
@@ -2015,7 +2026,7 @@
         <button class="view-btn" id="viewFront">Front</button>
         <button class="view-btn" id="view34">3/4</button>
         <button class="view-btn" id="viewReset">Reset</button>
-        <button class="view-btn" id="moveToggle" disabled>Move</button>
+        <button class="view-btn" id="moveToggle" title="Move the checked walls (blue) by dragging">Move</button>
         <button class="view-btn" id="dragContentToggle">Drag Content</button>
         <button class="view-btn" id="centerBtn">Center</button>
         <button class="view-btn" id="saveImageBtn">Save Image</button>
@@ -2861,7 +2872,9 @@ function renderWallList() {
     }
     state.walls.forEach(wall => {
         const entry = document.createElement('div');
-        entry.className = 'wall-entry' + (wall.id === state.selectedWallId ? ' selected' : '');
+        entry.className = 'wall-entry' +
+            (wall.id === state.selectedWallId ? ' selected' : '') +
+            (wall.moveChecked ? ' move-checked' : '');
         entry.dataset.id = wall.id;
 
         const isRect = isRectWall(wall);
@@ -2896,6 +2909,7 @@ function renderWallList() {
 
         entry.innerHTML =
             '<div class="wall-entry-header">' +
+            '<input type="checkbox" class="wall-move-check" data-wall="' + wall.id + '" title="Select for Move (multiple allowed)"' + (wall.moveChecked ? ' checked' : '') + '>' +
             '<span class="wall-entry-name">' + escHtml(wall.name) + '</span>' +
             (state.walls.length > 1 ? '<button class="cw-entry-delete wall-entry-delete" title="Remove">\u2715</button>' : '') +
             '</div>' +
@@ -2929,7 +2943,8 @@ function renderWallList() {
 
         let renameTimer = null;
         entry.addEventListener('click', e => {
-            if (e.target.closest('.wall-entry-delete') || e.target.closest('.wall-entry-rename') || e.target.closest('.wall-entry-controls')) return;
+            if (e.target.closest('.wall-entry-delete') || e.target.closest('.wall-entry-rename') ||
+                e.target.closest('.wall-entry-controls') || e.target.closest('.wall-move-check')) return;
             clearTimeout(renameTimer);
             if (wall.id !== state.selectedWallId) {
                 selectWall(wall.id);
@@ -2937,6 +2952,11 @@ function renderWallList() {
                 const nameSpan = e.target.closest('.wall-entry-name');
                 if (nameSpan) renameTimer = setTimeout(() => startWallRename(nameSpan), 300);
             }
+        });
+        entry.querySelector('.wall-move-check')?.addEventListener('change', e => {
+            e.stopPropagation();
+            wall.moveChecked = e.target.checked;
+            entry.classList.toggle('move-checked', wall.moveChecked);
         });
         entry.querySelector('.wall-entry-name')?.addEventListener('dblclick', e => {
             e.stopPropagation();
@@ -6892,7 +6912,10 @@ let ledAttachedStageId = null;
 function syncWallPlatform(source) {
     const st = stages.find(s => s.id === ledAttachedStageId);
     if (!st) {
-        if (wallGroup) {
+        // Drop the wall to the floor only on an actual detach ('stage'
+        // source: attach toggle / deck delete). A free wall move ('wall'
+        // source) with nothing attached must keep its vertical position.
+        if (source === 'stage' && wallGroup) {
             wallGroup.position.y = 0;
             // Keep any persisted custom position in step with the drop
             const awd = state.walls.find(w => w.id === activeContextWallId);
@@ -7302,7 +7325,7 @@ function setMoveMode(on) {
     overlay.classList.toggle('move-mode', on);
     moveToggleBtn.classList.toggle('active', on);
     hint.textContent = on
-        ? 'Drag to position wall \u00b7 Scroll to zoom'
+        ? 'Drag to move the checked walls (blue) \u00b7 Scroll to zoom'
         : 'Drag to pan \u00b7 Scroll to zoom \u00b7 Middle-drag to rotate';
 }
 
@@ -7388,6 +7411,13 @@ overlay.addEventListener('mousemove', e => {
     }
 }, true);
 
+/* Move mode drags every CHECKED wall (blue-highlighted via the per-wall
+   checkboxes) by the same delta, using the original camera-facing-plane
+   mechanics. With nothing checked, the active wall moves (single-wall
+   behavior unchanged). */
+let _moveTargets = [];        // [{ wall, group, start: Vector3 }]
+const _moveStartHit = new THREE.Vector3();
+
 overlay.addEventListener('mousedown', e => {
     if (!state.moveMode || e.button !== 0) return;
     e.stopPropagation();
@@ -7399,8 +7429,16 @@ overlay.addEventListener('mousedown', e => {
 
     raycaster.setFromCamera(mouse, camera);
     if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
-        dragOffset.copy(dragIntersect).sub(wallGroup.position);
-        isDragging = true;
+        _moveStartHit.copy(dragIntersect);
+        const checked = state.walls.filter(w => w.moveChecked);
+        const targets = checked.length > 0
+            ? checked
+            : state.walls.filter(w => w.id === activeContextWallId);
+        _moveTargets = targets.map(w => {
+            const ctx = wallContextMap.get(w.id);
+            return ctx ? { wall: w, group: ctx.group, start: ctx.group.position.clone() } : null;
+        }).filter(Boolean);
+        if (_moveTargets.length > 0) isDragging = true;
     }
 });
 
@@ -7410,15 +7448,20 @@ overlay.addEventListener('mousemove', e => {
 
     raycaster.setFromCamera(mouse, camera);
     if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
-        wallGroup.position.copy(dragIntersect.sub(dragOffset));
-        // Attached stage deck follows the wall (and re-imposes platform lift)
-        if (window.__syncWallPlatform) window.__syncWallPlatform('wall');
-        // Record as this wall's custom position so the auto-arranger leaves
-        // it alone and it persists across reloads.
-        const aw = state.walls.find(w => w.id === activeContextWallId);
-        if (aw) aw.pos = { x: wallGroup.position.x, y: wallGroup.position.y, z: wallGroup.position.z };
-        controls.target.copy(wallGroup.position);
+        const delta = dragIntersect.clone().sub(_moveStartHit);
+        for (const t of _moveTargets) {
+            t.group.position.copy(t.start).add(delta);
+            // Record as custom position so the auto-arranger leaves it
+            // alone and it persists across reloads.
+            t.wall.pos = { x: t.group.position.x, y: t.group.position.y, z: t.group.position.z };
+        }
+        // Attached stage deck follows if the active wall is among the moved
+        if (_moveTargets.some(t => t.wall.id === activeContextWallId)) {
+            if (window.__syncWallPlatform) window.__syncWallPlatform('wall');
+            controls.target.copy(wallGroup.position);
+        }
         updatePositionInfo();
+        markDirty();
     }
 });
 
