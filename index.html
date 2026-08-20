@@ -8617,15 +8617,18 @@ let _persistViewTimer = null;
 
 function persistViewState() {
     try {
+        // Clamp stored coordinates to the plausible-showroom bound so a
+        // runaway interaction can never poison the persisted state.
+        const CL = v => Math.max(-3000, Math.min(3000, +v || 0));
         localStorage.setItem(VIEW_KEY, JSON.stringify({
             cam: {
-                px: camera.position.x, py: camera.position.y, pz: camera.position.z,
-                tx: controls.target.x, ty: controls.target.y, tz: controls.target.z,
+                px: CL(camera.position.x), py: CL(camera.position.y), pz: CL(camera.position.z),
+                tx: CL(controls.target.x), ty: CL(controls.target.y), tz: CL(controls.target.z),
             },
             fov: camera.fov,
             lock: !!window.__viewLocked,
             userView: !!window.__userViewDirty,
-            walls: state.walls.map(w => w.pos ? { x: w.pos.x, y: w.pos.y, z: w.pos.z } : null),
+            walls: state.walls.map(w => w.pos ? { x: CL(w.pos.x), y: CL(w.pos.y), z: CL(w.pos.z) } : null),
         }));
     } catch (_) { /* storage full/blocked — persistence is best-effort */ }
 }
@@ -8638,10 +8641,15 @@ window.__schedulePersistView = () => {
     let data = null;
     try { data = JSON.parse(localStorage.getItem(VIEW_KEY)); } catch (_) {}
     if (!data) return;
+    // Sanity bound: reject positions/views beyond a plausible showroom
+    // (a runaway drag once persisted walls tens of thousands of inches
+    // away, which restored as an apparently empty scene on every load).
+    const SANE = 3000;   // inches (250 ft)
+    const sane = v => isFinite(v) && Math.abs(v) <= SANE;
     if (Array.isArray(data.walls)) {
         let anyPos = false;
         data.walls.forEach((p, i) => {
-            if (p && state.walls[i] && [p.x, p.y, p.z].every(isFinite)) {
+            if (p && state.walls[i] && [p.x, p.y, p.z].every(sane)) {
                 state.walls[i].pos = { x: +p.x, y: +p.y, z: +p.z };
                 anyPos = true;
             }
@@ -8650,7 +8658,7 @@ window.__schedulePersistView = () => {
     }
     if (data.cam && data.userView) {
         const c = data.cam;
-        if ([c.px, c.py, c.pz, c.tx, c.ty, c.tz].every(isFinite)) {
+        if ([c.px, c.py, c.pz, c.tx, c.ty, c.tz].every(sane)) {
             camera.position.set(c.px, c.py, c.pz);
             controls.target.set(c.tx, c.ty, c.tz);
             controls.update();
