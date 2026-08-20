@@ -705,6 +705,35 @@
             transition: width 0.4s;
         }
 
+        /* Perspective calibration overlay */
+        .persp-calib {
+            position: absolute;
+            inset: 0;
+            z-index: 20;
+            background: rgba(0, 0, 0, 0.25);
+        }
+        .persp-calib canvas {
+            position: absolute;
+            inset: 0;
+            cursor: crosshair;
+        }
+        .persp-toolbar {
+            position: absolute;
+            top: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(10, 10, 12, 0.92);
+            border: 1px solid #333;
+            border-radius: 10px;
+            padding: 10px 14px;
+            z-index: 21;
+        }
+        .persp-toolbar span { font-size: 13px; color: #ccc; white-space: nowrap; }
+        .persp-toolbar .view-btn:disabled { opacity: 0.4; cursor: default; }
+
         /* Sub-section that appears under the Discrete GPU toggle */
         .hp-options {
             margin-left: 14px;
@@ -1792,6 +1821,14 @@
             </label>
         </div>
         <div class="vs-hint">FOV auto-sets from the photo's EXIF focal length when available. Fine-tune until the wall's perspective matches the photo's sightlines, then Lock View and position the wall with Move.</div>
+        <button class="add-corner-btn hidden" id="perspCalibBtn" style="margin-top:8px" title="Trace 4 sightlines on the photo; the camera solves to match its exact perspective">Calibrate Perspective (trace sightlines)</button>
+        <div class="toggle-row hidden" id="perspGridRow">
+            <label title="Ground grid drawn in the solved perspective — wall movements track these lines">Sightline Grid</label>
+            <label class="toggle">
+                <input type="checkbox" id="perspGridToggle" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
         <button class="venue-clear hidden" id="venueClearBtn">Clear Background</button>
     </div>
 
@@ -2039,6 +2076,17 @@
     </div>
 
     <div class="showroom-hint" id="showroomHint">Drag to pan · Scroll to zoom · Middle-drag to rotate</div>
+
+    <!-- Perspective calibration overlay: trace sightlines on the venue photo -->
+    <div class="persp-calib" id="perspCalib" style="display:none">
+        <canvas id="perspCanvas"></canvas>
+        <div class="persp-toolbar">
+            <span id="perspInstr">Draw 2 RED lines on width-parallel edges (back wall top &amp; bottom)</span>
+            <button class="view-btn" id="perspUndoBtn">Undo Line</button>
+            <button class="view-btn" id="perspSolveBtn" disabled>Solve &amp; Lock</button>
+            <button class="view-btn" id="perspCancelBtn">Cancel</button>
+        </div>
+    </div>
 </main>
 
 <!-- v3: Custom shape editor side panel (hidden by default) -->
@@ -6305,6 +6353,7 @@ function setVenue(file) {
     // (a fresh Image() at capture time is never .complete synchronously).
     window.__venueBgImage = new Image();
     window.__venueBgImage.src = venueObjectUrl;
+    document.getElementById('perspCalibBtn').classList.remove('hidden');
     // Perspective match: derive the camera FOV from the photo's EXIF
     // focal length (35mm-equivalent) so the wall's vanishing lines agree
     // with the photo's sightlines. Runs async; slider stays manual override.
@@ -6385,6 +6434,253 @@ document.getElementById('lockViewToggle').addEventListener('change', e => {
     if (window.__schedulePersistView) window.__schedulePersistView();
 });
 
+/* ── Perspective calibration engine ──────────────────────────────────────
+   Trace two pairs of parallel sightlines on the venue photo (RED pair =
+   width-parallel edges, GREEN pair = depth-receding edges). Their two
+   vanishing points solve the photo's exact camera:
+     focal length  f = sqrt(-(v1 . v2))   (centered image coords)
+     rotation      world axes from the VP directions
+   The 3D camera is then set to that fov + orientation and locked, the
+   world ground plane coincides with the photo's floor, a sightline grid
+   confirms the match, and Move-mode drags slide walls along that floor —
+   movements track the photo's perspective lines. */
+const persp = { lines: [], drawing: null, dragPt: null, matched: false, gridLines: null };
+
+function perspOpen() {
+    if (!window.__venueBgImage || !window.__venueBgImage.complete) {
+        showUploadError('Set a venue background photo first.');
+        return;
+    }
+    persp.lines = [];
+    persp.drawing = null;
+    const el = document.getElementById('perspCalib');
+    const cv = document.getElementById('perspCanvas');
+    const showroom = document.getElementById('showroom');
+    cv.width = showroom.clientWidth;
+    cv.height = showroom.clientHeight;
+    el.style.display = '';
+    perspDraw();
+    perspUpdateUI();
+}
+
+function perspClose() {
+    document.getElementById('perspCalib').style.display = 'none';
+}
+
+function perspUpdateUI() {
+    const n = persp.lines.length + (persp.drawing ? 1 : 0);
+    const instr = document.getElementById('perspInstr');
+    if (n < 2) instr.textContent = 'Draw 2 RED lines on width-parallel edges (back wall top & bottom) — ' + n + '/2';
+    else if (n < 4) instr.textContent = 'Now 2 GREEN lines on depth-receding edges (floor/ceiling lines going away) — ' + (n - 2) + '/2';
+    else instr.textContent = 'Adjust endpoints if needed, then Solve & Lock';
+    document.getElementById('perspSolveBtn').disabled = persp.lines.length < 4;
+}
+
+function perspDraw() {
+    const cv = document.getElementById('perspCanvas');
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+    // Venue photo, cover-fit (same as the live CSS background)
+    const img = window.__venueBgImage;
+    if (img && img.complete && img.naturalWidth > 0) {
+        const ar = img.naturalWidth / img.naturalHeight, cAr = W / H;
+        let dw, dh, dx, dy;
+        if (ar > cAr) { dh = H; dw = H * ar; dx = (W - dw) / 2; dy = 0; }
+        else          { dw = W; dh = W / ar; dx = 0; dy = (H - dh) / 2; }
+        ctx.drawImage(img, dx, dy, dw, dh);
+    }
+    // Lines (+ the in-progress one)
+    const all = persp.drawing ? [...persp.lines, persp.drawing] : persp.lines;
+    all.forEach((l, i) => {
+        const color = i < 2 ? '#ef4444' : '#22c55e';
+        // Extended dashed guide
+        const dx = l.x2 - l.x1, dy = l.y2 - l.y1;
+        const len = Math.hypot(dx, dy) || 1;
+        const ex = dx / len * 4000, ey = dy / len * 4000;
+        ctx.strokeStyle = color; ctx.globalAlpha = 0.28; ctx.setLineDash([6, 6]); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(l.x1 - ex, l.y1 - ey); ctx.lineTo(l.x2 + ex, l.y2 + ey); ctx.stroke();
+        // Main segment
+        ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(l.x1, l.y1); ctx.lineTo(l.x2, l.y2); ctx.stroke();
+        // Endpoints
+        for (const [px, py] of [[l.x1, l.y1], [l.x2, l.y2]]) {
+            ctx.fillStyle = '#0a0a0a'; ctx.beginPath(); ctx.arc(px, py, 6, 0, 7); ctx.fill();
+            ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(px, py, 6, 0, 7); ctx.stroke();
+        }
+    });
+}
+
+function perspLineIntersect(l1, l2) {
+    const d = (l1.x1 - l1.x2) * (l2.y1 - l2.y2) - (l1.y1 - l1.y2) * (l2.x1 - l2.x2);
+    if (Math.abs(d) < 1e-9) return null;   // parallel on screen → VP at infinity
+    const a = l1.x1 * l1.y2 - l1.y1 * l1.x2;
+    const b = l2.x1 * l2.y2 - l2.y1 * l2.x2;
+    return {
+        x: (a * (l2.x1 - l2.x2) - (l1.x1 - l1.x2) * b) / d,
+        y: (a * (l2.y1 - l2.y2) - (l1.y1 - l1.y2) * b) / d,
+    };
+}
+
+function perspSolve() {
+    const cv = document.getElementById('perspCanvas');
+    const W = cv.width, H = cv.height;
+    const vpX = perspLineIntersect(persp.lines[0], persp.lines[1]);
+    const vpZ = perspLineIntersect(persp.lines[2], persp.lines[3]);
+    // Centered image coords, y up
+    const toC = p => p ? { u: p.x - W / 2, v: -(p.y - H / 2) } : null;
+    const cX = toC(vpX), cZ = toC(vpZ);
+
+    let f;
+    if (cX && cZ) {
+        const f2 = -(cX.u * cZ.u + cX.v * cZ.v);
+        if (!(f2 > 100)) {
+            showUploadError('Those sightlines describe an impossible camera — make sure the RED pair and GREEN pair follow edges that are perpendicular to each other in the real room.');
+            return;
+        }
+        f = Math.sqrt(f2);
+    } else {
+        // A parallel pair means that axis is parallel to the image plane;
+        // fall back to the current FOV for focal length.
+        f = (H / 2) / Math.tan(camera.fov * Math.PI / 360);
+    }
+
+    // World axis directions in camera space (camera looks down -Z)
+    const dirFrom = c => new THREE.Vector3(c.u, c.v, -f).normalize();
+    const lineDir = l => {
+        // In-image direction for a VP at infinity (axis parallel to image plane)
+        const d = new THREE.Vector3(l.x2 - l.x1, -(l.y2 - l.y1), 0).normalize();
+        return d;
+    };
+    let wx = cX ? dirFrom(cX) : lineDir(persp.lines[0]);
+    let recede = cZ ? dirFrom(cZ) : lineDir(persp.lines[2]);
+    let wz = recede.clone().negate();               // world +Z toward the viewer
+    if (wx.x < 0) wx.negate();                      // world +X to the right
+    if (wz.z < 0) wz.negate();                      // receding lines go into the photo
+    // Orthonormalize X against Z, derive up
+    wx.sub(wz.clone().multiplyScalar(wx.dot(wz))).normalize();
+    let wy = new THREE.Vector3().crossVectors(wz, wx);
+    if (wy.y < 0) { wx.negate(); wy.negate(); }     // keep world up pointing up
+    // makeBasis(wx,wy,wz) has the world axes as columns = the world→camera
+    // rotation; the camera's orientation is its transpose (rotation inverse).
+    const m = new THREE.Matrix4().makeBasis(wx, wy, wz).transpose();
+    camera.quaternion.setFromRotationMatrix(m);
+
+    // FOV from focal length (viewport pixels)
+    const vfov = 2 * Math.atan((H / 2) / f) * 180 / Math.PI;
+    setVenueCameraFov(Math.round(Math.max(8, Math.min(110, vfov))));
+
+    // Keep the orbit target in front of the camera at the previous distance
+    const dist = camera.position.distanceTo(controls.target) || 300;
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    controls.target.copy(camera.position).addScaledVector(fwd, dist);
+
+    // Lock the matched view
+    persp.matched = true;
+    window.__perspMatched = true;
+    window.__userViewDirty = true;
+    window.__viewLocked = true;
+    controls.enabled = false;
+    document.getElementById('lockViewToggle').checked = true;
+    document.getElementById('perspGridRow').classList.remove('hidden');
+    buildPerspGrid();
+    perspClose();
+    markDirty();
+    if (window.__schedulePersistView) window.__schedulePersistView();
+}
+
+/* Sightline grid: ground-plane lines in the solved perspective. When the
+   match is right these visually seat onto the photo's floor. */
+function removePerspGrid() {
+    if (persp.gridLines) {
+        scene.remove(persp.gridLines);
+        persp.gridLines.geometry.dispose();
+        persp.gridLines.material.dispose();
+        persp.gridLines = null;
+    }
+    markDirty();
+}
+
+function buildPerspGrid() {
+    removePerspGrid();
+    if (!persp.matched) return;
+    const d = wallDims();
+    const floorY = -d.totalH / 2;
+    const pts = [];
+    const EXT = 1440, STEP = 48;   // 120 ft square, 4 ft spacing
+    for (let x = -EXT; x <= EXT; x += STEP) { pts.push(x, floorY, -EXT, x, floorY, EXT); }
+    for (let z = -EXT; z <= EXT; z += STEP) { pts.push(-EXT, floorY, z, EXT, floorY, z); }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    const mat = new THREE.LineBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.3, depthWrite: false });
+    persp.gridLines = new THREE.LineSegments(geom, mat);
+    persp.gridLines.visible = document.getElementById('perspGridToggle').checked;
+    scene.add(persp.gridLines);
+    markDirty();
+}
+
+(() => {
+    const btn = document.getElementById('perspCalibBtn');
+    const cv = document.getElementById('perspCanvas');
+    if (!btn) return;
+    btn.addEventListener('click', perspOpen);
+    document.getElementById('perspCancelBtn').addEventListener('click', perspClose);
+    document.getElementById('perspSolveBtn').addEventListener('click', perspSolve);
+    document.getElementById('perspUndoBtn').addEventListener('click', () => {
+        persp.drawing = null;
+        persp.lines.pop();
+        perspDraw();
+        perspUpdateUI();
+    });
+    document.getElementById('perspGridToggle').addEventListener('change', e => {
+        if (persp.gridLines) { persp.gridLines.visible = e.target.checked; markDirty(); }
+    });
+
+    const pt = e => {
+        const r = cv.getBoundingClientRect();
+        return { x: e.clientX - r.left, y: e.clientY - r.top };
+    };
+    cv.addEventListener('mousedown', e => {
+        const p = pt(e);
+        // Grab an existing endpoint to adjust it
+        for (const l of persp.lines) {
+            for (const end of ['1', '2']) {
+                if (Math.hypot(l['x' + end] - p.x, l['y' + end] - p.y) < 12) {
+                    persp.dragPt = { line: l, end };
+                    return;
+                }
+            }
+        }
+        if (persp.lines.length >= 4) return;
+        persp.drawing = { x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+        perspUpdateUI();
+    });
+    cv.addEventListener('mousemove', e => {
+        const p = pt(e);
+        if (persp.dragPt) {
+            persp.dragPt.line['x' + persp.dragPt.end] = p.x;
+            persp.dragPt.line['y' + persp.dragPt.end] = p.y;
+            perspDraw();
+            return;
+        }
+        if (persp.drawing) {
+            persp.drawing.x2 = p.x;
+            persp.drawing.y2 = p.y;
+            perspDraw();
+        }
+    });
+    window.addEventListener('mouseup', () => {
+        if (persp.dragPt) { persp.dragPt = null; return; }
+        if (persp.drawing) {
+            const l = persp.drawing;
+            persp.drawing = null;
+            if (Math.hypot(l.x2 - l.x1, l.y2 - l.y1) > 25) persp.lines.push(l);
+            perspDraw();
+            perspUpdateUI();
+        }
+    });
+})();
+
 venueZone.addEventListener('click', () => venueInput.click());
 venueInput.addEventListener('change', () => {
     if (venueInput.files[0]) setVenue(venueInput.files[0]);
@@ -6402,6 +6698,13 @@ venueClearBtn.addEventListener('click', () => {
     venueClearBtn.classList.add('hidden');
     venueInput.value = '';
     window.__venueBgImage = null;
+    // Clearing the photo also clears its perspective match
+    document.getElementById('perspCalibBtn').classList.add('hidden');
+    document.getElementById('perspGridRow').classList.add('hidden');
+    persp.matched = false;
+    window.__perspMatched = false;
+    removePerspGrid();
+    if (window.__schedulePersistView) window.__schedulePersistView();
 });
 
 document.getElementById('bgColorPicker').addEventListener('input', e => {
@@ -7442,9 +7745,16 @@ overlay.addEventListener('mousedown', e => {
     e.stopPropagation();
     updateMouseNDC(e);
 
-    const camDir = new THREE.Vector3();
-    camera.getWorldDirection(camDir);
-    dragPlane.setFromNormalAndCoplanarPoint(camDir.clone().negate(), wallGroup.position);
+    if (window.__perspMatched) {
+        // Perspective-matched: walls slide along the photo's floor plane so
+        // movements track the solved sightlines (recede/approach correctly).
+        const d = wallDims();
+        dragPlane.set(new THREE.Vector3(0, 1, 0), d.totalH / 2);   // y = -totalH/2
+    } else {
+        const camDir = new THREE.Vector3();
+        camera.getWorldDirection(camDir);
+        dragPlane.setFromNormalAndCoplanarPoint(camDir.clone().negate(), wallGroup.position);
+    }
 
     raycaster.setFromCamera(mouse, camera);
     if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
@@ -7537,6 +7847,8 @@ overlay.addEventListener('mousemove', e => {
     raycaster.setFromCamera(mouse, camera);
     if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
         const delta = dragIntersect.clone().sub(_moveStartHit);
+        // Guard against grazing-angle spikes on the floor-plane drag
+        if (delta.length() > 2000) delta.setLength(2000);
         for (const t of _moveTargets) {
             t.group.position.copy(t.start).add(delta);
             // Record as custom position so the auto-arranger leaves it
@@ -8761,6 +9073,8 @@ function persistViewState() {
             fov: camera.fov,
             lock: !!window.__viewLocked,
             userView: !!window.__userViewDirty,
+            pm: window.__perspMatched ? 1 : 0,
+            pq: window.__perspMatched ? camera.quaternion.toArray().map(v => +v.toFixed(5)) : undefined,
             walls: state.walls.map(w => w.pos ? {
                 x: CL(w.pos.x), y: CL(w.pos.y), z: CL(w.pos.z),
                 r: +((w.rotY || 0).toFixed(4)),
@@ -8815,6 +9129,14 @@ window.__schedulePersistView = () => {
         controls.enabled = false;
         const t = document.getElementById('lockViewToggle');
         if (t) t.checked = true;
+    }
+    // Restore a solved perspective match (camera orientation + grid)
+    if (data.pm && Array.isArray(data.pq) && data.pq.length === 4 && data.pq.every(isFinite)) {
+        camera.quaternion.fromArray(data.pq);
+        persp.matched = true;
+        window.__perspMatched = true;
+        document.getElementById('perspGridRow').classList.remove('hidden');
+        buildPerspGrid();
     }
     markDirty();
 })();
