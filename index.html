@@ -7328,10 +7328,11 @@ function setMoveMode(on) {
     state.moveMode = on;
     controls.enableRotate = !on;
     controls.enablePan = !on;
+    controls.enableZoom = !on;   // scroll moves the wall in Z while in Move mode
     overlay.classList.toggle('move-mode', on);
     moveToggleBtn.classList.toggle('active', on);
     hint.textContent = on
-        ? 'Drag a wall to move it (grabs the wall under the cursor) \u00b7 Scroll to zoom'
+        ? 'Drag a wall to move it in X/Y \u00b7 Scroll to move it in depth (Z)'
         : 'Drag to pan \u00b7 Scroll to zoom \u00b7 Middle-drag to rotate';
 }
 
@@ -7442,15 +7443,33 @@ overlay.addEventListener('mousedown', e => {
         selectWall(hitWallId);   // switches wallGroup to the grabbed wall
     }
 
-    const camDir = new THREE.Vector3();
-    camera.getWorldDirection(camDir);
-    dragPlane.setFromNormalAndCoplanarPoint(camDir.clone().negate(), wallGroup.position);
+    // Constrain the drag to world X/Y: intersect against a fixed world-Z
+    // plane through the wall's current depth, so dragging never changes Z
+    // no matter the camera angle. Depth is adjusted with the scroll wheel.
+    dragPlane.set(new THREE.Vector3(0, 0, 1), -wallGroup.position.z);
 
     if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
         dragOffset.copy(dragIntersect).sub(wallGroup.position);
         isDragging = true;
     }
 });
+
+/* Move mode: scroll wheel moves the grabbed wall in depth (Z). Capture
+   phase + stopImmediatePropagation keeps OrbitControls' zoom out of it
+   (enableZoom is also off in move mode, belt and braces). */
+overlay.addEventListener('wheel', e => {
+    if (!state.moveMode) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const dz = -e.deltaY * 0.12;   // ~12in per wheel notch, scroll up = closer
+    wallGroup.position.z += dz;
+    if (window.__syncWallPlatform) window.__syncWallPlatform('wall');
+    const aw = state.walls.find(w => w.id === activeContextWallId);
+    if (aw) aw.pos = { x: wallGroup.position.x, y: wallGroup.position.y, z: wallGroup.position.z };
+    updatePositionInfo();
+    markDirty();
+    if (window.__schedulePersistView) window.__schedulePersistView();
+}, { passive: false, capture: true });
 
 overlay.addEventListener('mousemove', e => {
     if (!isDragging) return;
