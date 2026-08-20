@@ -7443,10 +7443,13 @@ overlay.addEventListener('mousedown', e => {
         selectWall(hitWallId);   // switches wallGroup to the grabbed wall
     }
 
-    // Constrain the drag to world X/Y: intersect against a fixed world-Z
-    // plane through the wall's current depth, so dragging never changes Z
-    // no matter the camera angle. Depth is adjusted with the scroll wheel.
-    dragPlane.set(new THREE.Vector3(0, 0, 1), -wallGroup.position.z);
+    // X/Y-only movement with stable sensitivity at any camera angle:
+    // intersect a CAMERA-FACING plane through the wall (never edge-on to
+    // the view ray, so no grazing-angle blowups), then apply only the X/Y
+    // components of the drag delta. Z stays put; scroll adjusts it.
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+    dragPlane.setFromNormalAndCoplanarPoint(camDir.negate(), wallGroup.position);
 
     if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
         dragOffset.copy(dragIntersect).sub(wallGroup.position);
@@ -7461,7 +7464,9 @@ overlay.addEventListener('wheel', e => {
     if (!state.moveMode) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    const dz = -e.deltaY * 0.12;   // ~12in per wheel notch, scroll up = closer
+    // ~12in per standard notch (deltaY 100), clamped so high-resolution
+    // wheels / trackpads with large or rapid deltas can't rocket the wall.
+    const dz = Math.max(-12, Math.min(12, -e.deltaY * 0.12));
     wallGroup.position.z += dz;
     if (window.__syncWallPlatform) window.__syncWallPlatform('wall');
     const aw = state.walls.find(w => w.id === activeContextWallId);
@@ -7477,7 +7482,10 @@ overlay.addEventListener('mousemove', e => {
 
     raycaster.setFromCamera(mouse, camera);
     if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
-        wallGroup.position.copy(dragIntersect.sub(dragOffset));
+        // Apply only X/Y of the drag; depth (Z) is scroll-controlled.
+        const p = dragIntersect.sub(dragOffset);
+        wallGroup.position.x = p.x;
+        wallGroup.position.y = p.y;
         // Attached stage deck follows the wall (and re-imposes platform lift)
         if (window.__syncWallPlatform) window.__syncWallPlatform('wall');
         // Record as this wall's custom position so the auto-arranger leaves
