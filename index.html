@@ -2794,48 +2794,49 @@ function selectWall(wallId) {
 }
 
 function arrangeWalls() {
-    /* Walls the user has positioned by hand (wall.pos set via Move mode)
-       keep their custom position; the auto-arranger only slots walls that
-       haven't been moved. Center (with the wall active) clears wall.pos to
-       return a wall to its auto slot. */
-    if (state.walls.length <= 1) {
-        const wall = state.walls[0];
-        const ctx = wallContextMap.get(wall?.id);
-        if (ctx) {
-            if (wall && wall.pos) ctx.group.position.set(wall.pos.x, wall.pos.y, wall.pos.z);
-            else ctx.group.position.set(0, 0, 0);
-        }
-        return;
-    }
+    /* Standalone walls: every wall owns its position (wall.pos) and ALL
+       manipulation goes through the wall object. A wall without a position
+       gets a one-time default here — the first wall at the origin, each
+       later wall to the right of the current rightmost wall and bottom-
+       aligned with the first — and from then on nothing in this function
+       ever moves a wall again. Resizing, reshaping, or moving one wall can
+       never reposition another. */
     const saved = activeContextWallId;
-    const infos = [];
-    let totalW = 0;
-    let maxH = 0;
+
+    // Measure every wall and find the rightmost edge of positioned walls
+    let rightmost = -Infinity;
+    let firstBottom = null;
+    const dims = new Map();
     for (const wall of state.walls) {
         activateWallContext(wall.id);
         const b = wallBounds();
         const d = wallDims();
-        infos.push({ id: wall.id, w: b.w, h: d.totalH, pos: wall.pos || null });
-        totalW += b.w;
-        maxH = Math.max(maxH, d.totalH);
-    }
-    totalW += (state.walls.length - 1) * WALL_GAP_IN;
-    let x = -totalW / 2;
-    for (const info of infos) {
-        const ctx = wallContextMap.get(info.id);
-        if (ctx) {
-            if (info.pos) {
-                ctx.group.position.set(info.pos.x, info.pos.y, info.pos.z);
-            } else {
-                ctx.group.position.x = x + info.w / 2;
-                // Bottom-align: shift shorter walls down so all bottoms are at the same Y
-                ctx.group.position.y = -(maxH - info.h) / 2;
-                ctx.group.position.z = 0;
-            }
+        dims.set(wall.id, { w: b.w, h: d.totalH });
+        if (wall.pos) rightmost = Math.max(rightmost, wall.pos.x + b.w / 2);
+        if (firstBottom === null) {
+            firstBottom = (wall.pos ? wall.pos.y : 0) - d.totalH / 2;
         }
-        x += info.w + WALL_GAP_IN;
     }
-    activateWallContext(saved);
+
+    for (const wall of state.walls) {
+        const dm = dims.get(wall.id);
+        if (!wall.pos) {
+            if (!isFinite(rightmost)) {
+                wall.pos = { x: 0, y: 0, z: 0 };            // first wall
+            } else {
+                wall.pos = {                                 // next free slot right
+                    x: rightmost + WALL_GAP_IN + dm.w / 2,
+                    y: (firstBottom !== null) ? firstBottom + dm.h / 2 : 0,
+                    z: 0,
+                };
+            }
+            rightmost = wall.pos.x + dm.w / 2;
+        }
+        const ctx = wallContextMap.get(wall.id);
+        if (ctx) ctx.group.position.set(wall.pos.x, wall.pos.y, wall.pos.z);
+    }
+
+    if (saved) activateWallContext(saved);
     if (isRecording) buildRecordOverlays();
     markDirty();
 }
@@ -7337,10 +7338,10 @@ function updatePositionInfo() {
 moveToggleBtn.addEventListener('click', () => setMoveMode(!state.moveMode));
 
 centerBtn.addEventListener('click', () => {
-    // Purposeful reset: clear this wall's custom position so the
-    // auto-arranger re-slots it (origin for a single wall).
+    // Purposeful reset on the standalone wall object: return the ACTIVE
+    // wall to the origin. Other walls are untouched.
     const aw = state.walls.find(w => w.id === activeContextWallId);
-    if (aw) aw.pos = null;
+    if (aw) aw.pos = { x: 0, y: 0, z: 0 };
     arrangeWalls();
     if (window.__syncWallPlatform) window.__syncWallPlatform('wall');
     controls.target.copy(wallGroup.position);
