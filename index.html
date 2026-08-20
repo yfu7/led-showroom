@@ -2213,8 +2213,33 @@ function addWall() {
         // and synthesized on demand from cols×rows (see wallFilledCells).
         shape: { mode: 'rect', cells: null },
     };
+    // Adding a wall must not disturb walls already on stage: freeze every
+    // existing wall at its current world position (making it independently
+    // movable/pinned), then place the new wall to the right of the current
+    // rightmost extent as its own separately movable element.
+    let newX = 0;
+    if (state.walls.length > 0) {
+        let rightmost = -Infinity;
+        const savedCtx = activeContextWallId;
+        for (const w of state.walls) {
+            const ctx = wallContextMap.get(w.id);
+            if (!ctx) continue;
+            if (!w.pos) {
+                w.pos = { x: ctx.group.position.x, y: ctx.group.position.y, z: ctx.group.position.z };
+            }
+            activateWallContext(w.id);
+            const b = wallBounds();
+            rightmost = Math.max(rightmost, w.pos.x + b.w / 2);
+        }
+        if (savedCtx) activateWallContext(savedCtx);
+        // New wall is 5 cols by default — half-width from panel size
+        const newHalfW = (5 * PANEL_W_IN + 4 * PANEL_GAP_IN) / 2;
+        newX = (isFinite(rightmost) ? rightmost : 0) + WALL_GAP_IN + newHalfW;
+    }
+
     state.walls.push(wall);
     wallContextMap.set(id, createWallRenderContext());
+    if (state.walls.length > 1) wall.pos = { x: newX, y: 0, z: 0 };
 
     // Activate this wall so buildWall operates on it
     activateWallContext(id);
@@ -2222,6 +2247,7 @@ function addWall() {
     buildWall();
     arrangeWalls();
     renderWallList();
+    if (window.__schedulePersistView) window.__schedulePersistView();
     return wall;
 }
 
