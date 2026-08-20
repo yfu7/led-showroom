@@ -2835,7 +2835,8 @@ function arrangeWalls() {
         const ctx = wallContextMap.get(wall.id);
         if (ctx) {
             ctx.group.position.set(wall.pos.x, wall.pos.y, wall.pos.z);
-            ctx.group.rotation.set(0, wall.rotY || 0, 0);
+            ctx.group.rotation.set(wall.rotX || 0, wall.rotY || 0, 0);
+            ctx.group.scale.setScalar(wall.scale || 1);
         }
     }
 
@@ -4501,7 +4502,7 @@ function fitCameraToWall(force) {
     camera.position.set(b.cx, b.cy || 0, dist);
     for (const w of state.walls) {
         const c = wallContextMap.get(w.id);
-        if (c) c.group.rotation.set(0, w.rotY || 0, 0);   // clear auto-rotate, keep wall yaw
+        if (c) c.group.rotation.set(w.rotX || 0, w.rotY || 0, 0);   // clear auto-rotate, keep wall pitch/yaw
     }
     controls.update();
 }
@@ -4520,7 +4521,7 @@ function setCameraView(view) {
     controls.target.set(b.cx, cy, 0);
     for (const w of state.walls) {
         const c = wallContextMap.get(w.id);
-        if (c) c.group.rotation.set(0, w.rotY || 0, 0);   // clear auto-rotate, keep wall yaw
+        if (c) c.group.rotation.set(w.rotX || 0, w.rotY || 0, 0);   // clear auto-rotate, keep wall pitch/yaw
     }
 
     if (view === 'front') {
@@ -7343,7 +7344,7 @@ function setMoveMode(on) {
     overlay.classList.toggle('move-mode', on);
     moveToggleBtn.classList.toggle('active', on);
     hint.textContent = on
-        ? 'Drag to move the checked walls (blue) \u00b7 Middle-drag to rotate them \u00b7 Scroll to zoom'
+        ? 'Checked walls (blue): drag to move \u00b7 middle-drag to rotate (yaw/pitch) \u00b7 scroll to zoom the wall'
         : 'Drag to pan \u00b7 Scroll to zoom \u00b7 Middle-drag to rotate';
 }
 
@@ -7461,10 +7462,11 @@ overlay.addEventListener('mousedown', e => {
 });
 
 /* Move mode: MIDDLE-drag (scroll-wheel button) rotates the checked walls
-   around their own Y axis — each wall spins in place on the wall object
-   (wall.rotY), horizontal drag distance sets the angle. */
+   in place on the wall object — horizontal drag = yaw (wall.rotY),
+   vertical drag = pitch (wall.rotX). */
 let _rotTargets = null;
 let _rotStartX = 0;
+let _rotStartY = 0;
 
 overlay.addEventListener('mousedown', e => {
     if (!state.moveMode || e.button !== 1) return;
@@ -7476,18 +7478,22 @@ overlay.addEventListener('mousedown', e => {
         : state.walls.filter(w => w.id === activeContextWallId);
     _rotTargets = targets.map(w => {
         const ctx = wallContextMap.get(w.id);
-        return ctx ? { wall: w, group: ctx.group, start: (w.rotY || 0) } : null;
+        return ctx ? { wall: w, group: ctx.group, startY: (w.rotY || 0), startX: (w.rotX || 0) } : null;
     }).filter(Boolean);
     _rotStartX = e.clientX;
+    _rotStartY = e.clientY;
 });
 
 overlay.addEventListener('mousemove', e => {
     if (!_rotTargets) return;
     if ((e.buttons & 4) === 0) { _rotTargets = null; return; }
-    const d = (e.clientX - _rotStartX) * 0.005;   // rad per px of horizontal drag
+    const dYaw = (e.clientX - _rotStartX) * 0.005;    // rad per px, horizontal
+    const dPitch = (e.clientY - _rotStartY) * 0.005;  // rad per px, vertical
+    const PITCH_MAX = Math.PI / 2 - 0.05;             // keep short of vertical flip
     for (const t of _rotTargets) {
-        t.wall.rotY = t.start + d;
-        t.group.rotation.y = t.wall.rotY;
+        t.wall.rotY = t.startY + dYaw;
+        t.wall.rotX = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, t.startX + dPitch));
+        t.group.rotation.set(t.wall.rotX, t.wall.rotY, 0);
     }
     if (_rotTargets.some(t => t.wall.id === activeContextWallId) && window.__syncWallPlatform) {
         window.__syncWallPlatform('wall');
@@ -7501,6 +7507,28 @@ window.addEventListener('mouseup', e => {
         if (window.__schedulePersistView) window.__schedulePersistView();
     }
 });
+
+/* Move mode: SCROLL zooms (scales) the checked walls — per-wall zoom for
+   proportion-matching against a backdrop. Capture-phase so OrbitControls'
+   camera zoom stays out of it while Move is active; normal camera zoom
+   returns when Move is toggled off. */
+overlay.addEventListener('wheel', e => {
+    if (!state.moveMode) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const factor = Math.exp(-Math.max(-300, Math.min(300, e.deltaY)) * 0.001);
+    const checked = state.walls.filter(w => w.moveChecked);
+    const targets = checked.length > 0
+        ? checked
+        : state.walls.filter(w => w.id === activeContextWallId);
+    for (const w of targets) {
+        w.scale = Math.max(0.1, Math.min(10, (w.scale || 1) * factor));
+        const ctx = wallContextMap.get(w.id);
+        if (ctx) ctx.group.scale.setScalar(w.scale);
+    }
+    markDirty();
+    if (window.__schedulePersistView) window.__schedulePersistView();
+}, { passive: false, capture: true });
 
 overlay.addEventListener('mousemove', e => {
     if (!isDragging) return;
@@ -8733,7 +8761,12 @@ function persistViewState() {
             fov: camera.fov,
             lock: !!window.__viewLocked,
             userView: !!window.__userViewDirty,
-            walls: state.walls.map(w => w.pos ? { x: CL(w.pos.x), y: CL(w.pos.y), z: CL(w.pos.z), r: +((w.rotY || 0).toFixed(4)) } : null),
+            walls: state.walls.map(w => w.pos ? {
+                x: CL(w.pos.x), y: CL(w.pos.y), z: CL(w.pos.z),
+                r: +((w.rotY || 0).toFixed(4)),
+                rx: +((w.rotX || 0).toFixed(4)),
+                s: +((w.scale || 1).toFixed(3)),
+            } : null),
         }));
     } catch (_) { /* storage full/blocked — persistence is best-effort */ }
 }
@@ -8757,6 +8790,8 @@ window.__schedulePersistView = () => {
             if (p && state.walls[i] && [p.x, p.y, p.z].every(sane)) {
                 state.walls[i].pos = { x: +p.x, y: +p.y, z: +p.z };
                 if (isFinite(p.r) && Math.abs(p.r) < 100) state.walls[i].rotY = +p.r;
+                if (isFinite(p.rx) && Math.abs(p.rx) < 2) state.walls[i].rotX = +p.rx;
+                if (isFinite(p.s) && p.s >= 0.1 && p.s <= 10) state.walls[i].scale = +p.s;
                 anyPos = true;
             }
         });
