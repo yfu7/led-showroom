@@ -705,6 +705,11 @@
             transition: width 0.4s;
         }
 
+        .gizmo-modes { display: inline-flex; gap: 4px; }
+        .gizmo-mode-btn { min-width: 34px; font-size: 15px; padding: 6px 8px; }
+        .gizmo-mode-btn.active { background: #1e3a5f; border-color: #3b82f6; color: #93c5fd; }
+        #measureToggle.active { background: #4a3a10; border-color: #eab308; color: #fde047; }
+
         /* Perspective calibration overlay */
         .persp-calib {
             position: absolute;
@@ -1829,6 +1834,16 @@
                 <span class="slider"></span>
             </label>
         </div>
+        <div class="vs-dims-row hidden" id="perspHeightRow">
+            <div class="vs-dim">
+                <span class="cw-label" title="Height of the camera that took the photo, above the venue floor — pins the solved perspective to real scale">Camera height (in)</span>
+                <input type="number" id="perspCamHeight" value="60" min="6" max="480" step="1">
+            </div>
+            <div class="vs-dim">
+                <span class="cw-label" title="Horizontal distance from the camera to the world origin (where the wall starts)">Camera distance (in)</span>
+                <input type="number" id="perspCamDist" value="300" min="12" max="3000" step="6">
+            </div>
+        </div>
         <button class="venue-clear hidden" id="venueClearBtn">Clear Background</button>
     </div>
 
@@ -2063,12 +2078,18 @@
         <button class="view-btn" id="viewFront">Front</button>
         <button class="view-btn" id="view34">3/4</button>
         <button class="view-btn" id="viewReset">Reset</button>
-        <button class="view-btn" id="moveToggle" title="Move the checked walls (blue) by dragging">Move</button>
+        <button class="view-btn" id="moveToggle" title="Transform the checked walls (blue) with the gizmo — W move, E rotate, R scale">Move</button>
+        <span class="gizmo-modes" id="gizmoModes" style="display:none">
+            <button class="view-btn gizmo-mode-btn active" data-gmode="translate" title="Move along axes (W)">&#x2725;</button>
+            <button class="view-btn gizmo-mode-btn" data-gmode="rotate" title="Rotate (E)">&#x27f3;</button>
+            <button class="view-btn gizmo-mode-btn" data-gmode="scale" title="Scale (R)">&#x2922;</button>
+        </span>
+        <button class="view-btn" id="measureToggle" title="Measure: click two points in the scene; Esc clears all measurements">Measure</button>
         <button class="view-btn" id="dragContentToggle">Drag Content</button>
         <button class="view-btn" id="centerBtn">Center</button>
         <button class="view-btn" id="saveImageBtn">Save Image</button>
         <button class="view-btn" id="recordBtn">Record</button>
-        <div class="dist-meter" id="distMeter" title="Distance to wall — click to set">
+        <div class="dist-meter" id="distMeter" title="Distance to the selected wall's screen — click to set">
             <span class="dist-icon">&#x1f4cf;</span>
             <span id="distValue">--</span>
             <span class="dist-ref" id="distRef"></span>
@@ -2108,6 +2129,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 
@@ -2839,6 +2861,8 @@ function selectWall(wallId) {
     activateWallContext(wallId);
     syncUIFromState();
     renderWallList();
+    // Gizmo follows the active wall while Move mode is on
+    if (state.moveMode && window.__gizmoAttach) window.__gizmoAttach();
 }
 
 function arrangeWalls() {
@@ -2883,7 +2907,7 @@ function arrangeWalls() {
         const ctx = wallContextMap.get(wall.id);
         if (ctx) {
             ctx.group.position.set(wall.pos.x, wall.pos.y, wall.pos.z);
-            ctx.group.rotation.set(wall.rotX || 0, wall.rotY || 0, 0);
+            ctx.group.rotation.set(wall.rotX || 0, wall.rotY || 0, wall.rotZ || 0);
             ctx.group.scale.setScalar(wall.scale || 1);
         }
     }
@@ -3592,9 +3616,25 @@ let _gridAutoVisible = false;    // tracks whether grid is currently auto-shown
 
 let _skipControlsUpdate = false;
 
-/* Set camera to a specific distance from the wall (in inches, matching panel X/Y scale).
-   Simulates a person viewing the wall at that distance. */
+/* Set camera to a specific distance from the SELECTED wall's plane (in
+   inches). Moves the camera along its line to the wall center so the
+   perpendicular plane distance becomes the requested value. */
 function setDistanceToWall(inches) {
+    const ctx = wallContextMap.get(activeContextWallId);
+    if (ctx) {
+        const cur = distanceToSelectedWall();
+        if (cur > 0.5) {
+            const wallCenter = ctx.group.position;
+            const dir = new THREE.Vector3().subVectors(camera.position, wallCenter);
+            dir.multiplyScalar(inches / cur);
+            camera.position.copy(wallCenter).add(dir);
+            camera.lookAt(controls.target);
+            _skipControlsUpdate = true;
+            _prevDistIn = -1;
+            markDirty();
+            return;
+        }
+    }
     const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
     camera.position.copy(controls.target).addScaledVector(dir, inches);
     camera.lookAt(controls.target);
@@ -3603,18 +3643,38 @@ function setDistanceToWall(inches) {
     markDirty();
 }
 
+/* Distance from the camera to the SELECTED wall's screen plane, in world
+   inches — respects the wall's position, rotation, and scale, so with
+   multiple walls the meter (and the pixel-grid threshold) is tied to the
+   wall you're working on, not the canvas as a whole. */
+const _dtwLocal = new THREE.Vector3();
+function distanceToSelectedWall() {
+    const ctx = wallContextMap.get(activeContextWallId);
+    const w = state.walls.find(x => x.id === activeContextWallId);
+    if (!ctx || !w) return camera.position.distanceTo(controls.target);
+    ctx.group.updateMatrixWorld();
+    _dtwLocal.copy(camera.position);
+    ctx.group.worldToLocal(_dtwLocal);
+    const s = w.scale || 1;
+    // Perpendicular distance to the panel front face (local z = +depth/2)
+    return Math.max(0, (Math.abs(_dtwLocal.z) - PANEL_D_IN / 2) * s);
+}
+window.__distToWall = distanceToSelectedWall;
+
 function updateDistMeter() {
-    const camDist = camera.position.distanceTo(controls.target);  // inches (same scale as panel X/Y)
+    const camDist = distanceToSelectedWall();
     const roundedIn = camDist < 120 ? Math.round(camDist * 10) / 10 : Math.round(camDist);
     if (roundedIn === _prevDistIn) return;  // no change — skip DOM write
     _prevDistIn = roundedIn;
     const el = document.getElementById('distValue');
     const ref = document.getElementById('distRef');
     const meter = document.getElementById('distMeter');
-    // Primary: inches (matches panel X/Y scale), secondary: feet
+    const w = state.walls.find(x => x.id === activeContextWallId);
+    // Primary: inches (matches panel X/Y scale), secondary: feet + wall name
     const ft = camDist / 12;
     el.textContent = roundedIn + '"';
-    ref.textContent = '(' + (ft < 10 ? ft.toFixed(1) : Math.round(ft)) + "')";
+    ref.textContent = '(' + (ft < 10 ? ft.toFixed(1) : Math.round(ft)) + "')" +
+        (state.walls.length > 1 && w ? ' · ' + w.name : '');
     // Highlight green when within grid threshold
     meter.classList.toggle('close', camDist <= GRID_DIST_THRESHOLD);
 }
@@ -3629,7 +3689,7 @@ function checkGridAutoVisibility() {
         if (_gridAutoVisible) { _removeAllGrids(); _gridAutoVisible = false; }
         return;
     }
-    const camDist = camera.position.distanceTo(controls.target);
+    const camDist = distanceToSelectedWall();
     const fadeStart = GRID_DIST_THRESHOLD + GRID_FADE_BAND_IN;  // first ft where grid begins to appear
     const inBand = camDist <= fadeStart;
     // Linear fade: 0 at far edge of band, 1 at the threshold and closer
@@ -4550,7 +4610,7 @@ function fitCameraToWall(force) {
     camera.position.set(b.cx, b.cy || 0, dist);
     for (const w of state.walls) {
         const c = wallContextMap.get(w.id);
-        if (c) c.group.rotation.set(w.rotX || 0, w.rotY || 0, 0);   // clear auto-rotate, keep wall pitch/yaw
+        if (c) c.group.rotation.set(w.rotX || 0, w.rotY || 0, w.rotZ || 0);   // clear auto-rotate, keep wall orientation
     }
     controls.update();
 }
@@ -4569,7 +4629,7 @@ function setCameraView(view) {
     controls.target.set(b.cx, cy, 0);
     for (const w of state.walls) {
         const c = wallContextMap.get(w.id);
-        if (c) c.group.rotation.set(w.rotX || 0, w.rotY || 0, 0);   // clear auto-rotate, keep wall pitch/yaw
+        if (c) c.group.rotation.set(w.rotX || 0, w.rotY || 0, w.rotZ || 0);   // clear auto-rotate, keep wall orientation
     }
 
     if (view === 'front') {
@@ -7647,8 +7707,9 @@ function setMoveMode(on) {
     overlay.classList.toggle('move-mode', on);
     moveToggleBtn.classList.toggle('active', on);
     hint.textContent = on
-        ? 'Checked walls (blue): drag to move \u00b7 middle-drag to rotate (yaw/pitch) \u00b7 scroll to zoom the wall'
+        ? 'Gizmo: drag arrows/rings to transform checked walls \u00b7 W move \u00b7 E rotate \u00b7 R scale \u00b7 scroll zooms the wall'
         : 'Drag to pan \u00b7 Scroll to zoom \u00b7 Middle-drag to rotate';
+    if (window.__gizmoSync) window.__gizmoSync(on);
 }
 
 function updatePositionInfo() {
@@ -7742,6 +7803,9 @@ const _moveStartHit = new THREE.Vector3();
 
 overlay.addEventListener('mousedown', e => {
     if (!state.moveMode || e.button !== 0) return;
+    // Gizmo handles take priority: when the pointer is on an arrow/ring,
+    // TransformControls owns the drag and the free-drag stays out.
+    if (window.__gizmoBusy && window.__gizmoBusy()) return;
     e.stopPropagation();
     updateMouseNDC(e);
 
@@ -7803,7 +7867,7 @@ overlay.addEventListener('mousemove', e => {
     for (const t of _rotTargets) {
         t.wall.rotY = t.startY + dYaw;
         t.wall.rotX = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, t.startX + dPitch));
-        t.group.rotation.set(t.wall.rotX, t.wall.rotY, 0);
+        t.group.rotation.set(t.wall.rotX, t.wall.rotY, t.wall.rotZ || 0);
     }
     if (_rotTargets.some(t => t.wall.id === activeContextWallId) && window.__syncWallPlatform) {
         window.__syncWallPlatform('wall');
@@ -9079,6 +9143,7 @@ function persistViewState() {
                 x: CL(w.pos.x), y: CL(w.pos.y), z: CL(w.pos.z),
                 r: +((w.rotY || 0).toFixed(4)),
                 rx: +((w.rotX || 0).toFixed(4)),
+                rz: +((w.rotZ || 0).toFixed(4)),
                 s: +((w.scale || 1).toFixed(3)),
             } : null),
         }));
@@ -9105,6 +9170,7 @@ window.__schedulePersistView = () => {
                 state.walls[i].pos = { x: +p.x, y: +p.y, z: +p.z };
                 if (isFinite(p.r) && Math.abs(p.r) < 100) state.walls[i].rotY = +p.r;
                 if (isFinite(p.rx) && Math.abs(p.rx) < 2) state.walls[i].rotX = +p.rx;
+                if (isFinite(p.rz) && Math.abs(p.rz) < 7) state.walls[i].rotZ = +p.rz;
                 if (isFinite(p.s) && p.s >= 0.1 && p.s <= 10) state.walls[i].scale = +p.s;
                 anyPos = true;
             }
@@ -9145,6 +9211,274 @@ window.__schedulePersistView = () => {
 // change (user or programmatic) refreshes the stored state.
 controls.addEventListener('start', () => { window.__userViewDirty = true; });
 controls.addEventListener('change', () => { if (window.__schedulePersistView) window.__schedulePersistView(); });
+
+/* ── Gizmo control engine (3D-software-style transforms) ─────────────────
+   A TransformControls gizmo — the arrows / rings / boxes from standard 3D
+   modeling tools — attaches to the active wall while Move mode is on.
+   Drag an axis arrow to move precisely along X, Y, or Z; a plane square
+   to slide in that plane; rings to rotate; boxes to scale. Deltas apply
+   to every checked wall so multi-wall moves stay grouped. W/E/R switch
+   modes (translate / rotate / scale), matching common 3D editors. */
+let gizmo = null;
+let _gizmoStart = null;   // wallId -> { pos, rot, scale } at drag start
+
+function gizmoTargets() {
+    const checked = state.walls.filter(w => w.moveChecked);
+    return checked.length ? checked : state.walls.filter(w => w.id === activeContextWallId);
+}
+
+function syncWallsFromGroups(persist) {
+    for (const w of gizmoTargets()) {
+        const ctx = wallContextMap.get(w.id);
+        if (!ctx) continue;
+        const s = Math.max(0.1, Math.min(10, ctx.group.scale.x || 1));
+        ctx.group.scale.setScalar(s);   // walls scale uniformly
+        w.pos = { x: ctx.group.position.x, y: ctx.group.position.y, z: ctx.group.position.z };
+        w.rotX = ctx.group.rotation.x;
+        w.rotY = ctx.group.rotation.y;
+        w.rotZ = ctx.group.rotation.z;
+        w.scale = s;
+    }
+    if (window.__syncWallPlatform) window.__syncWallPlatform('wall');
+    if (persist && window.__schedulePersistView) window.__schedulePersistView();
+}
+
+function applyGizmoDelta() {
+    const activeCtx = wallContextMap.get(activeContextWallId);
+    if (!activeCtx || !_gizmoStart) { syncWallsFromGroups(false); return; }
+    const s0 = _gizmoStart.get(activeContextWallId);
+    if (!s0) { syncWallsFromGroups(false); return; }
+    const g = activeCtx.group;
+    const dPos = g.position.clone().sub(s0.pos);
+    const dRx = g.rotation.x - s0.rot.x;
+    const dRy = g.rotation.y - s0.rot.y;
+    const dRz = g.rotation.z - s0.rot.z;
+    const dS = s0.scale ? (g.scale.x / s0.scale) : 1;
+    for (const w of gizmoTargets()) {
+        if (w.id === activeContextWallId) continue;
+        const st = _gizmoStart.get(w.id);
+        const ctx = wallContextMap.get(w.id);
+        if (!st || !ctx) continue;
+        ctx.group.position.copy(st.pos).add(dPos);
+        ctx.group.rotation.set(st.rot.x + dRx, st.rot.y + dRy, st.rot.z + dRz);
+        ctx.group.scale.setScalar(Math.max(0.1, Math.min(10, st.scale * dS)));
+    }
+    syncWallsFromGroups(false);
+}
+
+function ensureGizmo() {
+    if (gizmo) return gizmo;
+    gizmo = new TransformControls(camera, overlay);
+    gizmo.setSize(0.85);
+    gizmo.addEventListener('dragging-changed', e => {
+        if (e.value) {
+            controls.enabled = false;
+            _gizmoStart = new Map();
+            for (const w of gizmoTargets()) {
+                const ctx = wallContextMap.get(w.id);
+                if (ctx) _gizmoStart.set(w.id, {
+                    pos: ctx.group.position.clone(),
+                    rot: ctx.group.rotation.clone(),
+                    scale: ctx.group.scale.x,
+                });
+            }
+        } else {
+            controls.enabled = !window.__viewLocked;
+            _gizmoStart = null;
+            syncWallsFromGroups(true);
+        }
+        markDirty();
+    });
+    gizmo.addEventListener('objectChange', () => { applyGizmoDelta(); markDirty(); });
+    scene.add(gizmo);
+    window.__gizmo = gizmo;
+    return gizmo;
+}
+
+function setGizmoMode(m) {
+    ensureGizmo().setMode(m);
+    document.querySelectorAll('.gizmo-mode-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.gmode === m));
+    markDirty();
+}
+
+window.__gizmoAttach = () => {
+    const ctx = wallContextMap.get(activeContextWallId);
+    if (!ctx) return;
+    ensureGizmo().attach(ctx.group);
+    document.getElementById('gizmoModes').style.display = '';
+    markDirty();
+};
+window.__gizmoSync = on => {
+    if (on) window.__gizmoAttach();
+    else {
+        if (gizmo) gizmo.detach();
+        document.getElementById('gizmoModes').style.display = 'none';
+        markDirty();
+    }
+};
+window.__gizmoBusy = () => !!(gizmo && (gizmo.dragging || gizmo.axis));
+
+document.querySelectorAll('.gizmo-mode-btn').forEach(b =>
+    b.addEventListener('click', () => setGizmoMode(b.dataset.gmode)));
+
+window.addEventListener('keydown', e => {
+    if (!state.moveMode) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+    const k = e.key.toLowerCase();
+    if (k === 'w') setGizmoMode('translate');
+    else if (k === 'e') setGizmoMode('rotate');
+    else if (k === 'r') setGizmoMode('scale');
+});
+
+// Gizmo hover highlights need a render even before any orbit change
+overlay.addEventListener('pointermove', () => {
+    if (state.moveMode && gizmo && gizmo.object) markDirty();
+});
+
+/* ── Environment measuring engine: point-to-point Measure tool ───────────
+   Click two points on anything in the scene (panels, decks, venue-space
+   surfaces, or the floor plane) to draw a labeled tape measure. Multiple
+   measurements accumulate; Esc clears them all. */
+const measure = { active: false, first: null, items: [] };
+window.__measure = measure;
+const _measMarkerGeom = new THREE.SphereGeometry(1.4, 12, 12);
+const _measMarkerMat = new THREE.MeshBasicMaterial({ color: 0xeab308, depthTest: false });
+const _measLineMat = new THREE.LineBasicMaterial({ color: 0xeab308, depthTest: false, transparent: true, opacity: 0.95 });
+
+function measureRaycastPoint(e) {
+    updateMouseNDC(e);
+    raycaster.setFromCamera(mouse, camera);
+    const targets = [];
+    for (const ctx of wallContextMap.values()) {
+        if (ctx.panelMeshes) targets.push(...ctx.panelMeshes);
+    }
+    targets.push(...panelMeshes);
+    if (typeof stageMeshes !== 'undefined' && stageMeshes) targets.push(...stageMeshes);
+    if (venueSpaceGroup) venueSpaceGroup.traverse(o => { if (o.isMesh) targets.push(o); });
+    const hits = raycaster.intersectObjects(targets);
+    if (hits.length > 0) return hits[0].point.clone();
+    // Fallback: the floor plane (bottom of the selected wall)
+    const d = wallDims();
+    const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), d.totalH / 2);
+    const p = new THREE.Vector3();
+    return raycaster.ray.intersectPlane(floor, p) ? p.clone() : null;
+}
+
+function measureAddMarker(p) {
+    const m = new THREE.Mesh(_measMarkerGeom, _measMarkerMat);
+    m.renderOrder = 1002;
+    m.position.copy(p);
+    scene.add(m);
+    return m;
+}
+
+function measureCommit(a, b) {
+    const geom = new THREE.BufferGeometry().setFromPoints([a, b]);
+    const line = new THREE.Line(geom, _measLineMat);
+    line.renderOrder = 1001;
+    scene.add(line);
+    const distIn = a.distanceTo(b);
+    const label = createDimSprite(
+        (distIn < 120 ? distIn.toFixed(1) : Math.round(distIn)) + '" (' + (distIn / 12).toFixed(1) + "')");
+    label.position.copy(a).add(b).multiplyScalar(0.5);
+    label.position.y += 4;
+    scene.add(label);
+    return { line, label };
+}
+
+function measureClearAll() {
+    for (const it of measure.items) {
+        for (const o of [it.line, it.label, it.ma, it.mb]) {
+            if (!o) continue;
+            scene.remove(o);
+            if (o.geometry && o.geometry !== _measMarkerGeom) o.geometry.dispose();
+            if (o.isSprite) { o.material.map.dispose(); o.material.dispose(); }
+        }
+    }
+    measure.items = [];
+    if (measure.first) { scene.remove(measure.first.marker); measure.first = null; }
+    markDirty();
+}
+
+const measureBtn = document.getElementById('measureToggle');
+let _measSavedLeft = null;   // OrbitControls LEFT action to restore after measuring
+measureBtn.addEventListener('click', () => {
+    measure.active = !measure.active;
+    measureBtn.classList.toggle('active', measure.active);
+    overlay.style.cursor = measure.active ? 'crosshair' : '';
+    // Left-click must place points, not orbit/pan — park the LEFT mouse
+    // action while measuring (middle/right navigation stays live).
+    if (measure.active) {
+        _measSavedLeft = controls.mouseButtons.LEFT;
+        controls.mouseButtons.LEFT = -1;
+        if (gizmo) gizmo.enabled = false;
+    } else {
+        if (_measSavedLeft !== null) controls.mouseButtons.LEFT = _measSavedLeft;
+        _measSavedLeft = null;
+        if (gizmo) gizmo.enabled = true;
+    }
+    if (measure.first) { scene.remove(measure.first.marker); measure.first = null; markDirty(); }
+});
+
+// Capture on document so this runs before every overlay-level handler
+// (wall drag, selection) — those are earlier registrations on the target.
+function measureIntercept(e) {
+    if (!measure.active || e.target !== overlay) return;
+    if (e.type !== 'click' && e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    if (e.type !== 'mousedown') return;
+    const p = measureRaycastPoint(e);
+    if (!p) return;
+    if (!measure.first) {
+        measure.first = { point: p, marker: measureAddMarker(p) };
+    } else {
+        const a = measure.first.point;
+        const ma = measure.first.marker;
+        measure.first = null;
+        const mb = measureAddMarker(p);
+        const { line, label } = measureCommit(a, p);
+        measure.items.push({ line, label, ma, mb });
+    }
+    markDirty();
+}
+document.addEventListener('mousedown', measureIntercept, true);
+document.addEventListener('click', measureIntercept, true);
+
+window.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && (measure.active || measure.items.length)) measureClearAll();
+});
+
+/* ── Perspective scale reinforcement: known camera measurements ──────────
+   After a sightline solve, entering the real camera height (above the
+   venue floor) and its distance to the scene origin pins the solved
+   perspective to absolute scale — panels then read at true size. */
+function applyPerspCamMeasurements() {
+    if (!window.__perspMatched) return;
+    const h = parseFloat(document.getElementById('perspCamHeight').value);
+    const dist = parseFloat(document.getElementById('perspCamDist').value);
+    const d = wallDims();
+    const floorY = -d.totalH / 2;
+    if (isFinite(h) && h > 0) camera.position.y = floorY + h;
+    if (isFinite(dist) && dist > 0) {
+        const dxz = Math.hypot(camera.position.x, camera.position.z);
+        if (dxz > 1) {
+            const k = dist / dxz;
+            camera.position.x *= k;
+            camera.position.z *= k;
+        } else {
+            camera.position.z = dist;
+        }
+    }
+    _prevDistIn = -1;
+    markDirty();
+    if (window.__schedulePersistView) window.__schedulePersistView();
+}
+document.getElementById('perspCamHeight').addEventListener('change', applyPerspCamMeasurements);
+document.getElementById('perspCamDist').addEventListener('change', applyPerspCamMeasurements);
+window.__applyPerspCamMeasurements = applyPerspCamMeasurements;
 
 /* ── GPU mode toggle + high-performance sub-options ──────────────────────
    Only exposed on dual-GPU systems. The main toggle picks discrete vs
