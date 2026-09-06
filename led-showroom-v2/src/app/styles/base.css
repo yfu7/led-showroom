@@ -1,0 +1,76 @@
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  font-family: var(--font-ui);
+  font-size: var(--fs-md);
+  font-weight: 400;
+  letter-spacing: var(--track-tight);
+  /* Manrope's ss02 is the alternate 'l' Veloxity ships with; tnum keeps figures from jittering. */
+  font-feature-settings: 'tnum' 1, 'ss02' 1;
+  color: var(--fg-0);
+  background: var(--bg-0);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  user-select: none;
+}
+button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+button { background: none; border: 0; padding: 0; cursor: pointer; }
+input, textarea { user-select: text; }
+a { color: var(--accent-text); text-decoration: none; }
+::selection { background: var(--selection); }
+svg { display: block; }
+:focus-visible { outline: 1.5px solid var(--line-focus); outline-offset: 1px; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: var(--fg-3); background-clip: padding-box; border: 2px solid transparent; }
+
+/* ───────── app shell ───────── */
+.app {
+  position: relative;
+  display: grid;
+  grid-template-rows: var(--topbar-h) 1fr var(--statusbar-h);
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    "top top top"
+    "left viewport right"
+    "status status status";
+  height: 100%;
+  background: var(--bg-0);
+  transition: grid-template-columns var(--t-med) var(--ease);
+}
+.app.presentation { grid-template-rows: 0 1fr 0; }
+.app.presentation .topbar, .app.presentation .statusbar, .app.presentation .dock { display: none; }
+
+.topbar { grid-area: top; }
+.dock { display: flex; flex-direction: column; min-height: 0; background: var(--bg-1); }
+.dock-left { grid-area: left; width: var(--left-w); border-right: 1px solid var(--line); }
+.dock-right { grid-area: right; width: var(--right-w); border-left: 1px solid var(--line); }
+.dock.collapsed { width: 0; overflow: hidden; border: 0; }
+.viewport-area { grid-area: viewport; position: relative; min-width: 0; min-height: 0; background: var(--bg-0); }
+.statusbar { grid-area: status; }
+
+.sr-viewport { position: absolute; inset: 0; }
+.sr-layer canvas { display: block; }
+.sr-input { cursor: default; }
+.sr-input.grabbing { cursor: grabbing; }
+
+/* typographic utilities */
+.label {
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.num { font-variant-numeric: tabular-nums; }
+.display { font-family: var(--font-display); font-weight: var(--display-weight); letter-spacing: var(--track-display); }
+.muted { color: var(--fg-2); }
+.dim { color: var(--fg-1); }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hidden { display: none !important; }
+.row { display: flex; align-items: center; gap: var(--sp-2); }
+.grow { flex: 1 1 auto; min-width: 0; }
+.spacer { flex: 1; }

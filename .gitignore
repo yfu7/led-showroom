@@ -4,3 +4,10 @@ node_modules/
 Thumbs.db
 
 .vercel
+
+# Claude Code: per-machine permissions and scratch worktrees, never shared.
+.claude/settings.local.json
+.claude/worktrees/
+
+# Cygwin/MSYS crash dumps from shell tooling.
+*.stackdump

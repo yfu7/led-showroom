@@ -1,0 +1,13 @@
+# Normalise text in the index; keep working copies native (Windows checkouts stay CRLF).
+* text=auto eol=lf
+
+# Binary: never diff, never munge line endings.
+*.glb    binary
+*.webp   binary
+*.png    binary
+*.jpg    binary
+*.pdf    binary
+*.STEP   binary
+*.stp    binary
+*.wasm   binary
+*.mp4    binary

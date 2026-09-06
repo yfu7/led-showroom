@@ -1,0 +1,123 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Veloxity Showroom — design tokens
+   Blue and black, 70 % Veloxity: their cyan (#28ace3) is the only colour, laid
+   on near-black blue-tinted surfaces the way their hero sits cyan LED posters
+   in a dark corridor. Manrope at light and regular weights with tight tracking,
+   pill controls, 2px borders that invert on hover, rounded trays, hairlines
+   instead of shadows.
+   30 % luxury, read modern rather than classical: no serif anywhere. The luxury
+   note is restraint — extra-light Manrope at display sizes with very tight
+   tracking, tracked uppercase micro-labels, and generous air around small type,
+   the way Aesop, Rimowa and B&O do it.
+   "Night" is the default; "Studio" is the light alternate.
+   ───────────────────────────────────────────────────────────────────────────── */
+:root {
+  /* type — one family, used from 200 to 700; the display face is the same grotesk gone light */
+  --font-ui: 'Manrope', -apple-system, 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Manrope', -apple-system, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'DM Mono', 'SF Mono', ui-monospace, Menlo, monospace;
+  /* display type is light and very tightly tracked — the modern-luxury signature */
+  --display-weight: 200;
+  --track-display: -0.045em;
+  --fs-2xs: 10.5px;
+  --fs-xs: 11.5px;
+  --fs-sm: 12.5px;
+  --fs-md: 13.5px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+  --fs-2xl: 24px;
+  --fs-3xl: 34px;
+  /* Veloxity tracks tight everywhere and reserves wide tracking for tiny labels */
+  --track-label: 0.1em;
+  --track-tight: -0.025em;
+  --track-tighter: -0.05em;
+
+  /* spacing / shape — Veloxity's 40px trays scaled to tool density */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
+  --r-xs: 6px; --r-sm: 8px; --r-md: 12px; --r-lg: 18px; --r-pill: 999px;
+  --topbar-h: 50px;
+  --statusbar-h: 28px;
+  --left-w: 292px;
+  --right-w: 328px;
+
+  /* motion — Veloxity's easing, short and flat */
+  --ease: cubic-bezier(.4, 0, .2, 1);
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --t-fast: 150ms;
+  --t-med: 200ms;
+  --t-slow: 300ms;
+
+  /* accent — Veloxity brand cyan, unmodified */
+  --accent: #28ace3;
+  --accent-strong: #1b8dbe;
+  --accent-soft: rgba(40, 172, 227, .16);
+  --accent-glow: rgba(40, 172, 227, .5);
+  --accent-text: #6cc9ef;
+  --accent-ink: #04121a;
+  --gold: #b08d57;
+  --danger: #e0574f;
+  --warn: #d9a43f;
+  --success: #47b483;
+  --axis-x: #e0574f;
+  --axis-y: #6cbf5c;
+  --axis-z: #4a8ee0;
+
+  /* Night (default) — blue-black: every surface carries a trace of the accent's hue */
+  --bg-0: #07090c;
+  --bg-1: #0d1116;
+  --bg-2: #131920;
+  --bg-3: #1a222b;
+  --bg-4: #232d38;
+  --fg-0: #eef4f9;
+  --fg-1: #aab7c4;
+  --fg-2: #7d8b9b;
+  --fg-3: #55616f;
+  --line: rgba(140, 190, 225, .1);
+  --line-strong: rgba(140, 190, 225, .22);
+  --line-focus: rgba(40, 172, 227, .65);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, .6), 0 0 0 1px rgba(140, 190, 225, .1);
+  --shadow-island: 0 4px 16px rgba(0, 0, 0, .5), 0 0 0 1px rgba(140, 190, 225, .12);
+  --glass: rgba(13, 17, 22, .84);
+  --scrim: rgba(3, 5, 8, .6);
+  --selection: rgba(40, 172, 227, .3);
+  /* Veloxity stands products on a tray that contrasts with the panel: lighter on black. */
+  --tray: #171e26;
+  color-scheme: dark;
+}
+
+/* Studio — the same system on Veloxity's white and #f2f4f7, for lit rooms and print */
+:root[data-theme="light"] {
+  --bg-0: #f2f4f7;
+  --bg-1: #ffffff;
+  --bg-2: #f7f9fb;
+  --bg-3: #eef1f5;
+  --bg-4: #e2e7ee;
+  --fg-0: #161616;
+  --fg-1: #3f4654;
+  --fg-2: #5f6980;
+  --fg-3: #9aa3b2;
+  --line: #e7ebf0;
+  --line-strong: #dddddd;
+  --line-focus: rgba(40, 172, 227, .5);
+  --accent-text: #1b8dbe;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(40, 172, 227, .12);
+  --danger: #d64545;
+  --warn: #c98a1f;
+  --success: #2f9e68;
+  --axis-x: #d05a55;
+  --axis-y: #5f9c4e;
+  --axis-z: #3f73c7;
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, .1), 0 0 0 1px rgba(0, 0, 0, .05);
+  --shadow-island: 0 4px 14px rgba(20, 30, 50, .08), 0 0 0 1px rgba(0, 0, 0, .05);
+  --glass: rgba(255, 255, 255, .82);
+  --scrim: rgba(22, 22, 22, .38);
+  --selection: rgba(40, 172, 227, .22);
+  /* darker than the white panel, exactly Veloxity's #f2f4f7 tray */
+  --tray: #f2f4f7;
+  color-scheme: light;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --t-fast: 0ms; --t-med: 0ms; --t-slow: 150ms; }
+}
