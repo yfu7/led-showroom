@@ -231,12 +231,15 @@ export function roomPosition(entities: readonly Entity[], wallFromBackIn = DEFAU
   return [d.centreX, 0, d.rearZ - wallFromBackIn];
 }
 
+/** The name a room is born with; a booth preset overwrites it with its own label. */
+export const DEFAULT_ROOM_NAME = 'Venue space';
+
 /** v1 defaults: 40 ft wide, 13 ft high, 30 ft deep; the LED wall sits 2 ft in front of the back wall. */
 export function createRoom(widthFt = 40, heightFt = 13, depthFt = 30, wallFromBackIn = DEFAULT_WALL_FROM_BACK_IN): RoomEntity {
   return {
     id: newId('room'),
     type: 'room',
-    name: 'Venue space',
+    name: DEFAULT_ROOM_NAME,
     transform: identityTransform(roomPosition([], wallFromBackIn)),
     visible: true,
     locked: false,
@@ -245,6 +248,7 @@ export function createRoom(widthFt = 40, heightFt = 13, depthFt = 30, wallFromBa
     depthIn: depthFt * 12,
     surfaces: {},
     show: { back: true, floor: true, ceiling: false, left: true, right: true },
+    outlineWalls: false,
     color: '#2a2a2e',
     opacity: 1,
   };
@@ -286,10 +290,11 @@ export interface BoothPreset {
  * ceilings run anywhere from 16 to 30+ ft and differ per venue, so modelling one is a guess that
  * says nothing useful. 8 ft is the number an exhibitor actually designs against: the standard US
  * inline back drape is 8 ft high (with 3 ft side rails over the front 5 ft), and it is the display
- * height limit for a linear booth. Putting the room's walls on that line turns them into the drape
- * datum — if an LED wall pokes above them, it is over height for an inline booth. Islands carry no
- * drape at all, but one height across the three presets keeps the reference readable, and the room
- * ceiling stays off by default so 8 ft never boxes in a taller build.
+ * height limit for a linear booth. Putting the top of the booth's corner guides on that line turns
+ * them into the drape datum — if an LED wall pokes above them, it is over height for an inline
+ * booth. Islands carry no drape at all, but one height across the three presets keeps the reference
+ * readable, and nothing is drawn at that height but a dashed line, so 8 ft never boxes in a taller
+ * build.
  */
 export const BOOTH_HEIGHT_FT = 8;
 
@@ -304,6 +309,31 @@ export function findBoothPreset(id: string): BoothPreset | undefined {
   return BOOTH_PRESETS.find(p => p.id === id);
 }
 
+/** The room fields a booth preset dictates. Everything else about the room is left alone. */
+export type BoothRoomPatch = Pick<RoomEntity, 'widthIn' | 'heightIn' | 'depthIn' | 'outlineWalls' | 'show'>;
+
+/**
+ * Size and look of a booth, as a patch any room can be given.
+ *
+ * A booth is a footprint on the show floor, not a room: outline the volume (floor face plus dashed
+ * height guides at the corners) instead of raising three solid drape walls around the build. The
+ * show flags say the same thing, so the inspector's toggles, the outliner and any future export
+ * agree with what is actually drawn rather than hiding walls in the renderer.
+ *
+ * Both entry points share this — the catalog card builds a new room from it through
+ * {@link createBoothForScene}, the Venue panel patches the room already in the scene with it — so
+ * the two can never drift into drawing different things.
+ */
+export function boothRoomPatch(preset: BoothPreset): BoothRoomPatch {
+  return {
+    widthIn: preset.widthFt * 12,
+    heightIn: preset.heightFt * 12,
+    depthIn: preset.depthFt * 12,
+    outlineWalls: true,
+    show: { back: false, floor: true, ceiling: false, left: false, right: false },
+  };
+}
+
 /**
  * A booth-sized venue room, placed against the scene exactly like {@link createRoomForScene}:
  * centred on the existing LED walls with the back wall clearing their rear face.
@@ -313,7 +343,7 @@ export function createBoothForScene(
 ): RoomEntity {
   const room = createRoomForScene(entities, preset.widthFt, preset.heightFt, preset.depthFt, wallFromBackIn);
   room.name = preset.label;
-  return room;
+  return Object.assign(room, boothRoomPatch(preset));
 }
 
 export function createDimension(a: Vec3, b: Vec3): DimensionEntity {

@@ -6,13 +6,18 @@ unit you choose), on three axes, with undo, snapping, measuring, photo-matched v
 
 ## Run locally
 
+The app is the `led-showroom-v2/` directory of the repo, so start there — v1 lives at the root and
+has its own `server.js`.
+
 ```bash
+cd led-showroom-v2
 npm install
 npm run dev          # Vite dev server on http://localhost:5173
 npm run server       # optional: proxy + splat pipeline API on http://localhost:3001 (websites on walls need it)
 ```
 
-`npm run build` type-checks and produces `dist/`. `npm run server` then serves `dist/` with the API
+`npm run build` type-checks and produces `dist/`. `npm run cad` re-converts the manufacturer STEP
+files in `../cad/` to the glTF meshes in `public/models/`. `npm run server` then serves `dist/` with the API
 on one port (`PORT=3001` by default). `npm test` runs the engine's unit tests.
 
 The splat pipeline needs `led-showroom-tools` (COLMAP and Brush) and `led-showroom-spaces` beside

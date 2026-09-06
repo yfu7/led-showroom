@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BOOTH_HEIGHT_FT, BOOTH_PRESETS, DEFAULT_WALL_FROM_BACK_IN, createBoothForScene, createLedWall, createRoom,
+  BOOTH_HEIGHT_FT, BOOTH_PRESETS, DEFAULT_ROOM_NAME, DEFAULT_WALL_FROM_BACK_IN, boothRoomPatch, createBoothForScene, createLedWall, createRoom,
   createRoomForScene, createStage, findBoothPreset, ledWallDatum, roomPosition,
 } from './defaults';
 import { IPOSTER } from '../ledwall/specs';
@@ -111,9 +111,41 @@ describe('trade-show booth presets', () => {
     const room = createBoothForScene(byId('booth-10x10'));
     expect(room.type).toBe('room');
     expect(room.name).toBe('10 × 10 booth');
+    expect(room.name).not.toBe(DEFAULT_ROOM_NAME);
     expect(room.visible).toBe(true);
     expect(room.locked).toBe(false);
     expect(room.show.ceiling).toBe(false); // 8 ft walls must never box in a taller build
+  });
+
+  it('renders as a footprint, not a room: outline on, floor on, every wall and the ceiling off', () => {
+    // A plain venue space is untouched by the new flag.
+    expect(createRoom().outlineWalls).toBe(false);
+    expect(createRoomForScene([]).outlineWalls).toBe(false);
+    for (const p of BOOTH_PRESETS) {
+      const r = createBoothForScene(p);
+      expect(r.outlineWalls).toBe(true);
+      // The entity says what it is: the walls are OFF, not merely hidden by the renderer.
+      expect(r.show).toEqual({ back: false, floor: true, ceiling: false, left: false, right: false });
+    }
+  });
+
+  it('gives the same patch to a new booth and to a room resized into one', () => {
+    // The Venue panel patches the room already in the scene with boothRoomPatch while the catalog
+    // card builds a fresh entity: both must land on identical geometry and show flags, or clicking
+    // "20 × 10" would mean one thing in the catalog and another in the panel.
+    for (const p of BOOTH_PRESETS) {
+      const patch = boothRoomPatch(p);
+      expect(patch).toEqual({
+        widthIn: p.widthFt * 12, heightIn: p.heightFt * 12, depthIn: p.depthFt * 12,
+        outlineWalls: true, show: { back: false, floor: true, ceiling: false, left: false, right: false },
+      });
+      // Applying it to a plain venue space (solid walls, hall proportions) yields the booth a card
+      // would have added, right down to the flags.
+      const resized = Object.assign(createRoom(), boothRoomPatch(p));
+      const fresh = createBoothForScene(p);
+      for (const k of ['widthIn', 'heightIn', 'depthIn', 'outlineWalls'] as const) expect(resized[k]).toEqual(fresh[k]);
+      expect(resized.show).toEqual(fresh.show);
+    }
   });
 
   it('positions a booth against the scene exactly like roomPosition', () => {

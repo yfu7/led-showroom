@@ -180,6 +180,16 @@ export interface RoomEntity extends EntityBase {
   depthIn: number;
   surfaces: { back?: SurfaceMedia | null; floor?: SurfaceMedia | null; ceiling?: SurfaceMedia | null; left?: SurfaceMedia | null; right?: SurfaceMedia | null };
   show: { back: boolean; floor: boolean; ceiling: boolean; left: boolean; right: boolean };
+  /**
+   * Draw the volume as an outline rather than as solid surfaces: the floor face renders as usual
+   * (photo and all) and the back, left, right and ceiling planes are replaced by faded dashed
+   * vertical guides at the four footprint corners, from the floor up to `heightIn`.
+   *
+   * This is what a trade-show booth wants — a footprint on the show floor plus a height reference,
+   * not a room you stand inside — but it is not booth-specific: a venue space reads the same way
+   * when you want to see past its walls. Off by default, so every existing room is unchanged.
+   */
+  outlineWalls: boolean;
   color: string;
   opacity: number;
 }

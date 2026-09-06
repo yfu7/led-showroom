@@ -212,10 +212,10 @@ export function buildCatalog(unit: Unit): CatalogItem[] {
     description: 'A proportional room: back wall, floor, ceiling and side walls with optional photos.',
     make: ({ engine }) => createRoomForScene(engine.doc.entities),
   });
-  // Trade-show booth footprints: the same room entity at the standard rented sizes, walls on the
-  // 8 ft back-drape line. Sub-lines go through formatDims so they read in the active unit.
-  // The descriptions say what the entity *is* — a venue room scaled to the footprint, so back and
-  // side walls at one height, floor on, ceiling off — rather than what the show floor calls it.
+  // Trade-show booth footprints: the same room entity at the standard rented sizes, drawn as an
+  // outline — no walls, just the floor face and dashed corner guides on the 8 ft back-drape line.
+  // Sub-lines go through formatDims so they read in the active unit. The descriptions say what is
+  // actually drawn, so the card cannot promise a room the viewport does not build.
   for (const p of BOOTH_PRESETS) {
     items.push({
       id: p.id,
@@ -224,8 +224,8 @@ export function buildCatalog(unit: Unit): CatalogItem[] {
       sub: formatDims([p.widthFt * 12, p.heightFt * 12, p.depthFt * 12], unit),
       icon: 'room',
       description: p.widthFt === p.depthFt && p.widthFt === 20
-        ? 'Island-size footprint, drawn as a room: floor, back wall and side walls at the 8 ft drape height. A real island is open on all four sides, so read the walls as a height reference.'
-        : `Standard ${p.depthFt} ft deep inline booth. The back wall sits at the 8 ft back-drape height; the side walls are drawn at the same height, where real side rails are 3 ft.`,
+        ? 'Island-size footprint: the floor face plus dashed corner guides at the 8 ft drape height. An island is open on all four sides, so the guides are a height reference, not walls.'
+        : `Standard ${p.depthFt} ft deep inline booth. The floor face marks the rented area and the dashed corner guides sit on the 8 ft back-drape line, the display height limit for a linear booth.`,
       make: ({ engine }) => createBoothForScene(p, engine.doc.entities),
     });
   }

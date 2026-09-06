@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
-import { createDocument, createRoom } from '../document/defaults';
+import { BOOTH_PRESETS, createBoothForScene, createDocument, createRoom } from '../document/defaults';
 import { assets } from '../persistence/AssetStore';
 import type { RenderContext } from './EntityRenderer';
 import {
-  ROOM_SIDES, RoomRenderer, createRoomRenderer, roomCenter, roomLocalBounds, roomPlanePlacement, surfaceMediaKey, surfaceToSource,
-  type RoomSide,
+  ROOM_GUIDE, ROOM_SIDES, RoomRenderer, createRoomRenderer, roomCenter, roomFootprintCorners, roomGuidePositions, roomLocalBounds,
+  roomPlanePlacement, surfaceMediaKey, surfaceToSource, type RoomSide,
 } from './RoomRenderer';
 
 const D = { widthIn: 480, heightIn: 156, depthIn: 360 };
@@ -179,5 +179,124 @@ describe('RoomRenderer', () => {
     expect(calls).toEqual(['pause', 'play']);
     planes.get('ceiling')!.media = null;
     r.dispose();
+  });
+});
+
+describe('outline-mode corner guides', () => {
+  /** The renderer's one LineSegments child. */
+  const guidesOf = (r: RoomRenderer) =>
+    r.root.children.find(c => (c as THREE.LineSegments).isLineSegments) as THREE.LineSegments<THREE.BufferGeometry, THREE.LineDashedMaterial>;
+
+  it('puts a segment at each of the four footprint corners, spanning y = 0 to heightIn', () => {
+    expect(roomFootprintCorners(D)).toEqual([[-240, 0], [240, 0], [-240, 360], [240, 360]]);
+    const pos = roomGuidePositions(D);
+    expect(pos).toHaveLength(24); // 4 segments x 2 vertices x 3 components
+    const verts: [number, number, number][] = [];
+    for (let i = 0; i < pos.length; i += 3) verts.push([pos[i], pos[i + 1], pos[i + 2]]);
+    // Each pair is one vertical line: same x/z, y from 0 to the room height.
+    for (let i = 0; i < verts.length; i += 2) {
+      const [a, b] = [verts[i], verts[i + 1]];
+      expect(a[0]).toBe(b[0]); expect(a[2]).toBe(b[2]);
+      expect(a[1]).toBe(0); expect(b[1]).toBe(D.heightIn);
+      expect(Math.abs(a[0])).toBe(D.widthIn / 2);
+      expect([0, D.depthIn]).toContain(a[2]);
+    }
+    // All four corners, none repeated.
+    expect(new Set(verts.map(v => `${v[0]},${v[2]}`)).size).toBe(4);
+  });
+
+  it('draws the floor and dashed guides only, with soft inch-sized dashes and line distances', () => {
+    const e = createBoothForScene(BOOTH_PRESETS[0]); // 10 x 10 x 8 ft, outlineWalls on
+    const r = new RoomRenderer(e, ctx());
+    const g = guidesOf(r);
+    expect(g.visible).toBe(true);
+    expect(g.geometry.getAttribute('position').count).toBe(8);
+    // Dashes are sized in INCHES, faint, and do not write depth.
+    expect(g.material).toBeInstanceOf(THREE.LineDashedMaterial);
+    expect(g.material.dashSize).toBe(ROOM_GUIDE.dashIn);
+    expect(g.material.gapSize).toBe(ROOM_GUIDE.gapIn);
+    expect(g.material.opacity).toBe(ROOM_GUIDE.opacity);
+    expect(g.material.transparent).toBe(true);
+    expect(g.material.depthWrite).toBe(false);
+    expect(g.material.color.getHex()).toBe(ROOM_GUIDE.color);
+    expect(g.material.toneMapped).toBe(false); // reads the same in Night and Studio
+    expect(g.material.depthTest).toBe(true); // still occluded by whatever stands in the booth
+    // Line distances are set: without them a dashed material renders solid. Each corner restarts at
+    // 0 (computeLineDistances would accumulate 0, 96, 96, 192 … and put every guide on its own dash
+    // phase, since 96 in is not a whole number of 5 in periods).
+    const dist = g.geometry.getAttribute('lineDistance');
+    expect(dist).toBeTruthy();
+    expect(Array.from(dist.array as Float32Array)).toEqual([0, 96, 0, 96, 0, 96, 0, 96]);
+    // No wall or ceiling plane, and the guides are not a click target: the floor is the handle.
+    const visible = (r.root.children.filter(c => (c as THREE.Mesh).isMesh) as THREE.Mesh[]).filter(m => m.visible);
+    expect(visible.map(m => m.userData.part)).toEqual(['floor']);
+    expect(g.userData.unpickable).toBe(true);
+    expect(r.selectionMeshes().map(m => m.userData.part)).toEqual(['floor']);
+    // Framing still gets the whole volume even though only the floor is a surface.
+    const b = r.bounds();
+    expect(b.min.y).toBeCloseTo(0); expect(b.max.y).toBeCloseTo(96);
+    expect(b.min.x).toBeCloseTo(-60); expect(b.max.x).toBeCloseTo(60);
+    expect(b.min.z).toBeCloseTo(0); expect(b.max.z).toBeCloseTo(120);
+    r.dispose();
+  });
+
+  it('hides the guides and restores the planes when outline mode is off', () => {
+    const e = createRoom(40, 13, 30);
+    const r = new RoomRenderer(e, ctx());
+    expect(guidesOf(r).visible).toBe(false);
+    expect(r.selectionMeshes().map(m => m.userData.part).sort()).toEqual(['back', 'floor', 'left', 'right']);
+    // Outline on, with the wall show flags left true: the renderer must still draw no wall.
+    r.update({ ...e, outlineWalls: true }, ctx());
+    expect(guidesOf(r).visible).toBe(true);
+    expect(r.selectionMeshes().map(m => m.userData.part)).toEqual(['floor']);
+    // The floor obeys its own show flag even in outline mode.
+    r.update({ ...e, outlineWalls: true, show: { ...e.show, floor: false } }, ctx());
+    expect(r.selectionMeshes()).toEqual([]);
+    r.update({ ...e, outlineWalls: false }, ctx());
+    expect(guidesOf(r).visible).toBe(false);
+    expect(r.selectionMeshes().map(m => m.userData.part).sort()).toEqual(['back', 'floor', 'left', 'right']);
+    r.dispose();
+  });
+
+  it('rebuilds the guides when the room is resized and disposes the old geometry', () => {
+    const e = createBoothForScene(BOOTH_PRESETS[0]);
+    const r = new RoomRenderer(e, ctx());
+    const g = guidesOf(r);
+    const first = g.geometry;
+    let disposed = false;
+    first.addEventListener('dispose', () => { disposed = true; });
+
+    r.update({ ...e, widthIn: 240, heightIn: 120, depthIn: 240 }, ctx());
+    expect(disposed).toBe(true);
+    expect(g.geometry).not.toBe(first);
+    expect(Array.from(g.geometry.getAttribute('position').array as Float32Array)).toEqual(roomGuidePositions({ widthIn: 240, heightIn: 120, depthIn: 240 }));
+    expect(Array.from(g.geometry.getAttribute('lineDistance').array as Float32Array)).toEqual([0, 120, 0, 120, 0, 120, 0, 120]);
+    r.dispose();
+  });
+
+  it('fades the guides with the room opacity', () => {
+    const e = createBoothForScene(BOOTH_PRESETS[0]);
+    const r = new RoomRenderer(e, ctx());
+    const g = guidesOf(r);
+    expect(g.material.opacity).toBeCloseTo(ROOM_GUIDE.opacity);
+    r.update({ ...e, opacity: 0.5 }, ctx());
+    expect(g.material.opacity).toBeCloseTo(ROOM_GUIDE.opacity * 0.5);
+    // Out-of-range values are clamped like the planes', not passed through to the material.
+    r.update({ ...e, opacity: 0 }, ctx());
+    expect(g.material.opacity).toBe(0);
+    r.update({ ...e, opacity: 4 }, ctx());
+    expect(g.material.opacity).toBeCloseTo(ROOM_GUIDE.opacity);
+    r.dispose();
+  });
+
+  it('disposes the guide geometry and material and detaches them', () => {
+    const r = new RoomRenderer(createBoothForScene(BOOTH_PRESETS[2]), ctx());
+    const g = guidesOf(r);
+    const seen: string[] = [];
+    g.geometry.addEventListener('dispose', () => seen.push('geometry'));
+    g.material.addEventListener('dispose', () => seen.push('material'));
+    r.dispose();
+    expect(seen.sort()).toEqual(['geometry', 'material']);
+    expect(g.parent).toBeNull();
   });
 });

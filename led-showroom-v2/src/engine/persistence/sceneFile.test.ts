@@ -5,8 +5,8 @@ import {
   type SceneFile,
 } from './sceneFile';
 import {
-  createDimension, createDocument, createEquipment, createGroup, createLedWall, createModel, createRoom, createSplat, createStage,
-  defaultEnvironment, defaultSettings, defaultView,
+  BOOTH_PRESETS, createBoothForScene, createDimension, createDocument, createEquipment, createGroup, createLedWall, createModel,
+  createRoom, createSplat, createStage, defaultEnvironment, defaultSettings, defaultView,
 } from '../document/defaults';
 import type { DimensionEntity, Document, EquipmentEntity, LedWallEntity, ModelEntity, RoomEntity, SplatEntity, StageEntity } from '../document/types';
 import { EQUIPMENT_BY_ID } from '../catalog/equipment';
@@ -317,11 +317,24 @@ describe('migrateDocument', () => {
       expect(a).toMatchObject({ fileName: 'scan.splat', format: 'splat' });
       expect(b).toMatchObject({ fileName: 'splat.ply', format: 'ply' });
     });
-    it('room: dims / show / surfaces / colour / opacity', () => {
+    it('room: dims / show / outlineWalls / surfaces / colour / opacity', () => {
       const d = createRoom();
       const [r] = ents([{ type: 'room', widthIn: 0, show: { ceiling: true }, surfaces: { back: { kind: 'image', assetId: 'x' }, floor: { kind: 'hologram' }, left: 3 }, opacity: 4 }]) as RoomEntity[];
       expect(r).toMatchObject({ widthIn: d.widthIn, heightIn: d.heightIn, depthIn: d.depthIn, show: { ...d.show, ceiling: true }, color: d.color, opacity: 1 });
       expect(r.surfaces).toEqual({ back: { kind: 'image', assetId: 'x' } });
+      // Missing or junk outlineWalls falls back to the factory default (false), like every other flag.
+      expect(r.outlineWalls).toBe(false);
+      expect(d.outlineWalls).toBe(false);
+      expect((ents([{ type: 'room', outlineWalls: 'yes' }])[0] as RoomEntity).outlineWalls).toBe(false);
+    });
+
+    it('room: an outlined booth survives a scene-file round trip', () => {
+      const booth = createBoothForScene(BOOTH_PRESETS[0]);
+      expect(booth.outlineWalls).toBe(true);
+      const [back] = ents(JSON.parse(JSON.stringify([booth]))) as RoomEntity[];
+      expect(back).toEqual(booth);
+      expect(back.outlineWalls).toBe(true);
+      expect(back.show).toEqual({ back: false, floor: true, ceiling: false, left: false, right: false });
     });
     it('dimension: a / b / label', () => {
       const [a, b] = ents([{ type: 'dimension', a: [1, 2, 3], b: 'x', label: 5 }, { type: 'dimension', a: [0, 0, 0], b: [4, 0, 0], label: 'L' }]) as DimensionEntity[];

@@ -311,6 +311,7 @@ function migrateTyped(raw: Record<string, unknown>, e: Record<string, unknown>):
       e.depthIn = positive(raw.depthIn, d.depthIn);
       const show = isObj(raw.show) ? raw.show : {};
       e.show = { back: bool(show.back, d.show.back), floor: bool(show.floor, d.show.floor), ceiling: bool(show.ceiling, d.show.ceiling), left: bool(show.left, d.show.left), right: bool(show.right, d.show.right) };
+      e.outlineWalls = bool(raw.outlineWalls, d.outlineWalls);
       const surfaces: Record<string, unknown> = {};
       if (isObj(raw.surfaces)) {
         for (const k of ['back', 'floor', 'ceiling', 'left', 'right']) {

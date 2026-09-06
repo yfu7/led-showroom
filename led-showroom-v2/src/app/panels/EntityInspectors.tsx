@@ -197,6 +197,21 @@ const SIDES: { key: Side; label: string }[] = [
   { key: 'back', label: 'Back wall' }, { key: 'floor', label: 'Floor' }, { key: 'ceiling', label: 'Ceiling' }, { key: 'left', label: 'Left wall' }, { key: 'right', label: 'Right wall' },
 ];
 
+/** Does the room have any upright surface switched on, outline mode aside? */
+function anyUprightShown(e: RoomEntity): boolean {
+  return e.show.back || e.show.left || e.show.right || e.show.ceiling;
+}
+
+/**
+ * Leaving outline mode on a booth: a booth preset stores every upright side as hidden, so clearing
+ * the flag on its own would leave a bare floor and a toggle that looks broken. Raise the three walls
+ * a venue room is born with, in the same command so one undo puts the outline back. A room that
+ * still shows a wall keeps its flags — a side hidden on purpose stays hidden.
+ */
+function solidWallsPatch(e: RoomEntity): Partial<RoomEntity> {
+  return { outlineWalls: false, show: { ...e.show, back: true, left: true, right: true } };
+}
+
 export function RoomInspector({ entity }: { entity: RoomEntity }) {
   const engine = useEngine();
   const doc = useDoc();
@@ -233,9 +248,20 @@ export function RoomInspector({ entity }: { entity: RoomEntity }) {
         <div className="hint">A proportional room at real scale, placed around the LED walls. Wall from back is the gap between the walls' back face and the back wall.</div>
       </Section>
       <Section title="Surfaces">
-        {SIDES.map(s => (
-          <ToggleRow key={s.key} label={s.label} checked={entity.show[s.key]} onChange={v => up({ show: { ...entity.show, [s.key]: v } }, undefined, `${v ? 'Show' : 'Hide'} ${s.label.toLowerCase()}`)} />
-        ))}
+        <ToggleRow label="Walls as outline" checked={entity.outlineWalls}
+          hint="Draw the floor face plus faded dashed height guides at the four corners, instead of solid walls."
+          onChange={v => up(v || anyUprightShown(entity) ? { outlineWalls: v } : solidWallsPatch(entity), undefined, v ? 'Outline walls' : 'Solid walls')} />
+        {SIDES.map(s => {
+          // In outline mode nothing upright is drawn, so those toggles would be dead controls:
+          // show what is actually rendered and disable them rather than lie about the surface.
+          const outlined = entity.outlineWalls && s.key !== 'floor';
+          return (
+            <ToggleRow key={s.key} label={s.label} checked={entity.show[s.key] && !outlined} disabled={outlined}
+              hint={outlined ? 'Not drawn while walls are an outline; the corner guides replace it.' : undefined}
+              onChange={v => up({ show: { ...entity.show, [s.key]: v } }, undefined, `${v ? 'Show' : 'Hide'} ${s.label.toLowerCase()}`)} />
+          );
+        })}
+        {entity.outlineWalls && <div className="hint">Outline mode draws the floor and four dashed corner guides only, so the wall and ceiling toggles are disabled while it is on. Switching it off brings the walls back.</div>}
       </Section>
       <Section title="Appearance">
         <Prop label="Colour"><ColorField value={entity.color} onChange={v => up({ color: v }, 'room:color')} /></Prop>
