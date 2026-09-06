@@ -37,6 +37,21 @@ export function proxyUrl(url: string): string {
   return url;
 }
 
+/**
+ * Sandbox applied to every iframe that displays a user-supplied website — the sliced CSS3D
+ * windows in `LedWallRenderer` and the single-element path below. One constant, two importers,
+ * so the two paths cannot drift apart again.
+ *
+ * Trade-off recorded on purpose: `allow-same-origin` stays for now. The website proxy re-serves
+ * the remote page from *this app's* origin, so a displayed page runs same-origin with the
+ * showroom and can reach this origin's localStorage (autosaved document, settings, presets, the
+ * catalog order), its IndexedDB (the AssetStore — uploaded images, video and models) and its
+ * cookies, and can call same-origin endpoints such as /proxy as the app. Dropping the token is
+ * the safer end state, but it also breaks every site that needs storage or cookies to render, so
+ * it is the product owner's call, not a silent change. Settle that before editing this line.
+ */
+export const WEBSITE_IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups';
+
 export function sourceKey(src: ContentSource | null): string {
   if (!src) return '';
   return JSON.stringify([src.type, src.assetId ?? src.url ?? '', src.color ?? '', src.name ?? '']);
@@ -158,7 +173,7 @@ export function createContentMedia(src: ContentSource, assets: AssetStore, opts:
     const ifr = document.createElement('iframe');
     Object.assign(ifr.style, { width: '100%', height: '100%', border: '0', display: 'block', background: '#000' });
     ifr.src = proxyUrl(url);
-    ifr.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups');
+    ifr.setAttribute('sandbox', WEBSITE_IFRAME_SANDBOX);
     el.appendChild(ifr);
     return { kind: 'dom', width: 0, height: 0, texture: null, element: el, ready: Promise.resolve(), update: () => false, player: null, dispose: () => { ifr.src = 'about:blank'; el.remove(); } };
   }

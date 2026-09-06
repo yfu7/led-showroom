@@ -45,13 +45,18 @@ export function App() {
     registerDefaultTools(eng);
     eng.tools.activate('select');
     const detach = attach(eng);
-    (window as unknown as { showroom: Engine }).showroom = eng;
+    // Dev-only debug handle. `import.meta.env.DEV` is a compile-time constant, so the whole
+    // branch is dead code in a production build and never reaches a visitor's window.
+    if (import.meta.env.DEV) (window as unknown as { showroom?: Engine }).showroom = eng;
     // fresh document → seed a wall so the first impression isn't an empty floor
     if (eng.doc.entities.length === 0) eng.seedDefaultScene();
     // a saved perspective calibration re-applies the solved photo camera and lock
     if (eng.doc.environment.backdrop.calibration?.solved) getCalibrationSession(eng).restoreFromDocument(eng);
     else if (shouldAutoFrame({ restoredView: eng.restoredView, locked: eng.camera.locked })) eng.frameAll(false);
-    return () => { detach(); eng.dispose(); };
+    return () => {
+      detach(); eng.dispose();
+      if (import.meta.env.DEV) delete (window as unknown as { showroom?: Engine }).showroom;
+    };
   }, [attach]);
 
   useGlobalShortcuts(engine);

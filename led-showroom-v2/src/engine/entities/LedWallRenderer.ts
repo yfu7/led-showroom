@@ -25,7 +25,7 @@ import {
 } from '../ledwall/pixelGrid';
 import { buildWallDimensions, disposeDimensionGroup, updateLabelSpriteScale } from '../ledwall/dimensions';
 import { clampWindowRect, spanInfo, windowAtPixel } from '../ledwall/contentWindows';
-import { acquireMedia, proxyUrl, releaseMedia, sourceKey, type ContentMedia } from '../content/ContentLayer';
+import { WEBSITE_IFRAME_SANDBOX, acquireMedia, proxyUrl, releaseMedia, sourceKey, type ContentMedia } from '../content/ContentLayer';
 import { formatLength } from '../units';
 import type { Vec3 } from '../math';
 
@@ -444,6 +444,7 @@ export class LedWallRenderer implements EntityRenderer<LedWallEntity> {
           const ifr = document.createElement('iframe');
           Object.assign(ifr.style, { position: 'absolute', left: `${it.texRect.x - sl.rect.x}px`, top: `${it.texRect.y - sl.rect.y}px`, width: `${it.texRect.w}px`, height: `${it.texRect.h}px`, border: '0', background: '#000' });
           ifr.src = proxyUrl(src.url ?? '');
+          ifr.setAttribute('sandbox', WEBSITE_IFRAME_SANDBOX);
           el.appendChild(ifr);
           const obj = new CSS3DObject(el);
           const { w, h } = this.placeSlice(obj, sl, back, zIndex);
