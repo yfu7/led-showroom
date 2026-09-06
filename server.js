@@ -119,99 +119,14 @@ const MIME_TYPES = {
 const server = http.createServer((req, res) => {
     const parsed = url.parse(req.url, true);
 
-    // ── Proxy endpoint ──
+    // ── Proxy endpoint — CLOSED ──
+    // v1 is deprecated. This endpoint fetched whatever URL the caller named, with no address
+    // validation and a wildcard CORS header, which made it an open proxy and an SSRF vector.
+    // It is closed rather than repaired; v2 carries the guarded version in
+    // led-showroom-v2/server/urlGuard.cjs. See ../README.md.
     if (parsed.pathname === '/proxy') {
-        const targetUrl = parsed.query.url;
-        if (!targetUrl) {
-            res.writeHead(400, { 'Content-Type': 'text/plain' });
-            return res.end('Missing ?url= parameter');
-        }
-
-        let target;
-        try {
-            target = new URL(targetUrl);
-        } catch {
-            res.writeHead(400, { 'Content-Type': 'text/plain' });
-            return res.end('Invalid URL');
-        }
-
-        const client = target.protocol === 'https:' ? https : http;
-
-        const proxyReq = client.request(target, {
-            method: 'GET',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-            },
-        }, (proxyRes) => {
-            // Follow redirects (up to 5)
-            if ([301, 302, 303, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location) {
-                const redirectUrl = new URL(proxyRes.headers.location, target).href;
-                // Redirect the client to the proxy with the new URL
-                res.writeHead(302, { 'Location': '/proxy?url=' + encodeURIComponent(redirectUrl) });
-                return res.end();
-            }
-
-            // Build response headers — strip iframe-blocking headers
-            const headers = {};
-            for (const [key, value] of Object.entries(proxyRes.headers)) {
-                const lower = key.toLowerCase();
-                if (lower === 'x-frame-options') continue;
-                if (lower === 'content-security-policy') continue;
-                if (lower === 'content-security-policy-report-only') continue;
-                headers[key] = value;
-            }
-
-            // Allow our origin to frame the content
-            headers['Access-Control-Allow-Origin'] = '*';
-
-            // Rewrite HTML to fix relative URLs
-            const contentType = (proxyRes.headers['content-type'] || '').toLowerCase();
-            if (contentType.includes('text/html')) {
-                let body = [];
-                proxyRes.on('data', chunk => body.push(chunk));
-                proxyRes.on('end', () => {
-                    let html = Buffer.concat(body).toString('utf-8');
-
-                    // Inject a <base> tag so relative URLs resolve to the original site
-                    const baseTag = '<base href="' + target.origin + target.pathname + '">';
-                    if (html.includes('<head>')) {
-                        html = html.replace('<head>', '<head>' + baseTag);
-                    } else if (html.includes('<HEAD>')) {
-                        html = html.replace('<HEAD>', '<HEAD>' + baseTag);
-                    } else {
-                        html = baseTag + html;
-                    }
-
-                    delete headers['content-length'];
-                    delete headers['Content-Length'];
-                    delete headers['transfer-encoding'];
-                    delete headers['Transfer-Encoding'];
-                    headers['Content-Type'] = 'text/html; charset=utf-8';
-
-                    res.writeHead(proxyRes.statusCode, headers);
-                    res.end(html);
-                });
-            } else {
-                res.writeHead(proxyRes.statusCode, headers);
-                proxyRes.pipe(res);
-            }
-        });
-
-        proxyReq.on('error', (err) => {
-            res.writeHead(502, { 'Content-Type': 'text/plain' });
-            res.end('Proxy error: ' + err.message);
-        });
-
-        proxyReq.setTimeout(10000, () => {
-            proxyReq.destroy();
-            res.writeHead(504, { 'Content-Type': 'text/plain' });
-            res.end('Proxy timeout');
-        });
-
-        proxyReq.end();
-        return;
+        res.writeHead(410, { 'Content-Type': 'text/plain' });
+        return res.end('The v1 proxy is closed. Use led-showroom-v2.');
     }
 
     // ── Splat pipeline endpoints (local only) ──

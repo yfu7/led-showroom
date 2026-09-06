@@ -1,5 +1,7 @@
 # Veloxity Showroom — working notes
 
+- **This directory is the project.** `led-showroom-v2/` is the app and `master` is the v2 line; run every command from here, not from the repo root. v1 (`../index.html`, `../server.js`) is deprecated, frozen, and has no deployment — its Vercel project is deleted and its `/proxy` route answers 410. Do not add to v1 or revive its proxy; see `../README.md`.
+
 - Run: `npm run dev` (Vite, 5173) and `npm run server` (proxy + splat API, 3001). `npm run typecheck`, `npm test` (vitest, node env).
 - `src/engine` never imports React. UI reads from the Zustand store (`src/app/store.ts`) and writes through `Engine` (`engine.update / run / patchSettings / patchEnvironment`) so everything is undoable. Continuous edits pass a `mergeKey`; call `engine.history.commit()` when a gesture ends.
 - Units: 1 world unit = 1 inch, Y up, floor at y = 0, document angles in degrees. LED walls, equipment and stages have their origin at the bottom centre; `applyTransform` handles degree/radian conversion.
