@@ -27,6 +27,44 @@ export interface NumberFieldProps {
   coarseStep?: number;
 }
 
+/**
+ * The widths, in characters, a field is allowed to take. An `<input>` does not shrink-wrap its
+ * content — it carries a default `size` of 20 characters — so left alone every box claims the same
+ * oversized width and is then squeezed by whatever row it is in. Publishing a character count lets
+ * `.field` size the input to the number it is actually showing (1ch = one tabular digit).
+ *
+ * The count is quantised to these few steps rather than tracked per digit: where a field's own
+ * width still decides the layout, a per-digit width makes the box resize on every frame of a
+ * scrub, sliding and shrinking its neighbours under the pointer, and grows or shrinks the box on
+ * every keystroke while you type into it. Four steps mean a width change is rare and never more
+ * than one step. The last step is the ceiling — a very long value is clipped by the CSS rather
+ * than allowed to push its panel open.
+ */
+export const FIELD_CHAR_STEPS = [4, 7, 10, 14] as const;
+
+/** Quantised width, in characters, for a field showing `text`. See {@link FIELD_CHAR_STEPS}. */
+export function fieldChars(text: string): number {
+  for (const step of FIELD_CHAR_STEPS) if (text.length <= step) return step;
+  return FIELD_CHAR_STEPS[FIELD_CHAR_STEPS.length - 1];
+}
+
+/**
+ * True when the value is longer than the narrowest step, i.e. it may not fit a three-across
+ * transform row and be clipped there. Such a field carries its full value in a `title` so the
+ * number is always readable; a short value gets no tooltip, because it needs none.
+ */
+export function fieldValueMayClip(text: string): boolean {
+  return text.length > FIELD_CHAR_STEPS[0];
+}
+
+/**
+ * Width hint for the CSS. Purely presentational: it never touches the value, its precision or the
+ * scrub.
+ */
+export function fieldCharStyle(text: string): React.CSSProperties {
+  return { '--field-chars': fieldChars(text) } as React.CSSProperties;
+}
+
 function evalMath(s: string): number | null {
   const t = s.trim().replace(/,/g, '');
   if (!t) return null;
@@ -94,8 +132,9 @@ export function NumberField({ value, onChange, onCommit, min = -Infinity, max = 
   };
 
   const cls = ['field', axis ? `axis-${axis}` : '', invalid ? 'invalid' : '', className].filter(Boolean).join(' ');
+  const shown = text || placeholder || '';
   return (
-    <div className={cls} title={title}>
+    <div className={cls} title={title ?? (fieldValueMayClip(shown) ? shown : undefined)} style={fieldCharStyle(shown)}>
       {scrub !== undefined && (
         <span className="scrub" onPointerDown={onScrubDown} onPointerMove={onScrubMove} onPointerUp={onScrubUp} onPointerCancel={onScrubUp}>{scrub}</span>
       )}
@@ -188,8 +227,11 @@ export function LengthField({ inches, unit, onChange, onCommit, min = -Infinity,
   };
 
   const cls = ['field', axis ? `axis-${axis}` : '', invalid ? 'invalid' : '', className].filter(Boolean).join(' ');
+  // Select-all-and-delete leaves `text` empty mid-edit; fall back to the committed value so the
+  // box keeps the width it had instead of collapsing to the narrowest step under the cursor.
+  const shown = text || display(inches);
   return (
-    <div className={cls} title={title}>
+    <div className={cls} title={title ?? (fieldValueMayClip(shown) ? shown : undefined)} style={fieldCharStyle(shown)}>
       {scrub !== undefined && (
         <span className="scrub" onPointerDown={onScrubDown} onPointerMove={onScrubMove} onPointerUp={onScrubUp} onPointerCancel={onScrubUp}>{scrub}</span>
       )}

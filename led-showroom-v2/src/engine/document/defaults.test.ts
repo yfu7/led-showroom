@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_WALL_FROM_BACK_IN, createLedWall, createRoom, createRoomForScene, createStage, ledWallDatum, roomPosition,
+  BOOTH_HEIGHT_FT, BOOTH_PRESETS, DEFAULT_WALL_FROM_BACK_IN, createBoothForScene, createLedWall, createRoom,
+  createRoomForScene, createStage, findBoothPreset, ledWallDatum, roomPosition,
 } from './defaults';
 import { IPOSTER } from '../ledwall/specs';
 import { wallDims } from '../ledwall/layout';
@@ -58,5 +59,73 @@ describe('venue room placement', () => {
     expect(d.centreX).toBeCloseTo(0);
     expect(d.rearZ).toBeCloseTo(-HALF_D * 3);
     expect(roomPosition([w], 0)[2]).toBeCloseTo(-HALF_D * 3);
+  });
+});
+
+describe('trade-show booth presets', () => {
+  const byId = (id: string) => {
+    const p = findBoothPreset(id);
+    if (!p) throw new Error(`missing preset ${id}`);
+    return p;
+  };
+
+  it('offers the three standard footprints, smallest first', () => {
+    expect(BOOTH_PRESETS.map(p => p.id)).toEqual(['booth-10x10', 'booth-20x10', 'booth-20x20']);
+    expect(BOOTH_PRESETS.map(p => p.label)).toEqual(['10 × 10 booth', '20 × 10 booth', '20 × 20 booth']);
+    expect(findBoothPreset('booth-30x30')).toBeUndefined();
+  });
+
+  it('keeps every preset at the 8 ft back-drape height', () => {
+    expect(BOOTH_HEIGHT_FT).toBe(8);
+    for (const p of BOOTH_PRESETS) {
+      expect(p.heightFt).toBe(BOOTH_HEIGHT_FT);
+      expect(createBoothForScene(p).heightIn).toBe(96);
+    }
+  });
+
+  it('builds exact inch dimensions for all three', () => {
+    const dims = (id: string) => {
+      const r = createBoothForScene(byId(id));
+      return [r.widthIn, r.heightIn, r.depthIn];
+    };
+    expect(dims('booth-10x10')).toEqual([120, 96, 120]);
+    expect(dims('booth-20x10')).toEqual([240, 96, 120]);
+    expect(dims('booth-20x20')).toEqual([240, 96, 240]);
+  });
+
+  it('does not transpose width and depth (20 × 10 is 20 ft wide, 10 ft deep)', () => {
+    const p = byId('booth-20x10');
+    expect([p.widthFt, p.depthFt]).toEqual([20, 10]);
+    const room = createBoothForScene(p);
+    expect(room.widthIn).toBe(20 * 12);
+    expect(room.depthIn).toBe(10 * 12);
+    expect(room.widthIn).toBeGreaterThan(room.depthIn);
+    // The square presets stay square, so a transposition elsewhere cannot hide behind them.
+    for (const id of ['booth-10x10', 'booth-20x20']) {
+      const r = createBoothForScene(byId(id));
+      expect(r.widthIn).toBe(r.depthIn);
+    }
+  });
+
+  it('names the room after the preset and leaves it visible and unlocked', () => {
+    const room = createBoothForScene(byId('booth-10x10'));
+    expect(room.type).toBe('room');
+    expect(room.name).toBe('10 × 10 booth');
+    expect(room.visible).toBe(true);
+    expect(room.locked).toBe(false);
+    expect(room.show.ceiling).toBe(false); // 8 ft walls must never box in a taller build
+  });
+
+  it('positions a booth against the scene exactly like roomPosition', () => {
+    const a = createLedWall({ cols: 2, rows: 2, position: [-100, 0, 40] });
+    const b = createLedWall({ cols: 2, rows: 2, position: [60, 0, 10] });
+    const entities = [a, createStage(), b];
+    for (const p of BOOTH_PRESETS) {
+      expect(createBoothForScene(p, entities).transform.position).toEqual(roomPosition(entities));
+      expect(createBoothForScene(p, entities, 0).transform.position).toEqual(roomPosition(entities, 0));
+    }
+    // No walls: same fallback as a plain venue space.
+    expect(createBoothForScene(byId('booth-20x20')).transform.position).toEqual(createRoomForScene([]).transform.position);
+    expect(createBoothForScene(byId('booth-20x20'), entities).transform.position[1]).toBe(0);
   });
 });

@@ -59,6 +59,11 @@
 .seg svg { width: 14px; height: 14px; stroke-width: 1.5; }
 
 /* ───────── fields ───────── */
+/* A field's *natural* width is the width its own value needs (see `--field-chars` below), and it
+   grows only where a rule below hands it a slot to fill. The base must not grow: a bare `.field`
+   also sits in the header (the units dropdown) and in ad-hoc rows, where growing turns a 50px
+   control into whatever free space the window happens to have — and the wider the window, the
+   worse it gets. */
 .field {
   display: flex; align-items: center; height: 28px;
   border-radius: var(--r-sm); background: var(--bg-2); border: 1px solid var(--line-strong);
@@ -68,16 +73,27 @@
 .field:hover { border-color: var(--line-strong); }
 .field:focus-within { border-color: var(--line-focus); background: var(--bg-1); }
 .field.invalid { border-color: var(--danger); }
+/* Basis `auto`, not 0: both an input and a select then contribute the width of what they show to
+   the field's natural width. For a select that is its longest option — before, a select
+   contributed nothing and a `.field.select` collapsed to its chevron (21px in the corners row). */
 .field input, .field select {
-  flex: 1; min-width: 0; height: 100%; padding: 0 8px; background: transparent; border: 0; outline: 0;
+  flex: 1 1 auto; min-width: 0; height: 100%; padding: 0 6px; background: transparent; border: 0; outline: 0;
   font-family: var(--font-ui); font-variant-numeric: tabular-nums; font-size: var(--fs-sm); color: var(--fg-0);
 }
+/* An input does not shrink-wrap its text (it defaults to `size="20"`), so left alone every field
+   claims the same oversized width and is then squeezed by its row. NumberField publishes the
+   character count it is showing (quantised, so the box does not resize per digit mid-scrub); with
+   tabular figures 1ch is exactly one digit, so this is the room the value actually needs plus the
+   horizontal padding. It is the field's *natural* width, not a floor — where the column is
+   narrower the value is clipped with an ellipsis and the full number is in the field's tooltip. */
+.field input { width: calc(var(--field-chars, 6) * 1ch + 12px); text-overflow: ellipsis; }
 .field input::placeholder { color: var(--fg-3); }
-.field .unit { padding-right: 8px; font-size: var(--fs-2xs); color: var(--fg-2); letter-spacing: 0; }
+/* Chrome around the value never grows or shrinks — only the value does. */
+.field .unit { flex: none; padding: 0 6px 0 2px; font-size: var(--fs-2xs); color: var(--fg-2); letter-spacing: 0; white-space: nowrap; }
 .field .scrub {
-  display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 100%;
-  padding: 0 4px 0 7px; font-size: var(--fs-2xs); font-weight: 600; letter-spacing: .04em; color: var(--fg-2);
-  cursor: ew-resize; user-select: none; border-right: 1px solid var(--line);
+  display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 22px; height: 100%;
+  padding: 0 4px 0 6px; font-size: var(--fs-2xs); font-weight: 600; letter-spacing: .04em; color: var(--fg-2);
+  cursor: ew-resize; user-select: none; white-space: nowrap; border-right: 1px solid var(--line);
 }
 .field .scrub:hover { color: var(--accent-text); }
 .field.axis-x .scrub { color: var(--axis-x); }
@@ -128,6 +144,7 @@
   display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px 0 16px;
   border-bottom: 1px solid var(--line); flex: none;
 }
+.panel-head .label { color: var(--accent-text); }
 .panel-title { font-size: var(--fs-sm); font-weight: 600; color: var(--fg-0); }
 .panel-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .section { border-bottom: 1px solid var(--line); }
@@ -146,12 +163,35 @@
 .prop.wide { grid-template-columns: 1fr; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+/* A field on its own in a row fills the slot the row gives it — its natural width is now only as
+   wide as its value, so without this a lone field would sit in the middle of an empty column. */
+.prop > .v > .field, .row > .field { flex: 1 1 auto; }
+/* Two or three numeric fields in one row share it in equal, content-independent columns (basis 0,
+   no min-content floor). Equal columns are the point of these rows: the axis-coloured X/Y/Z scrub
+   handles are read down the column, so they have to line up. Sizing the boxes to their values
+   instead would make each box a different width, slide a neighbour under the pointer on every
+   frame of a scrub, and — once the values no longer fit — wrap two on one line and one on the
+   next. A value too long for its column is clipped with an ellipsis and carried in full in the
+   field's tooltip (see `fieldValueMayClip` in NumberField). Selects are left out: they size to
+   their longest option, which is the useful width for a dropdown. `.grid-2` / `.grid-3` already
+   do this with `repeat(N, 1fr)` tracks — `min-width: 0` on the field is what lets a track shrink
+   below the value, so the row keeps its columns instead of pushing the panel open. */
+.prop > .v:has(> .field ~ .field) > .field:not(.select),
+.row:has(> .field ~ .field) > .field:not(.select) { flex: 1 1 0; }
 /* Veloxity spec rows: label left, value right, weight 300, hairline rule between. */
 .stat { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line-strong); font-size: var(--fs-xs); font-weight: 300; }
 .stat:last-child { border-bottom: 0; }
 .stat .k { color: var(--fg-2); }
 .stat .v { color: var(--fg-0); font-variant-numeric: tabular-nums; }
 .hint { font-size: var(--fs-xs); color: var(--fg-2); line-height: 1.45; font-weight: 300; }
+
+/* The companion line to a display heading ("Scene" → "1 object · millimetres"). It carries the
+   brand blue against the white title, one weight heavier and a touch wider than a hint, because
+   at --fg-2 and weight 300 it read as disabled rather than as part of the heading. */
+.subhead {
+  font-size: var(--fs-xs); font-weight: 500; letter-spacing: .02em;
+  color: var(--accent-text); line-height: 1.45;
+}
 .divider { height: 1px; background: var(--line); margin: 4px 0; }
 
 /* ───────── list rows (outliner, windows, presets) ───────── */
@@ -289,7 +329,7 @@
    "Showroom" in extra-light. The weight contrast is the luxury note; nothing is italic or serif. */
 .brand { display: flex; align-items: baseline; gap: 7px; margin-right: 10px; }
 .brand .wordmark { font-family: var(--font-ui); font-size: 16px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--fg-0); }
-.brand .wordmark i { font-style: normal; font-weight: 200; letter-spacing: var(--track-display); text-transform: none; font-size: 19px; color: var(--fg-2); }
+.brand .wordmark i { font-style: normal; font-weight: 300; letter-spacing: -.005em; text-transform: none; font-size: 19px; color: var(--accent-text); }
 .brand .ver { font-size: 9.5px; letter-spacing: var(--track-label); text-transform: uppercase; color: var(--fg-3); }
 .scene-name { display: flex; align-items: center; gap: 6px; }
 .scene-name input { background: transparent; border: 1px solid transparent; border-radius: var(--r-sm); padding: 3px 8px; font-size: var(--fs-sm); font-weight: 500; color: var(--fg-0); outline: 0; width: 200px; }
@@ -319,7 +359,10 @@
   font-size: var(--fs-sm); color: var(--fg-1); text-align: left;
 }
 .menu-item:hover { background: var(--bg-3); color: var(--fg-0); }
-.menu-item.danger:hover { color: var(--danger); }
+/* A destructive item is red at rest, not only under the pointer: a flag that shows nothing until
+   you hover it cannot warn anyone, and Delete / Clear scene would otherwise read exactly like
+   Open and Save. Hover keeps the colour and takes the usual row background. */
+.menu-item.danger, .menu-item.danger:hover { color: var(--danger); }
 .menu-item .kbd { margin-left: auto; font-size: var(--fs-2xs); color: var(--fg-2); }
 .menu-item svg { width: 14px; height: 14px; stroke-width: 1.5; }
 .menu .sep { height: 1px; background: var(--line); margin: 5px 4px; }

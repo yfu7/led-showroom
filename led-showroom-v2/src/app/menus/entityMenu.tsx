@@ -26,6 +26,7 @@ import { useStore } from '@/app/store';
 import { instantiateCatalogItem } from '@/app/panels/Catalog';
 import { buildCatalog, catalogGroups, GROUP_LED, GROUP_STAGING, GROUP_VENUE } from '@/app/panels/catalogItems';
 import { addWindow, clearWindowSource, duplicateWindow, moveWindow, removeWindow } from '@/app/panels/contentActions';
+import { requestClearScene } from '@/app/shell/ClearSceneDialog';
 
 const DEG = Math.PI / 180;
 
@@ -270,7 +271,7 @@ function equipmentSubmenu(engine: Engine, point: Vec3): MenuItem[] {
   }));
 }
 
-/** Right-click on empty floor: paste, place, frame, select and the view presets. */
+/** Right-click on empty floor: paste, place, frame, select, the view presets and clear scene. */
 export function buildEmptyViewportMenu(engine: Engine, point: Vec3): MenuItem[] {
   const grid = engine.doc.environment.grid.visible;
   const items: MenuItem[] = [];
@@ -302,6 +303,9 @@ export function buildEmptyViewportMenu(engine: Engine, point: Vec3): MenuItem[] 
       label: 'Grid', icon: <Grid2x2 />, kbd: 'G', checked: grid,
       onSelect: () => engine.patchEnvironment(env => ({ ...env, grid: { ...env.grid, visible: !env.grid.visible } }), grid ? 'Hide grid' : 'Show grid'),
     },
+    'sep',
+    // Destructive and unrecoverable, so it sits last and only ever opens the shared confirm.
+    { label: 'Clear scene', icon: <Eraser />, danger: true, onSelect: requestClearScene },
   );
   return items;
 }

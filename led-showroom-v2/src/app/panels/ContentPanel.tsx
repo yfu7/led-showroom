@@ -308,12 +308,14 @@ export function ContentPanel({ wall }: Props) {
                     { value: 'px', label: 'px' }, { value: 'panels', label: 'Panels' }, { value: 'pct', label: '%' },
                   ]} />
                 </Prop>
+                {/* The two fields are direct children of the row: the equal-columns rule for a row
+                    of numeric fields keys off that adjacency, so a wrapper div would opt out. */}
                 <div className="row">
-                  <div className="grow">{rectField('w', 'x')}</div>
+                  {rectField('w', 'x')}
                   <IconButton size="sm" active={win.aspectLock} tip={win.aspectLock ? 'Unlock aspect ratio' : 'Lock aspect ratio'} onClick={toggleLock}>
                     {win.aspectLock ? <Lock /> : <LockOpen />}
                   </IconButton>
-                  <div className="grow">{rectField('h', 'y')}</div>
+                  {rectField('h', 'y')}
                 </div>
                 <div className="grid-2">
                   {rectField('x', 'x')}

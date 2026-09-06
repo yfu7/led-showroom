@@ -247,8 +247,19 @@ export class Engine extends Emitter<EngineEvents> implements DocHost {
     this.camera.setState(this.doc.view);
     this.frameAll(false);
   }
+  /**
+   * Clear the scene: a factory document in place of this one, with the undo history gone.
+   *
+   * The display unit and the snap increments carry over. They are how the user works, not part of
+   * what they built — someone modelling in millimetres on 5 mm steps did not ask to be put back on
+   * inches and 1" by emptying the floor, and the confirm dialog promises only that the objects,
+   * the venue, the floor and the lighting go.
+   */
   newDocument(): void {
-    this.loadDocument(createDocument(), 'New scene');
+    const { units, snap } = this.doc.settings;
+    const doc = createDocument();
+    doc.settings = { ...doc.settings, units, snap: { ...snap } };
+    this.loadDocument(doc, 'Clear scene');
   }
   /** First-run scene: one 5×5 wall standing at the origin. */
   seedDefaultScene(): void {

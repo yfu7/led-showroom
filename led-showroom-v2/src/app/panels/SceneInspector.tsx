@@ -3,19 +3,18 @@
  * units & snapping, scene actions, presets and exports. (RightDock supplies the panel head and
  * the scrolling body; this renders a display-font intro block plus the sections.)
  */
-import { useState } from 'react';
-import { Maximize } from 'lucide-react';
+import { Eraser, Maximize } from 'lucide-react';
 import type { Document, LightingPreset, SnapSettings } from '@/engine/document/types';
 import { UNITS, formatLength } from '@/engine/units';
 import { useDoc, useEngine } from '@/app/store';
 import { Button } from '@/app/components/Button';
-import { Modal } from '@/app/components/Modal';
 import { LengthField, NumberField } from '@/app/components/NumberField';
 import { Prop, Section, Stat } from '@/app/components/Section';
 import { Segmented } from '@/app/components/Segmented';
 import { Select } from '@/app/components/Select';
 import { Slider } from '@/app/components/Slider';
 import { ToggleRow } from '@/app/components/Toggle';
+import { requestClearScene } from '@/app/shell/ClearSceneDialog';
 import { VenuePanel } from './VenuePanel';
 import { PresetsPanel } from './PresetsPanel';
 import { ExportPanel } from './ExportPanel';
@@ -39,7 +38,6 @@ export function SceneInspector() {
   const unit = doc.settings.units;
   const env = doc.environment;
   const settings = doc.settings;
-  const [confirmNew, setConfirmNew] = useState(false);
 
   const patchEnv = (fn: (e: Env) => Env, label: string, mergeKey?: string) => engine.patchEnvironment(fn, label, mergeKey);
   const patchSnap = (p: Partial<SnapSettings>, label = 'Snapping') => engine.patchSettings({ snap: { ...settings.snap, ...p } }, label);
@@ -52,14 +50,16 @@ export function SceneInspector() {
     <>
       <div style={{ padding: '14px 16px 12px', borderBottom: '1px solid var(--line)' }}>
         <div className="display" style={{ fontSize: 'var(--fs-2xl)', lineHeight: 1.1, color: 'var(--fg-0)' }}>Scene</div>
-        <div className="hint num" style={{ marginTop: 2 }}>{total === 0 ? 'Empty scene' : `${total} ${total === 1 ? 'object' : 'objects'}`} · {unitLong}</div>
+        <div className="subhead num" style={{ marginTop: 2 }}>{total === 0 ? 'Empty scene' : `${total} ${total === 1 ? 'object' : 'objects'}`} · {unitLong}</div>
       </div>
 
       <Section title="Venue"><VenuePanel /></Section>
 
       <Section title="Floor & grid">
         <ToggleRow label="Grid" checked={env.grid.visible} onChange={v => patchEnv(e => ({ ...e, grid: { ...e.grid, visible: v } }), v ? 'Show grid' : 'Hide grid')} />
-        <Prop label="Spacing">
+        {/* Wide: "minor"/"major" are words, not one-glyph scrub handles, and with a unit suffix
+            too the pair cannot fit beside a 92px label — in mm the value was clipped to 2 digits. */}
+        <Prop label="Spacing" wide>
           <LengthField inches={env.grid.minorIn} unit={unit} min={1} max={env.grid.majorIn} scrub="minor" title="Minor grid spacing"
             onChange={v => patchEnv(e => ({ ...e, grid: { ...e.grid, minorIn: v } }), 'Grid spacing', 'env:grid.minor')} />
           <LengthField inches={env.grid.majorIn} unit={unit} min={env.grid.minorIn} max={1200} scrub="major" title="Major grid spacing"
@@ -114,22 +114,12 @@ export function SceneInspector() {
         <Stat label="Floor" value={formatLength(env.floor.sizeIn, unit)} />
         <div className="grid-2" style={{ marginTop: 6 }}>
           <Button size="sm" icon={<Maximize size={14} strokeWidth={1.5} />} onClick={() => engine.frameAll()}>Frame all</Button>
-          <Button size="sm" variant="ghost" onClick={() => setConfirmNew(true)}>New scene</Button>
+          <Button size="sm" variant="ghost" icon={<Eraser size={14} strokeWidth={1.5} />} onClick={requestClearScene}>Clear scene</Button>
         </div>
       </Section>
 
       <Section title="Presets" defaultOpen={false}><PresetsPanel /></Section>
       <Section title="Export"><ExportPanel /></Section>
-
-      <Modal open={confirmNew} title="New scene" onClose={() => setConfirmNew(false)} width="min(420px, 92vw)">
-        <div className="hint" style={{ fontSize: 'var(--fs-sm)' }}>
-          This replaces the current scene and clears its undo history. Save it as a preset first if you want to come back to it.
-        </div>
-        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
-          <Button variant="ghost" onClick={() => setConfirmNew(false)}>Cancel</Button>
-          <Button variant="primary" onClick={() => { setConfirmNew(false); engine.newDocument(); engine.toast('info', 'New scene'); }}>Start new scene</Button>
-        </div>
-      </Modal>
     </>
   );
 }

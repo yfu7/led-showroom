@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  Box, ChevronDown, FilePlus, FolderOpen, Image, Import, Maximize, Moon, PanelLeft, PanelRight,
+  Box, ChevronDown, Eraser, FolderOpen, Image, Import, Maximize, Moon, PanelLeft, PanelRight,
   CircleQuestionMark, Redo2, Save, Settings2, Sun, Undo2, Video,
 } from 'lucide-react';
 import { useStore } from '@/app/store';
@@ -12,6 +12,7 @@ import { UNITS, type Unit } from '@/engine/units';
 import type { Engine } from '@/engine/Engine';
 import { importV1Presets } from '@/engine/persistence/presets';
 import { exportSceneFile, importSceneFile, downloadBlob, sceneFileName } from '@/engine/persistence/sceneFile';
+import { ClearSceneDialog, requestClearScene } from './ClearSceneDialog';
 
 
 /** Application header: brand, file menu, scene name, history, units, theme, layout and settings. */
@@ -39,7 +40,6 @@ export function TopBar() {
   if (!engine || !doc) return <header className="topbar"><Brand /></header>;
 
   /* ───── file actions ───── */
-  const newScene = () => { engine.newDocument(); engine.toast('info', 'New scene'); };
   const openScene = () => fileInput.current?.click();
   const onFile = async (file: File) => {
     try {
@@ -66,7 +66,6 @@ export function TopBar() {
   };
 
   const fileItems: MenuItem[] = [
-    { label: 'New scene', icon: <FilePlus />, onSelect: newScene },
     { label: 'Open .showroom.json…', icon: <FolderOpen />, onSelect: openScene },
     { label: 'Save .showroom.json', icon: <Save />, onSelect: saveScene },
     'sep',
@@ -75,6 +74,10 @@ export function TopBar() {
     { label: 'Save image…', icon: <Image />, onSelect: () => setDialog('image') },
     { label: 'Record video…', icon: <Video />, onSelect: () => setDialog('video') },
     { label: 'Export glTF…', icon: <Box />, onSelect: () => setDialog('gltf') },
+    'sep',
+    // Last, behind a separator and its confirm: it used to sit first, one slip above "Open", and
+    // wiped the scene with no way back.
+    { label: 'Clear scene', icon: <Eraser />, danger: true, onSelect: requestClearScene },
   ];
 
   /* ───── settings ───── */
@@ -137,6 +140,7 @@ export function TopBar() {
         minWidth={220}
       />
 
+      <ClearSceneDialog />
       {dialog === 'image' && <SaveImageDialog onClose={closeDialog} />}
       {dialog === 'video' && <RecordVideoDialog onClose={closeDialog} />}
       {dialog === 'gltf' && <ExportGltfDialog onClose={closeDialog} />}

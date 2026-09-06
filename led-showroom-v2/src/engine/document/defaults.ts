@@ -263,6 +263,59 @@ export function createRoomForScene(
   return room;
 }
 
+/* ───────────────────────── trade-show booth presets ───────────────────────── */
+
+/** A standard trade-show booth footprint, expressed the way the show floor sells it: feet. */
+export interface BoothPreset {
+  /** Stable id, also used as the catalog card id. */
+  id: string;
+  /** Display name, e.g. "10 × 10 booth". */
+  label: string;
+  /** Across the aisle frontage. */
+  widthFt: number;
+  /** Back to front, away from the back wall. */
+  depthFt: number;
+  /** Wall height — see {@link BOOTH_HEIGHT_FT}. */
+  heightFt: number;
+}
+
+/**
+ * Wall height for every booth preset: 8 ft.
+ *
+ * A booth is not a venue hall, so the 13 ft of {@link createRoom} would be arbitrary here — hall
+ * ceilings run anywhere from 16 to 30+ ft and differ per venue, so modelling one is a guess that
+ * says nothing useful. 8 ft is the number an exhibitor actually designs against: the standard US
+ * inline back drape is 8 ft high (with 3 ft side rails over the front 5 ft), and it is the display
+ * height limit for a linear booth. Putting the room's walls on that line turns them into the drape
+ * datum — if an LED wall pokes above them, it is over height for an inline booth. Islands carry no
+ * drape at all, but one height across the three presets keeps the reference readable, and the room
+ * ceiling stays off by default so 8 ft never boxes in a taller build.
+ */
+export const BOOTH_HEIGHT_FT = 8;
+
+/** The three standard US booth footprints, smallest first. Width is frontage, depth runs back. */
+export const BOOTH_PRESETS: readonly BoothPreset[] = [
+  { id: 'booth-10x10', label: '10 × 10 booth', widthFt: 10, depthFt: 10, heightFt: BOOTH_HEIGHT_FT },
+  { id: 'booth-20x10', label: '20 × 10 booth', widthFt: 20, depthFt: 10, heightFt: BOOTH_HEIGHT_FT },
+  { id: 'booth-20x20', label: '20 × 20 booth', widthFt: 20, depthFt: 20, heightFt: BOOTH_HEIGHT_FT },
+];
+
+export function findBoothPreset(id: string): BoothPreset | undefined {
+  return BOOTH_PRESETS.find(p => p.id === id);
+}
+
+/**
+ * A booth-sized venue room, placed against the scene exactly like {@link createRoomForScene}:
+ * centred on the existing LED walls with the back wall clearing their rear face.
+ */
+export function createBoothForScene(
+  preset: BoothPreset, entities: readonly Entity[] = [], wallFromBackIn = DEFAULT_WALL_FROM_BACK_IN,
+): RoomEntity {
+  const room = createRoomForScene(entities, preset.widthFt, preset.heightFt, preset.depthFt, wallFromBackIn);
+  room.name = preset.label;
+  return room;
+}
+
 export function createDimension(a: Vec3, b: Vec3): DimensionEntity {
   return {
     id: newId('dim'),

@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Crosshair, Image, Plus, Sparkles, Upload } from 'lucide-react';
 import type { Engine } from '@/engine/Engine';
 import { isRoom } from '@/engine/document/types';
-import { createRoomForScene, createSplat } from '@/engine/document/defaults';
+import { BOOTH_PRESETS, type BoothPreset, createBoothForScene, createRoomForScene, createSplat } from '@/engine/document/defaults';
 import { fovFromFocal35, readExifFocal35 } from '@/engine/calibration/perspective';
 import { useDoc, useEngine, useStore } from '@/app/store';
 import { Button } from '@/app/components/Button';
@@ -162,6 +162,11 @@ export function VenuePanel() {
   const fov = useCameraFov(engine);
   const room = doc.entities.find(isRoom);
   const splatInput = useRef<HTMLInputElement>(null);
+  /** Resize the existing room to a booth footprint, or add one if the scene has no room yet. */
+  const setBoothFootprint = (p: BoothPreset) => {
+    if (!room) { engine.add(createBoothForScene(p, engine.doc.entities)); return; }
+    engine.update(room.id, { widthIn: p.widthFt * 12, heightIn: p.heightFt * 12, depthIn: p.depthFt * 12 }, { label: 'Booth footprint' });
+  };
   const [genVideos, setGenVideos] = useState<SplatVideo[] | null>(null);
 
   useEffect(() => {
@@ -306,7 +311,7 @@ export function VenuePanel() {
       {room ? (
         <div className="hint">
           <a href="#select-room" onClick={e => { e.preventDefault(); engine.select([room.id]); }}>Select room</a>
-          {' '}— its size and surface photos are edited in the room inspector.
+          {' '}— its surface photos and colour are edited in the room inspector.
         </div>
       ) : (
         <>
@@ -314,6 +319,18 @@ export function VenuePanel() {
           <div className="hint">A proportional room built around the wall — navigate it like a floating camera.</div>
         </>
       )}
+      {/* Footprints stay available once a room exists: trying one size and then another is the
+          obvious next move, so an existing room is resized in place (one undo step, its position,
+          photos and colour kept) instead of the panel asking for it to be deleted first. */}
+      <div className="row">
+        {BOOTH_PRESETS.map(p => (
+          <Button key={p.id} size="sm" className="grow" onClick={() => setBoothFootprint(p)}
+            tip={`${p.label} — ${room ? 'resize the room to this footprint' : 'a room at this footprint'}, walls at the 8 ft drape height`}>
+            {p.widthFt} × {p.depthFt}
+          </Button>
+        ))}
+      </div>
+      <div className="hint">Trade-show booth footprints in feet, walls on the 8 ft drape line.</div>
 
       <div className="divider" />
       <span className="label">Gaussian splat</span>
