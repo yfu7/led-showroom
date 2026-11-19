@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Dimensions of a folded shape land on the folded shape
+
+A custom-shape wall could always be folded — it takes the same `corners` list a rectangular one
+does — but its dimensions were drawn flat, under a comment asserting that "custom walls have no
+corners". Past the fold the lines floated off the panels they measured and their labels bunched up
+around the corner, which is what the pile-up in an L-shaped build actually was. It was never
+crowding: two dimensions on the same side of a shape are never closer than a panel pitch, because
+same side and same offset means the same edge run and those are merged before anything is drawn.
+
+Each run is now drawn in the frame of the segment carrying it, the way segment widths already were,
+and a horizontal run crossing a fold is split there. That is not only a placement fix: a span bent
+through 90 degrees has no single length, so the old drawing labelled a six-panel top edge 151.5"
+when what the build needs is two 75.7" faces. A four-row wall folded after column 2 goes from six
+dimensions, two of them fictional, to eight that each describe one real edge.
+
 ### The truss we actually own
 
 The catalog carried two placeholder trusses — a generic 12" box truss and a generic upright. Beside

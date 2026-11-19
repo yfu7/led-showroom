@@ -239,6 +239,37 @@ describe('buildWallDimensions — custom shapes', () => {
     expect(labels).toEqual(['18.9"', '18.9"', '25.2"', '25.2"', '37.9"', '50.5"']);
   });
 
+  it('splits a folded custom shape at the fold and draws each piece on the face it measures', () => {
+    //  col  0 1 2 | 3 4 5     folded 90 deg after column 2
+    //  r0   # # # | # # #
+    //  r1   # # # | # # #
+    //  r2   # #
+    //  r3   # #
+    const wall = createLedWall({ cols: 6, rows: 4 });
+    wall.shape = { mode: 'custom', cells: [
+      '0,0', '0,1', '0,2', '0,3', '1,0', '1,1', '1,2', '1,3',
+      '2,0', '2,1', '3,0', '3,1', '4,0', '4,1', '5,0', '5,1',
+    ] };
+    wall.corners = [{ afterCol: 2, angle: 90 }];
+    const g = buildWallDimensions(fixture(wall));
+
+    // Six boundary runs, but the top run (cols 0..5) and the row-1 bottom run (cols 2..5) each
+    // cross the fold, and a span bent through 90 deg is two edges, not one.
+    expect(lines(g).length).toBe(8);
+    expect(sprites(g).length).toBe(8);
+
+    // Five pieces belong to the near face and three to the folded one, each carrying its own yaw
+    // rather than being drawn flat across the fold.
+    const yaws = lines(g).map(l => l.rotation.y);
+    expect(yaws.filter(y => Math.abs(y) < 1e-9).length).toBe(5);
+    expect(yaws.filter(y => Math.abs(y - Math.PI / 2) < 1e-9).length).toBe(3);
+
+    // 3 panels = 75.7" and 4 rows = 75.8"; nothing reads 151.5" (6 panels) or 101.0" (4 panels),
+    // which is what a single straight line through the fold used to claim.
+    const labels = sprites(g).map(s => s.userData.label as string).sort();
+    expect(labels).toEqual(['25.2"', '37.9"', '37.9"', '50.5"', '75.7"', '75.7"', '75.7"', '75.8"']);
+  });
+
   it('places the bottom edge of the lowest row at y = 0 and the top at totalH', () => {
     const wall = createLedWall({ cols: 1, rows: 2 });
     wall.shape = { mode: 'custom', cells: ['0,0', '0,1'] };

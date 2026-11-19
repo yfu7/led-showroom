@@ -298,13 +298,37 @@ function linearDimensionPoints(s: LinearDimSpec): number[] {
 
 /* ───────────────────────────── Builders ───────────────────────────── */
 
+/** Where a flat run of columns sits in the wall-local frame. */
+interface Frame {
+  /** Centre of the run in wall-local XZ. */
+  cx: number;
+  cz: number;
+  /** Yaw of the run (three.js `rotation.y`). */
+  rotY: number;
+}
+
+/** A {@link Frame} plus the column index at its centre, so column `c` is at local x `(c - mid) * pitch`. */
+interface SegmentFrame extends Frame {
+  mid: number;
+}
+
+/**
+ * Map a point (lx, y, lz) in a segment's local frame to wall-local coordinates. three.js
+ * `rotation.y = θ` maps local +x to (cos θ, −sin θ) and local +z to (sin θ, cos θ) in XZ, so a
+ * label placed through this sits in front of the segment's face however the segment is folded.
+ */
+function segmentToWall(f: Frame, lx: number, y: number, lz: number): THREE.Vector3 {
+  const cos = Math.cos(f.rotY), sin = Math.sin(f.rotY);
+  return new THREE.Vector3(f.cx + lx * cos + lz * sin, y, f.cz - lx * sin + lz * cos);
+}
+
 export interface BuildWallDimensionsArgs {
   wall: LedWallEntity;
   /** Wall dimensions (cols, rows, gap, totalW, totalH, wallWPx, wallHPx). */
   dims: WallDims;
   /** Per-column placement in the wall-local XZ plane (corners applied). */
   layout: ColumnPlacement[];
-  /** Flat runs of columns between corners. Only used for rect walls. */
+  /** Flat runs of columns between corners. Both wall kinds draw each dimension in its run's frame. */
   segments: Segment[];
   /** Display unit for labels. */
   unit: Unit;
@@ -318,7 +342,8 @@ export interface BuildWallDimensionsArgs {
  *   flat segment between corners (label `125.9" (1720 px)`), plus one height dimension on the
  *   left of the first segment.
  * - Custom-shape walls (v1 `buildCustomShapeDimensions`, index.html 4308-4413): one dimension
- *   per boundary edge run from `computeShapeEdgeRuns`, offset outward along the edge normal.
+ *   per boundary edge run from `computeShapeEdgeRuns`, offset outward along the edge normal, split
+ *   at every fold so each piece lies on the face it measures.
  *
  * Every child has `renderOrder` 999 and a `depthTest: false` material. Children alternate
  * `LineSegments` (geometry) and `Sprite` (label), one pair per dimension.
@@ -337,7 +362,7 @@ export function buildWallDimensions(args: BuildWallDimensionsArgs): THREE.Group 
 
   // Same rect/custom decision as v1 (`if (_wall && !isRectWall(_wall))`, index.html 4427-4431):
   // a custom wall with no cells takes the custom path and draws nothing.
-  if (!isRectWall(wall)) buildCustomShapeDimensions(group, wall, dims, layout, zFront, unit);
+  if (!isRectWall(wall)) buildCustomShapeDimensions(group, wall, dims, layout, segments, zFront, unit);
   else buildRectDimensions(group, dims, layout, segments, zFront, unit);
   return group;
 }
@@ -379,18 +404,11 @@ function buildRectDimensions(
   };
 
   /**
-   * Map a point (lx, y, lz) expressed in a segment's local frame (rotated by rotY about Y at
-   * (cx, 0, cz)) to wall-local coordinates. three.js rotation.y = θ maps local +x to
-   * (cos θ, -sin θ) and local +z to (sin θ, cos θ) in XZ.
-   *
    * v1 placed the label sprites at `cx - zFront*sin, cz - zFront*cos`, i.e. mirrored to
    * z = -zFront behind the wall for an unrotated segment (invisible only because the sprite has
-   * depthTest off). The correct rotation is used here so labels sit in front of the face.
+   * depthTest off). `segmentToWall` uses the correct rotation, so labels sit in front of the face.
    */
-  const toWall = (f: { cx: number; cz: number; rotY: number }, lx: number, y: number, lz: number) => {
-    const cos = Math.cos(f.rotY), sin = Math.sin(f.rotY);
-    return new THREE.Vector3(f.cx + lx * cos + lz * sin, y, f.cz - lx * sin + lz * cos);
-  };
+  const toWall = segmentToWall;
 
   // ── Width dimension per segment/face ──
   for (let si = 0; si < segments.length; si++) {
@@ -429,67 +447,138 @@ function buildRectDimensions(
   group.add(hLabel);
 }
 
-/** Custom-shape dimensions (v1 index.html 4308-4413), one per boundary edge run. */
+/**
+ * One dimension per boundary edge run of a custom shape (v1 index.html 4308-4413).
+ *
+ * v1 — and v2 until now — drew every one of them flat in the wall-local XY plane, on the comment's
+ * assumption that "custom walls have no corners". They can: a shape is folded by the same
+ * `corners` list a rect wall uses. Past a fold the columns are rotated away, so a flat dimension
+ * line floated off the panels it measured and the far segment's labels piled up near the fold.
+ *
+ * Each run is therefore drawn in the frame of the segment that carries it, the way
+ * {@link buildRectDimensions} already drew segment widths, and a horizontal run crossing a fold is
+ * split there: a span bent through an angle has no single length, and the two faces it covers are
+ * two distinct edges that a build has to cut to.
+ */
 function buildCustomShapeDimensions(
   group: THREE.Group,
   wall: LedWallEntity,
   d: WallDims,
   layout: ColumnPlacement[],
+  segments: Segment[],
   zFront: number,
   unit: Unit,
 ): void {
   const panelW = d.panelW;
   const panelH = d.panelH;
+  const pitch = panelW + d.gap;
   // v1 stored cells as a Set and computeShapeEdgeRuns calls `cells.has`; the document stores a
   // string[], so convert through the shared `filledCells` helper (index.html 4319-4320).
   const runs: EdgeRun[] = computeShapeEdgeRuns(filledCells(wall));
+  if (runs.length === 0) return;
 
-  // Cell geometry in wall-local X/Y (custom walls have no corners, so z = 0 and rotY = 0).
-  //   left  X = layout[c].x - panelW / 2      right X = layout[c].x + panelW / 2
-  //   top   Y = totalH - r * (panelH + gap)   bottom Y = top - panelH
-  const cellLeftX = (c: number) => layout[c].x - panelW / 2;
-  const cellRightX = (c: number) => layout[c].x + panelW / 2;
+  // Columns inside a segment are evenly spaced along its heading (computeColumnLayout steps by
+  // `panelW + gap` between them), so the segment's own centre is the midpoint of its first and last
+  // column and column `c` sits at local x `(c - mid) * pitch`. A segment reaching past the layout is
+  // skipped rather than thrown on: unlike a rect wall, a custom shape can carry cells for columns a
+  // later edit removed, and they are already invisible.
+  const frames = segments.map((seg): SegmentFrame | null => {
+    const first = layout[seg.startCol] as ColumnPlacement | undefined;
+    const last = layout[seg.endCol] as ColumnPlacement | undefined;
+    if (!first || !last) return null;
+    return {
+      cx: (first.x + last.x) / 2,
+      cz: (first.z + last.z) / 2,
+      rotY: first.rotY,
+      mid: (seg.startCol + seg.endCol) / 2,
+    };
+  });
+
+  const localX = (f: SegmentFrame, c: number) => (c - f.mid) * pitch;
   const cellTopY = (r: number) => d.totalH - r * (panelH + d.gap);
   const cellBotY = (r: number) => cellTopY(r) - panelH;
 
-  runs.forEach((run, i) => {
-    const span = run.toIdx - run.fromIdx + 1;
+  const dims: EdgeDim[] = [];
+  for (const run of runs) {
     if (run.axis === 'h') {
-      // Horizontal edge on the top (ny = +1) or bottom (ny = -1) of row `perpIdx`.
+      // Horizontal edge on the top (ny = +1) or bottom (ny = -1) of row `perpIdx`, one piece per
+      // segment it covers. The pieces meet at the fold: computeColumnLayout steps half a panel
+      // either side of a corner, so the last column's right edge and the next one's left edge are
+      // the same point in two frames.
       const dir: 1 | -1 = run.ny > 0 ? 1 : -1;
-      const yEdge = dir > 0 ? cellTopY(run.perpIdx) : cellBotY(run.perpIdx);
-      const x0 = cellLeftX(run.fromIdx);
-      const x1 = cellRightX(run.toIdx);
-      const lengthIn = span * panelW + (span - 1) * d.gap;
-      const lineY = yEdge + dir * CUSTOM.offset;
-      const pts = linearDimensionPoints({
-        axis: 'x', a: x0, b: x1, edge: yEdge, line: lineY, dir, z: zFront,
-        extGap: CUSTOM.extGap, extOvershoot: CUSTOM.extOvershoot, tickHalf: CUSTOM.tickHalf,
-      });
-      group.add(makeLineSegments(pts, `dim-edge-${i}`));
-
-      const label = createLabelSprite(formatEdgeDimensionLabel(lengthIn, unit));
-      label.position.set((x0 + x1) / 2, lineY + dir * CUSTOM.labelOffset, zFront);
-      group.add(label);
+      const edge = dir > 0 ? cellTopY(run.perpIdx) : cellBotY(run.perpIdx);
+      for (let si = 0; si < segments.length; si++) {
+        const f = frames[si];
+        if (!f) continue;
+        const from = Math.max(run.fromIdx, segments[si].startCol);
+        const to = Math.min(run.toIdx, segments[si].endCol);
+        if (from > to) continue;
+        const span = to - from + 1;
+        dims.push({
+          frame: f, axis: 'x', dir, edge,
+          lo: localX(f, from) - panelW / 2,
+          hi: localX(f, to) + panelW / 2,
+          lengthIn: span * panelW + (span - 1) * d.gap,
+        });
+      }
     } else {
-      // Vertical edge on the left (nx = -1) or right (nx = +1) of column `perpIdx`.
+      // Vertical edge on the left (nx = -1) or right (nx = +1) of column `perpIdx` — one column, so
+      // one segment, and a fold cannot cut it.
+      const si = segments.findIndex(seg => run.perpIdx >= seg.startCol && run.perpIdx <= seg.endCol);
+      const f = si < 0 ? null : frames[si];
+      if (!f) continue;
       const dir: 1 | -1 = run.nx < 0 ? -1 : 1;
-      const xEdge = dir < 0 ? cellLeftX(run.perpIdx) : cellRightX(run.perpIdx);
-      const y0 = cellTopY(run.fromIdx);
-      const y1 = cellBotY(run.toIdx);
-      const lengthIn = span * panelH + (span - 1) * d.gap;
-      const lineX = xEdge + dir * CUSTOM.offset;
-      const pts = linearDimensionPoints({
-        axis: 'y', a: y0, b: y1, edge: xEdge, line: lineX, dir, z: zFront,
-        extGap: CUSTOM.extGap, extOvershoot: CUSTOM.extOvershoot, tickHalf: CUSTOM.tickHalf,
+      const span = run.toIdx - run.fromIdx + 1;
+      dims.push({
+        frame: f, axis: 'y', dir,
+        edge: localX(f, run.perpIdx) + dir * (panelW / 2),
+        lo: cellBotY(run.toIdx),
+        hi: cellTopY(run.fromIdx),
+        lengthIn: span * panelH + (span - 1) * d.gap,
       });
-      group.add(makeLineSegments(pts, `dim-edge-${i}`));
-
-      const label = createLabelSprite(formatEdgeDimensionLabel(lengthIn, unit));
-      label.position.set(lineX + dir * CUSTOM.labelOffset, (y0 + y1) / 2, zFront);
-      group.add(label);
     }
+  }
+
+  dims.forEach((p, i) => {
+    const horizontal = p.axis === 'x';
+    // Two dimensions on the same side of a shape are never closer than a panel pitch — same side
+    // and same offset means the same edge run, which `computeShapeEdgeRuns` has already merged —
+    // so every line sits a flat `offset` out from the edge it measures, with nothing to stack.
+    const line = p.edge + p.dir * CUSTOM.offset;
+    const pts = linearDimensionPoints({
+      // v1 ran a vertical dimension top-to-bottom; the geometry is the same either way.
+      axis: p.axis, a: horizontal ? p.lo : p.hi, b: horizontal ? p.hi : p.lo,
+      edge: p.edge, line, dir: p.dir, z: zFront,
+      extGap: CUSTOM.extGap, extOvershoot: CUSTOM.extOvershoot, tickHalf: CUSTOM.tickHalf,
+    });
+    const lines = makeLineSegments(pts, `dim-edge-${i}`);
+    lines.position.set(p.frame.cx, 0, p.frame.cz);
+    lines.rotation.y = p.frame.rotY;
+    group.add(lines);
+
+    const along = (p.lo + p.hi) / 2;
+    const across = line + p.dir * CUSTOM.labelOffset;
+    const label = createLabelSprite(formatEdgeDimensionLabel(p.lengthIn, unit));
+    label.position.copy(
+      horizontal ? segmentToWall(p.frame, along, across, zFront) : segmentToWall(p.frame, across, along, zFront),
+    );
+    group.add(label);
   });
+}
+
+/** One boundary edge run, resolved into the frame of the segment that carries it. */
+interface EdgeDim {
+  frame: SegmentFrame;
+  /** `x` measures a horizontal span, `y` a vertical one — the axis of {@link linearDimensionPoints}. */
+  axis: 'x' | 'y';
+  /** Outward direction from the measured edge towards the dimension line. */
+  dir: 1 | -1;
+  /** The measured span along `axis`, low to high. */
+  lo: number;
+  hi: number;
+  /** Position of the measured edge across `axis`. */
+  edge: number;
+  lengthIn: number;
 }
 
 /* ───────────────────────────── Disposal ───────────────────────────── */
