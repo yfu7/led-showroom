@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 2.2.0 — 2026-11-19
+
+The truss, the clamps and the bolt holes we actually own, the rig that holds a wall up, and the
+count that goes to the warehouse. Measurements snap to real hardware rather than to triangles,
+builds save as files on this computer, and the mouse pans before it orbits.
 
 ### Build list: what the scene asks the warehouse to pull
 
