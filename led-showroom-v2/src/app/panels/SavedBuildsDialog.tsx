@@ -49,8 +49,18 @@ export function SavedBuildsDialog({ onClose }: { onClose(): void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [armed, setArmed] = useState<string | null>(null);
   const [open, setOpen] = useState<Set<string>>(() => new Set());
+  /*
+   * Guards the async handlers against a dialog that closed under them. Set on EVERY mount, not only
+   * the first: StrictMode mounts, unmounts and mounts again in development, and a ref left false by
+   * that first cleanup suppresses every setState for the life of the dialog — the listing arrives
+   * and the dialog sits on "Looking…" forever. Declared above the effect that loads the listing, so
+   * it is true again before that one runs.
+   */
   const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
 
   const refresh = useCallback(async () => {
     const next = await listStoredScenes();
