@@ -4,6 +4,11 @@
  * Given a surface hit (world point + the mesh that was hit) find the best snap target within a
  * screen radius (default 10 px):
  *
+ *   element   a corner, edge midpoint, face centre or the centre of an element's own box — the
+ *             boxes the caller passes in `elements`. Unlike every other kind these are tested even
+ *             when the ray misses all geometry, which is exactly what happens a few pixels outside
+ *             a silhouette corner: the corner you are aiming at is the one a hit-only snap cannot
+ *             see, because the ray that would reach it passes beside the mesh.
  *   vertex    a vertex of the hit mesh (geometry position attribute → world; skipped for meshes
  *             with ≥ `maxVertices` vertices, default 20 000)
  *   midpoint  the midpoint of one of the three edges of the hit triangle
@@ -13,12 +18,12 @@
  *   surface   nothing snapped — the raw hit point
  *
  * Candidates are compared in SCREEN space (`projectedDistance`), so snapping feels the same at
- * any zoom. Within the radius the kinds rank vertex > midpoint > grid > floor; ties inside a
- * kind go to the closest candidate.
+ * any zoom. Within the radius the kinds rank element = vertex > midpoint > grid > floor; ties
+ * inside a kind go to the closest candidate.
  */
 import * as THREE from 'three';
 
-export type SnapKind = 'vertex' | 'midpoint' | 'grid' | 'surface' | 'floor';
+export type SnapKind = 'element' | 'vertex' | 'midpoint' | 'grid' | 'surface' | 'floor';
 
 export interface SnapResult {
   point: THREE.Vector3;
@@ -45,6 +50,8 @@ export interface SnapOptions {
   camera: THREE.Camera;
   /** Viewport size in CSS pixels. */
   viewport: { width: number; height: number };
+  /** Boxes whose corners, edge midpoints, face centres and centre snap as `element`. */
+  elements?: ElementBox[];
   /** Screen radius (px) inside which a candidate snaps. Default 10. */
   radiusPx?: number;
   /** Ground grid pitch in inches (document `environment.grid.minorIn`). 0 / undefined = no grid snap. */
@@ -55,11 +62,61 @@ export interface SnapOptions {
   floorY?: number;
 }
 
+/**
+ * One element's box, in the element's OWN frame plus the transform that places it.
+ *
+ * Not a world `Box3`: an axis-aligned world box around a rotated element has its corners out in
+ * the air beside it, which is the one thing a snap target must never be.
+ */
+export interface ElementBox {
+  /** Box centre in its own frame (a local bounding box is rarely centred on the origin). */
+  center: THREE.Vector3;
+  /** Half extents in that frame. */
+  half: THREE.Vector3;
+  /** That frame → world. */
+  matrix: THREE.Matrix4;
+}
+
+/**
+ * The 27 feature points of a box — 8 corners, 12 edge midpoints, 6 face centres and the centre —
+ * which is every combination of {-1, 0, +1} along the three axes.
+ *
+ * `visit` is handed the SAME vector each time; copy it if you keep it.
+ */
+export function elementFeaturePoints(box: ElementBox, visit: (p: THREE.Vector3) => void, out = new THREE.Vector3()): void {
+  for (let i = -1; i <= 1; i++) {
+    for (let j = -1; j <= 1; j++) {
+      for (let k = -1; k <= 1; k++) {
+        out.set(box.center.x + i * box.half.x, box.center.y + j * box.half.y, box.center.z + k * box.half.z);
+        visit(out.applyMatrix4(box.matrix));
+      }
+    }
+  }
+}
+
+/** An {@link ElementBox} from local-space bounds and the object's world matrix. Null when empty. */
+export function elementBoxFromLocal(local: THREE.Box3, matrixWorld: THREE.Matrix4): ElementBox | null {
+  if (local.isEmpty()) return null;
+  return {
+    center: local.getCenter(new THREE.Vector3()),
+    half: local.getSize(new THREE.Vector3()).multiplyScalar(0.5),
+    matrix: matrixWorld.clone(),
+  };
+}
+
 export const DEFAULT_SNAP_RADIUS_PX = 10;
 export const DEFAULT_MAX_SNAP_VERTICES = 20_000;
 
-/** Kind ranking used when several candidates are inside the radius (lower wins). */
-const KIND_RANK: Record<SnapKind, number> = { vertex: 0, midpoint: 1, grid: 2, floor: 3, surface: 4 };
+/**
+ * Kind ranking used when several candidates are inside the radius (lower wins).
+ *
+ * `element` and `vertex` deliberately share rank 0, so between those two the CLOSER one wins: a
+ * box corner 9 px away must not beat a real vertex 1 px away on a part that is nothing like a box
+ * (a truss, a clamp, a figure), nor the other way round. Element points are considered first, so a
+ * feature that is both — a cabinet's corner is a box corner AND a mesh vertex — reports as the
+ * element it belongs to.
+ */
+const KIND_RANK: Record<SnapKind, number> = { element: 0, vertex: 0, midpoint: 1, grid: 2, floor: 3, surface: 4 };
 
 const _pa = new THREE.Vector3();
 const _pb = new THREE.Vector3();
@@ -155,6 +212,13 @@ export function snapPoint(hit: SnapHit, opts: SnapOptions): SnapResult {
       state.best = { point: p.clone(), kind, d };
     }
   };
+
+  // Element features first: they are the only candidates that do not need the ray to have landed
+  // on anything, and considering them before the mesh gives a point that is both the element kind.
+  if (opts.elements) {
+    const v = new THREE.Vector3();
+    for (const box of opts.elements) elementFeaturePoints(box, p => consider(p, 'element'), v);
+  }
 
   const mesh = hit.object as THREE.Mesh | null | undefined;
   const geometry = mesh && (mesh as THREE.Mesh).isMesh ? mesh.geometry : null;

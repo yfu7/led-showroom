@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import type { Document, Entity } from '../document/types';
 import type { AssetStore } from '../persistence/AssetStore';
+import type { ElementBox } from '../tools/pointSnap';
 
 export interface RenderContext {
   /** Read-only access to the whole document (walls need global settings, stages, span mode). */
@@ -38,6 +39,13 @@ export interface EntityRenderer<E extends Entity = Entity> {
   bounds(out?: THREE.Box3): THREE.Box3;
   /** Objects used for selection outlines (meshes). */
   selectionMeshes(): THREE.Mesh[];
+  /**
+   * Boxes whose corners, edges and faces are REAL features of this element, for measure-tool
+   * snapping. Implement it where one box around the whole entity would be a lie — a folded LED
+   * wall is the case in hand — and leave it off otherwise: the measure tool then falls back to the
+   * local bounds of the entity's own meshes, which is exactly right for anything box-shaped.
+   */
+  snapBoxes?(): ElementBox[];
   /** Height of the top surface at local (x, z) for stacking (stages), or null. */
   topSurfaceY?(): number | null;
   /** Set by renderers that mount CSS3D objects (websites) so the DOM pass runs. */

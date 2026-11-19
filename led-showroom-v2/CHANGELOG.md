@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### The measure tool snaps to elements, not just to triangles
+
+Snapping only ever saw mesh topology: a vertex of the mesh under the pointer, or the midpoint of
+one of the three edges of the hit triangle - which includes the diagonal a quad is split along, a
+line that is nowhere on the object. Features a build is actually dimensioned from had no target at
+all. The centre of a case, the middle of a wall's face, the midpoint of a real edge: none of them
+is a vertex, so none of them could be caught.
+
+An element's own box now contributes its 27 features - 8 corners, 12 edge midpoints, 6 face
+centres and the centre. It is the box in the element's OWN frame, not a world-aligned box around
+it, because an axis-aligned box around a rotated case has its corners out in the air beside it. A
+folded LED wall gets one box per flat segment for the same reason; a custom shape gets none, since
+a segment's rectangle covers cells a staircase removed, and every panel is its own mesh, so the
+real corners of a custom shape already snap as vertices.
+
+The gap this closes is the one that made snapping feel unreliable. Within a few pixels of a
+silhouette corner the ray passes BESIDE the mesh and lands on the floor, so every mesh-derived
+candidate vanishes at exactly the spot someone aiming at that corner puts the pointer. Element
+features are tested on every path, including a floor hit and a complete miss.
+
+`element` shares a rank with `vertex` rather than outranking it, so the closer of the two wins: a
+box corner 9 px away must not beat a real vertex 1 px away on a truss or a clamp, which are
+nothing like boxes.
+
+### Selected items snap from anywhere
+
+Select the panels or cases you want a distance between, and their features snap wherever they are
+on screen, whether or not the pointer is over them - the scene in front no longer catches the
+pointer first. Everything unselected still has to be near the ray: its bounds, grown by what the
+snap radius is worth in inches at that depth, must meet the ray at all.
+
 ### The clamps, and what they bolt to
 
 Thirty-eight TAF 8002 slim half couplers, from Invoice INV-1131 (Truss Concepts, 13 October 2026,

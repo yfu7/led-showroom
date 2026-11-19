@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
-import { nearestGridPoint, projectOntoAxis, projectToScreen, projectedDistance, resolveHitFace, snapPoint } from './pointSnap';
+import {
+  elementBoxFromLocal, elementFeaturePoints, nearestGridPoint, projectOntoAxis, projectToScreen,
+  projectedDistance, resolveHitFace, snapPoint, type ElementBox,
+} from './pointSnap';
 
 const VIEW = { width: 800, height: 600 };
 
@@ -158,6 +161,91 @@ describe('snapPoint', () => {
     expect(r.kind).toBe('vertex');
     expect(r.point.x).toBeCloseTo(30, 5);
     expect(r.point.y).toBeCloseTo(20, 5);
+  });
+});
+
+describe('element snapping', () => {
+  /** The cube's own box, as the measure tool builds it: local bounds + the object's world matrix. */
+  function cubeBox(mesh: THREE.Mesh): ElementBox {
+    const local = new THREE.Box3(new THREE.Vector3(-10, -10, -10), new THREE.Vector3(10, 10, 10));
+    return elementBoxFromLocal(local, mesh.matrixWorld)!;
+  }
+
+  function points(box: ElementBox): THREE.Vector3[] {
+    const out: THREE.Vector3[] = [];
+    elementFeaturePoints(box, p => { out.push(p.clone()); });
+    return out;
+  }
+
+  it('yields 27 distinct features: corners, edge midpoints, face centres and the centre', () => {
+    const pts = points(cubeBox(cube()));
+    expect(pts.length).toBe(27);
+    expect(new Set(pts.map(p => p.toArray().join(','))).size).toBe(27);
+    const has = (x: number, y: number, z: number) =>
+      pts.some(p => Math.abs(p.x - x) < 1e-9 && Math.abs(p.y - y) < 1e-9 && Math.abs(p.z - z) < 1e-9);
+    expect(has(10, 20, 10)).toBe(true);  // a corner
+    expect(has(0, 20, 0)).toBe(true);    // the top face centre
+    expect(has(10, 20, 0)).toBe(true);   // the midpoint of a top edge
+    expect(has(0, 10, 0)).toBe(true);    // the centre
+  });
+
+  it('puts a rotated element\'s corners on the element, not on a world-aligned box', () => {
+    const mesh = cube();
+    mesh.rotation.y = Math.PI / 4;
+    mesh.updateMatrixWorld(true);
+    const pts = points(cubeBox(mesh));
+    // Turned 45 degrees, a corner swings out to the box's half-diagonal on x and onto z = 0.
+    const far = pts.reduce((a, b) => (Math.abs(b.x) > Math.abs(a.x) ? b : a));
+    expect(Math.abs(far.x)).toBeCloseTo(Math.SQRT2 * 10, 5);
+    expect(Math.abs(far.z)).toBeCloseTo(0, 5);
+  });
+
+  /**
+   * The case element snapping exists for. A few pixels outside a silhouette corner the ray passes
+   * BESIDE the mesh and lands on the floor, so every mesh-derived candidate is gone — and that is
+   * where someone aiming at the corner actually puts the pointer.
+   */
+  it('catches a corner from a floor hit just outside the silhouette', () => {
+    const cam = camera();
+    const mesh = cube();
+    const corner = new THREE.Vector3(10, 0, 10);          // bottom-front-right
+    const missed = new THREE.Vector3(10.5, 0, 10.5);      // on the floor, beside it
+    expect(projectedDistance(cam, VIEW, missed, corner)).toBeLessThan(10);
+
+    const hit = { point: missed, object: null, isFloor: true };
+    const withBox = snapPoint(hit, { camera: cam, viewport: VIEW, gridIn: 12, elements: [cubeBox(mesh)] });
+    expect(withBox.kind).toBe('element');
+    expect(withBox.point.toArray().map(v => Math.round(v))).toEqual([10, 0, 10]);
+
+    // Without the box there is nothing of the cube to find: the ray never touched it.
+    expect(snapPoint(hit, { camera: cam, viewport: VIEW, gridIn: 12 }).kind).not.toBe('element');
+  });
+
+  it('loses to a real vertex that is closer, since the two share a rank', () => {
+    const cam = camera();
+    const mesh = cube();
+    // A box off to the side of the corner: near enough to be a candidate, further than the vertex.
+    const aside = elementBoxFromLocal(
+      new THREE.Box3(new THREE.Vector3(-0.1, -0.1, -0.1), new THREE.Vector3(0.1, 0.1, 0.1)),
+      new THREE.Matrix4().makeTranslation(10.6, 20, 10),
+    )!;
+    const { hit, rc } = hitOn(mesh, cam, new THREE.Vector3(9.9, 19.9, 10));
+    const { face } = resolveHitFace(mesh, rc);
+    const r = snapPoint({ point: hit.point, object: mesh, face, isFloor: false },
+      { camera: cam, viewport: VIEW, elements: [aside] });
+    expect(r.kind).toBe('vertex');
+    expect(r.point.x).toBeCloseTo(10, 5);
+  });
+
+  it('reports a feature that is both a box corner and a mesh vertex as the element', () => {
+    const cam = camera();
+    const mesh = cube();
+    const { hit, rc } = hitOn(mesh, cam, new THREE.Vector3(9.7, 19.7, 10));
+    const { face } = resolveHitFace(mesh, rc);
+    const r = snapPoint({ point: hit.point, object: mesh, face, isFloor: false },
+      { camera: cam, viewport: VIEW, elements: [cubeBox(mesh)] });
+    expect(r.kind).toBe('element');
+    expect(r.point.toArray().map(v => Math.round(v))).toEqual([10, 20, 10]);
   });
 });
 

@@ -9,6 +9,7 @@ import { CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
 import type { ContentSource, ContentWindow, Corner, LedWallEntity, PxRect } from '../document/types';
 import type { EntityRenderer, RenderContext, RendererFactory } from './EntityRenderer';
 import { disposeObject, tagRoot } from './EntityRenderer';
+import type { ElementBox } from '../tools/pointSnap';
 import {
   accessoryPlacements, cellKey, computeColumnLayout, computeSegments, filledCells, isRectWall, miterCutsForColumn,
   panelLocalPosition, wallDims, wallLocalBounds, localPointToWallPixel, wallPixelToLocal,
@@ -554,6 +555,42 @@ export class LedWallRenderer implements EntityRenderer<LedWallEntity> {
 
   /** Local-space bounds (for the inspector). */
   localBounds() { return wallLocalBounds(this.dims, this.layout); }
+
+  /**
+   * One box per flat segment, so a folded wall snaps to the faces it actually has.
+   *
+   * A single box around a wall folded through 90 degrees would put four of its corners out in the
+   * air inside the fold, and its centre off the wall entirely. Each segment, though, IS a box: a
+   * flat run of columns, as wide as its columns and as deep as one panel.
+   *
+   * Custom shapes get nothing. A segment's box is the rectangle it spans, which for a staircase
+   * covers cells that were removed, and a corner hanging where no panel is would be worse than no
+   * snap at all. Nothing is lost by it: every panel is its own mesh, so the real corners of a
+   * custom shape already snap as vertices.
+   */
+  snapBoxes(): ElementBox[] {
+    if (!isRectWall(this.entity)) return [];
+    const d = this.dims;
+    const boxes: ElementBox[] = [];
+    this.root.updateWorldMatrix(true, false);
+    for (const seg of this.segments) {
+      const first = this.layout[seg.startCol];
+      const last = this.layout[seg.endCol];
+      if (!first || !last) continue;
+      const n = seg.endCol - seg.startCol + 1;
+      const segW = n * d.panelW + (n - 1) * d.gap;
+      // Segment frame: centred between its first and last column, yawed with them, panels on z = 0.
+      const frame = new THREE.Matrix4()
+        .makeRotationY(first.rotY)
+        .setPosition((first.x + last.x) / 2, 0, (first.z + last.z) / 2);
+      boxes.push({
+        center: new THREE.Vector3(0, d.totalH / 2, 0),
+        half: new THREE.Vector3(segW / 2, d.totalH / 2, d.panelD / 2),
+        matrix: this.root.matrixWorld.clone().multiply(frame),
+      });
+    }
+    return boxes;
+  }
 
   /** Wall pixel under a world point on the screen surface (or null). */
   pixelAtWorld(p: THREE.Vector3): { px: number; py: number } | null {

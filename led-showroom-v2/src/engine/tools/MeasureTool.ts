@@ -3,6 +3,11 @@
  *
  * Rebuilt from the v1 measure tool (index.html 9340-9452): click two points on anything in the
  * scene (walls, decks, equipment, rooms or the floor) to create a `DimensionEntity`. v2 adds:
+ *  - snapping to an ELEMENT's own box — its corners, edge midpoints, face centres and centre —
+ *    as well as to mesh geometry, so the features a build is dimensioned from have a target even
+ *    where no vertex sits. Selecting items first makes those items snap from anywhere on screen,
+ *    whether or not the pointer is over them: that is how you take a custom distance between two
+ *    particular panels or cases in a dense scene.
  *  - a hover snap marker (sphere on LAYER_GIZMO, coloured by snap kind — see `pointSnap.ts`),
  *  - a live preview line + distance label while placing the second point,
  *  - X / Y / Z axis lock while placing the second point (B projected onto the axis through A),
@@ -23,13 +28,21 @@ import { createDimension } from '../document/defaults';
 import { DIMENSION_LABEL_BACKGROUND, DIMENSION_TEXT_COLOR, createLabelSprite, updateLabelSpriteScale } from '../ledwall/dimensions';
 import { formatLength } from '../units';
 import type { Vec3 } from '../math';
-import { projectOntoAxis, resolveHitFace, snapPoint, type SnapKind, type SnapResult } from './pointSnap';
+import {
+  DEFAULT_SNAP_RADIUS_PX, elementBoxFromLocal, projectOntoAxis, resolveHitFace, snapPoint,
+  type ElementBox, type SnapKind, type SnapResult,
+} from './pointSnap';
+import { localMeshBounds } from '../entities/GroupRenderer';
+import type { Entity } from '../document/types';
 
 export const MEASURE_HINT_FIRST = 'Click the first point';
 export const MEASURE_HINT_SECOND = 'Click the second point · Shift keeps measuring · X/Y/Z lock axis';
+/** Appended while something is selected, because those items then snap from anywhere on screen. */
+export const MEASURE_HINT_SELECTION = ' · selected items snap from anywhere';
 
 /** Marker colour per snap kind. */
 export const SNAP_COLORS: Record<SnapKind, number> = {
+  element: 0xf472b6,  // pink
   vertex: 0xf97316,   // orange
   midpoint: 0x22d3ee, // cyan
   grid: 0xa78bfa,     // violet
@@ -68,6 +81,14 @@ export class MeasureTool implements Tool {
   /** Current hover snap (world), or null when the pointer is off-scene. */
   private hover: SnapResult | null = null;
   private axisKeys = new Set<Axis>();
+  /**
+   * Local-space bounds per entity, keyed by id and held against the entity object the renderer
+   * carries — the document is replaced on every edit, so a changed entity is a cache miss. Walking
+   * a model's meshes is the only part of gathering snap boxes that is not already cheap, and it
+   * would otherwise run on every pointer move. Cleared on activate, which is also the way out if
+   * an async load changes geometry under an entity that did not itself change.
+   */
+  private localBoxes = new Map<string, { entity: Entity; box: THREE.Box3 }>();
 
   // helpers
   private readonly group = new THREE.Group();
@@ -135,6 +156,7 @@ export class MeasureTool implements Tool {
     this.axisKeys.clear();
     // keyup is only delivered to the focused viewport: drop stale locks when focus leaves the window.
     if (typeof window !== 'undefined') window.addEventListener('blur', this.clearAxisKeys);
+    this.localBoxes.clear();
     this.setHint(MEASURE_HINT_FIRST);
     this.refreshHelpers();
     this.engine.invalidate();
@@ -268,7 +290,8 @@ export class MeasureTool implements Tool {
 
   /* ───────────── internals ───────────── */
 
-  private setHint(text: string): void {
+  private setHint(base: string): void {
+    const text = this.engine.selection.length ? base + MEASURE_HINT_SELECTION : base;
     if (this.hint === text) return;
     this.hint = text;
     // No dedicated "hint changed" event: re-emit the tool id so the status bar re-reads `hint`.
@@ -285,15 +308,70 @@ export class MeasureTool implements Tool {
     const camera = this.engine.camera.camera;
     const viewport = this.viewport();
     const gridIn = this.engine.doc.environment.grid.minorIn;
+    const caster = rayFromNdc(p.ndc, camera);
+    // Gathered once and passed down every path: a point a few pixels outside a silhouette corner
+    // misses the mesh entirely and lands on the floor, or on nothing at all, and that is precisely
+    // where someone is trying to catch the corner.
+    const elements = this.elementBoxes(caster.ray, viewport);
     const hit = pickSurface(p.ndc, camera, this.engine.scene.scene);
     if (hit) {
       const isFloor = hit.object.userData.pickable === 'ground';
-      const { face, instanceId } = isFloor ? { face: null, instanceId: null } : resolveHitFace(hit.object, rayFromNdc(p.ndc, camera));
-      return snapPoint({ point: hit.point, object: hit.object, face, instanceId, isFloor }, { camera, viewport, gridIn });
+      const { face, instanceId } = isFloor ? { face: null, instanceId: null } : resolveHitFace(hit.object, caster);
+      return snapPoint({ point: hit.point, object: hit.object, face, instanceId, isFloor }, { camera, viewport, gridIn, elements });
     }
     const g = pickGround(p.ndc, camera, 0, new THREE.Vector3());
     if (!g) return null;
-    return snapPoint({ point: g, object: null, isFloor: true }, { camera, viewport, gridIn });
+    return snapPoint({ point: g, object: null, isFloor: true }, { camera, viewport, gridIn, elements });
+  }
+
+  /**
+   * Snap boxes for the elements worth testing against this ray.
+   *
+   * Everything SELECTED is included wherever it is on screen — that is what lets you pick out the
+   * two items you want a distance between and then measure them without the scene in front
+   * catching the pointer. Everything else has to be near the ray: its world bounds, grown by what
+   * the snap radius is worth in inches at that depth, must meet the ray at all.
+   */
+  private elementBoxes(ray: THREE.Ray, viewport: { width: number; height: number }): ElementBox[] {
+    const selected = new Set(this.engine.selection);
+    const boxes: ElementBox[] = [];
+    const world = new THREE.Box3();
+    const centre = new THREE.Vector3();
+    for (const r of this.engine.scene.all()) {
+      const e = r.entity;
+      // A group has no geometry of its own (its children are listed separately), and a dimension is
+      // a drawing of a measurement, not a thing in the build to measure to.
+      if (e.type === 'group' || e.type === 'dimension' || !r.root.visible) continue;
+      if (!selected.has(e.id)) {
+        r.bounds(world);
+        if (world.isEmpty()) continue;
+        world.getCenter(centre);
+        world.expandByScalar(this.inchesPerPixel(centre, viewport) * DEFAULT_SNAP_RADIUS_PX);
+        if (!ray.intersectsBox(world)) continue;
+      }
+      const own = r.snapBoxes?.();
+      if (own) { boxes.push(...own); continue; }
+      let cached = this.localBoxes.get(e.id);
+      if (!cached || cached.entity !== e) {
+        cached = { entity: e, box: localMeshBounds(r.root) };
+        this.localBoxes.set(e.id, cached);
+      }
+      const box = elementBoxFromLocal(cached.box, r.root.matrixWorld);
+      if (box) boxes.push(box);
+    }
+    return boxes;
+  }
+
+  /** World inches one screen pixel covers at `at`, so a pixel radius can grow a world box. */
+  private inchesPerPixel(at: THREE.Vector3, viewport: { width: number; height: number }): number {
+    const cam = this.engine.camera.camera;
+    const persp = cam as THREE.PerspectiveCamera;
+    if (persp.isPerspectiveCamera) {
+      const dist = cam.position.distanceTo(at);
+      return (2 * Math.tan(THREE.MathUtils.degToRad(persp.fov) / 2) * dist) / viewport.height;
+    }
+    const ortho = cam as unknown as THREE.OrthographicCamera;
+    return (ortho.top - ortho.bottom) / Math.max(1e-6, ortho.zoom) / viewport.height;
   }
 
   /** Apply the axis lock (if any) to a candidate second point. */

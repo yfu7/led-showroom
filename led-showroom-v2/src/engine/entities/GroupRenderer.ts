@@ -27,6 +27,27 @@ export function visibleMeshBounds(obj: THREE.Object3D, out = new THREE.Box3()): 
   return out;
 }
 
+/**
+ * The same walk as {@link visibleMeshBounds}, but kept in `root`'s OWN frame rather than the
+ * world's — so a rotated entity gets a tight box that still lies on it, instead of an axis-aligned
+ * world box with its corners in the air beside it.
+ */
+export function localMeshBounds(root: THREE.Object3D, out = new THREE.Box3()): THREE.Box3 {
+  out.makeEmpty();
+  root.updateWorldMatrix(true, true);
+  const toLocal = root.matrixWorld.clone().invert();
+  const m = new THREE.Matrix4();
+  const b = new THREE.Box3();
+  root.traverseVisible(o => {
+    if (o.userData.helper || o.userData.unpickable) return;
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.geometry) return;
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    out.union(b.copy(mesh.geometry.boundingBox!).applyMatrix4(m.multiplyMatrices(toLocal, mesh.matrixWorld)));
+  });
+  return out;
+}
+
 export class GroupRenderer implements EntityRenderer<GroupEntity> {
   entity: GroupEntity;
   readonly root = new THREE.Group();
