@@ -81,6 +81,15 @@ export function NumberField({ value, onChange, onCommit, min = -Infinity, max = 
   const [editing, setEditing] = useState(false);
   const [invalid, setInvalid] = useState(false);
   const drag = useRef<{ x: number; start: number; moved: boolean } | null>(null);
+  /**
+   * Enter commits and then blurs, and `onBlur` would commit the very same text again. React has
+   * not re-rendered in between, so the `value` prop is still the pre-edit number and the second
+   * commit runs a second command: one typed edit, two undo entries, and the first Ctrl+Z appears
+   * to do nothing. One commit per focus session.
+   */
+  const committed = useRef(false);
+  /** Has the user typed into the field since it took focus? Arrow and scrub edits do not count. */
+  const typed = useRef(false);
 
   const fmt = (v: number) => (Number.isFinite(v) ? String(+v.toFixed(decimals)) : '');
   useEffect(() => { if (!editing) setText(fmt(value)); }, [value, editing, decimals]);
@@ -88,6 +97,11 @@ export function NumberField({ value, onChange, onCommit, min = -Infinity, max = 
   const clampv = (v: number) => Math.min(max, Math.max(min, v));
 
   const commitText = () => {
+    if (committed.current) return;
+    committed.current = true;
+    // Focus and blur with nothing typed is not an edit. The displayed text is `value` rounded to
+    // `decimals`, so committing it would write the rounded number back over the stored one.
+    if (!typed.current) { onCommit?.(); setEditing(false); return; }
     const v = evalMath(text);
     if (v === null) { setInvalid(true); setText(fmt(value)); setEditing(false); window.setTimeout(() => setInvalid(false), 600); return; }
     const c = clampv(v);
@@ -98,7 +112,9 @@ export function NumberField({ value, onChange, onCommit, min = -Infinity, max = 
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') { commitText(); (e.target as HTMLInputElement).blur(); }
-    else if (e.key === 'Escape') { setText(fmt(value)); setEditing(false); (e.target as HTMLInputElement).blur(); }
+    // Escape abandons the typed text, but the gesture is still over: `onCommit` closes the history
+    // merge window, or the next unrelated edit inside it folds into this field's entry.
+    else if (e.key === 'Escape') { committed.current = true; setText(fmt(value)); setEditing(false); onCommit?.(); (e.target as HTMLInputElement).blur(); }
     else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       e.preventDefault();
       const s = (e.shiftKey ? coarse : e.altKey ? step * 0.1 : step) * (e.key === 'ArrowUp' ? 1 : -1);
@@ -140,8 +156,8 @@ export function NumberField({ value, onChange, onCommit, min = -Infinity, max = 
       )}
       <input
         type="text" inputMode="decimal" value={text} disabled={disabled} placeholder={placeholder}
-        onFocus={e => { setEditing(true); e.target.select(); }}
-        onChange={e => setText(e.target.value)}
+        onFocus={e => { committed.current = false; typed.current = false; setEditing(true); e.target.select(); }}
+        onChange={e => { typed.current = true; setText(e.target.value); }}
         onBlur={commitText}
         onKeyDown={onKey}
       />
@@ -173,6 +189,15 @@ export function LengthField({ inches, unit, onChange, onCommit, min = -Infinity,
   const [editing, setEditing] = useState(false);
   const [invalid, setInvalid] = useState(false);
   const drag = useRef<{ x: number; start: number; moved: boolean } | null>(null);
+  /**
+   * Enter commits and then blurs, and `onBlur` would commit the very same text again. React has
+   * not re-rendered in between, so the `value` prop is still the pre-edit number and the second
+   * commit runs a second command: one typed edit, two undo entries, and the first Ctrl+Z appears
+   * to do nothing. One commit per focus session.
+   */
+  const committed = useRef(false);
+  /** Has the user typed into the field since it took focus? Arrow and scrub edits do not count. */
+  const typed = useRef(false);
   const step = stepIn ?? unitStepInches(unit, true);
 
   const display = (v: number) => {
@@ -185,6 +210,10 @@ export function LengthField({ inches, unit, onChange, onCommit, min = -Infinity,
   const clampv = (v: number) => Math.min(max, Math.max(min, v));
 
   const commitText = () => {
+    if (committed.current) return;
+    committed.current = true;
+    // See NumberField: an untouched field commits nothing, so blur cannot round the stored value.
+    if (!typed.current) { onCommit?.(); setEditing(false); return; }
     const v = parseLength(text, unit);
     if (v === null) { setInvalid(true); setText(display(inches)); setEditing(false); window.setTimeout(() => setInvalid(false), 600); return; }
     const c = clampv(v);
@@ -195,7 +224,7 @@ export function LengthField({ inches, unit, onChange, onCommit, min = -Infinity,
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') { commitText(); (e.target as HTMLInputElement).blur(); }
-    else if (e.key === 'Escape') { setText(display(inches)); setEditing(false); (e.target as HTMLInputElement).blur(); }
+    else if (e.key === 'Escape') { committed.current = true; setText(display(inches)); setEditing(false); onCommit?.(); (e.target as HTMLInputElement).blur(); }
     else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       e.preventDefault();
       const s = (e.shiftKey ? unitStepInches(unit, false) : step) * (e.altKey ? 0.1 : 1) * (e.key === 'ArrowUp' ? 1 : -1);
@@ -237,8 +266,8 @@ export function LengthField({ inches, unit, onChange, onCommit, min = -Infinity,
       )}
       <input
         type="text" inputMode="decimal" value={text} disabled={disabled}
-        onFocus={e => { setEditing(true); e.target.select(); }}
-        onChange={e => setText(e.target.value)}
+        onFocus={e => { committed.current = false; typed.current = false; setEditing(true); e.target.select(); }}
+        onChange={e => { typed.current = true; setText(e.target.value); }}
         onBlur={commitText}
         onKeyDown={onKey}
       />

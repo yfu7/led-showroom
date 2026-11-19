@@ -7,19 +7,25 @@
  * working while recording — orbiting the camera, dragging a wall or riding the brightness slider
  * mid-take is the main reason to record at all, and a Modal scrim would swallow all of it.
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { CircleStop } from 'lucide-react';
+import { Vector3 } from 'three';
 import { useEngine, useStore } from '@/app/store';
 import { Button } from '@/app/components/Button';
 import { Modal } from '@/app/components/Modal';
 import { Segmented } from '@/app/components/Segmented';
+import { Select } from '@/app/components/Select';
 import { ToggleRow } from '@/app/components/Toggle';
-import { Prop } from '@/app/components/Section';
+import { Prop, Section } from '@/app/components/Section';
 import { saveImage } from '@/engine/export/image';
 import { recordVideo, isMp4Supported } from '@/engine/export/video';
 import { exportGltf } from '@/engine/export/gltf';
+import { generateDrawing, type DrawingStats } from '@/engine/export/drawing';
+import { buildLineArt } from '@/engine/export/lineArt';
+import { PAPERS, VIEW_LABELS, sheetLayout, type Extents, type PaperId, type ViewKey } from '@/engine/export/sheet';
 import { downloadBlob } from '@/engine/export/composite';
+import { Raw } from '@/app/shell/GodMode';
 
 /* ───────── dialog frame ───────── */
 
@@ -250,5 +256,137 @@ export function ExportGltfDialog({ onClose }: { onClose(): void }) {
       <ToggleRow label="Selection only" checked={selectionOnly} onChange={setSelectionOnly} disabled={!hasSelection} hint={hasSelection ? 'Export only the selected objects' : 'Select objects first to export a subset'} />
       <div className="hint">Geometry is exported in inches. Content textures are baked as still frames.</div>
     </Dialog>
+  );
+}
+
+/* ───────── Generate render (CAD drawing sheet) ───────── */
+
+type Sheet = 'quad' | 'single';
+const SINGLE_VIEWS: ViewKey[] = ['front', 'top', 'right', 'iso'];
+
+/**
+ * A drawing sheet rather than a picture: third-angle line art at a standard scale, overall
+ * dimensions, a scale bar and a title block. The 1-up is the same machinery with one cell, for when
+ * a single elevation is all that is wanted.
+ */
+export function GenerateDrawingDialog({ onClose }: { onClose(): void }) {
+  const engine = useEngine();
+  const count = useStore(s => s.doc?.entities.length ?? 0);
+  const [sheet, setSheet] = useState<Sheet>('quad');
+  const [view, setView] = useState<ViewKey>('front');
+  const [paper, setPaper] = useState<PaperId>('ansi-b');
+  const [dpi, setDpi] = useState<'150' | '300'>('150');
+  const [busy, setBusy] = useState(false);
+  const god = useStore(s => s.godMode);
+  /** Last run's cost, for the admin view. Null until a sheet has been generated. */
+  const [stats, setStats] = useState<DrawingStats | null>(null);
+
+  // Paper size in pixels is worth showing: ANSI B at 300 dpi is a 5100 × 3300 PNG.
+  const px = sheetLayout({ w: 1, h: 1, d: 1 }, { paper, dpi: Number(dpi) });
+
+  const run = async () => {
+    setBusy(true);
+    try {
+      const r = await generateDrawing(engine, { paper, dpi: Number(dpi), views: sheet === 'quad' ? 'quad' : view });
+      setStats(r.stats);
+      if (r.empty) engine.toast('info', 'Drawing saved, but the scene has nothing visible to draw');
+      else if (r.simplified) engine.toast('info', 'Drawing saved — some geometry was simplified to fit the line budget');
+      else engine.toast('success', `Drawing saved at 1 : ${r.layout.scaleDenom}`);
+      if (!god) onClose();
+    } catch (err) {
+      engine.toast('error', `Generate render failed: ${(err as Error).message}`);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog title="Generate render" onClose={onClose} footer={<>
+      <Button variant="ghost" onClick={onClose}>Cancel</Button>
+      <Button variant="primary" onClick={run} disabled={busy}>{busy ? 'Drawing…' : 'Generate PNG'}</Button>
+    </>}>
+      <Prop label="Sheet" title="Four-up is the drawing; a single view fills the sheet">
+        <Segmented<Sheet> value={sheet} onChange={setSheet}
+          options={[{ value: 'quad', label: 'Four-up' }, { value: 'single', label: 'Single view' }]} />
+      </Prop>
+      {sheet === 'single' && (
+        <Prop label="View">
+          <Select<ViewKey> value={view} onChange={setView} className="grow"
+            options={SINGLE_VIEWS.map(v => ({ value: v, label: VIEW_LABELS[v].charAt(0) + VIEW_LABELS[v].slice(1).toLowerCase() }))} />
+        </Prop>
+      )}
+      <Prop label="Paper">
+        <Select<PaperId> value={paper} onChange={setPaper} className="grow"
+          options={(Object.keys(PAPERS) as PaperId[]).map(id => ({ value: id, label: PAPERS[id].name }))} />
+      </Prop>
+      <Prop label="Resolution" title="Dots per inch of paper">
+        <Segmented<'150' | '300'> value={dpi} onChange={setDpi}
+          options={[{ value: '150', label: '150 dpi' }, { value: '300', label: '300 dpi' }]} />
+      </Prop>
+      <div className="hint">
+        {count === 0
+          ? 'The scene is empty — the sheet will carry its title block and nothing else.'
+          : `Third-angle line art with hidden lines removed, at one standard scale chosen to fit. Overall dimensions, a scale bar and a title block are drawn on the sheet; the document is not touched. Output ${px.wPx} × ${px.hPx} px.`}
+      </div>
+      <DrawingDiagnostics paper={paper} dpi={Number(dpi)} sheet={sheet} view={view} stats={stats} />
+    </Dialog>
+  );
+}
+
+/**
+ * Admin view only. The layout half is live — it re-derives from the current scene and the options
+ * above as you change them, so you can see the chosen scale before spending a render. The cost
+ * half only appears once a sheet has actually been drawn.
+ */
+function DrawingDiagnostics({ paper, dpi, sheet, view, stats }: {
+  paper: PaperId; dpi: number; sheet: Sheet; view: ViewKey; stats: DrawingStats | null;
+}) {
+  const god = useStore(s => s.godMode);
+  const engine = useEngine();
+  const doc = useStore(s => s.doc);
+
+  // Same extents the real run computes, from the same source: the line-art bounds, not the
+  // document. A mismatch between this and the generated sheet is itself the finding.
+  //
+  // Memoised on the document, and not on the option state: building the line art allocates an
+  // `EdgesGeometry` per distinct source geometry, so without this every click on a paper size or
+  // dpi would rebuild every panel edge in the scene. Only `god` and `doc` can change what it
+  // returns. Hooks run whether or not the view is on, so the build itself is guarded too.
+  const extents = useMemo<Extents>(() => {
+    if (!god) return { w: 1, h: 1, d: 1 };
+    const art = buildLineArt(engine);
+    const size = art.bounds.isEmpty() ? new Vector3(1, 1, 1) : art.bounds.getSize(new Vector3());
+    art.dispose();
+    return { w: size.x, h: size.y, d: size.z };
+  }, [god, engine, doc]);
+
+  if (!god) return null;
+
+  const layout = sheetLayout(extents, { paper, dpi, views: sheet === 'quad' ? 'quad' : view });
+  const n = (v: number) => v.toFixed(2).replace(/\.00$/, '');
+
+  return (
+    <Section title="Diagnostics">
+      <Raw label="extents w x h x d (in)" value={`${n(extents.w)} x ${n(extents.h)} x ${n(extents.d)}`} />
+      <Raw label="scaleDenom" value={`1 : ${layout.scaleDenom}${layout.overflow ? '  OVERFLOW' : ''}`} />
+      <Raw label="pxPerIn" value={layout.pxPerIn.toFixed(4)} />
+      <Raw label="sheet px" value={`${layout.wPx} x ${layout.hPx}`} />
+      <Raw label="titleBlock" value={`${layout.titleBlock.w} x ${layout.titleBlock.h} @ ${layout.titleBlock.x},${layout.titleBlock.y}`} />
+      {layout.views.map(v => (
+        <Raw key={v.key} label={v.key}
+          value={`fit ${v.fit.w}x${v.fit.h} @ ${v.fit.x},${v.fit.y} | drawn ${n(v.drawnW)}x${n(v.drawnH)} | ${v.toScale ? 'to scale' : 'NTS'}`} />
+      ))}
+      {stats
+        ? <>
+            <Raw label="last run meshes" value={stats.meshes} />
+            <Raw label="last run segments" value={stats.segments} />
+            {/* Split by phase: the total on its own cannot say whether a slow sheet was the
+                geometry or the resolution, and on the one scene measured it was neither
+                obvious nor the same at both dpi settings. */}
+            <Raw label="last run lineArt ms" value={stats.lineArtMs} />
+            <Raw label="last run render ms" value={stats.renderMs} />
+            <Raw label="last run encode ms" value={stats.encodeMs} />
+            <Raw label="last run total ms" value={stats.ms} />
+          </>
+        : <div className="hint">Generate once for mesh, segment and timing counts.</div>}
+    </Section>
   );
 }

@@ -54,10 +54,10 @@ export const canRename = (): boolean => !useStore.getState().presentation;
 export function requestEntityRename(id: string): void {
   const st = useStore.getState();
   if (st.presentation) return;
-  // setLeftTab opens the dock as well, but say so explicitly — the input must be visible before
+  // setCatalogTab opens the dock as well, but say so explicitly — the input must be visible before
   // it is focused, whether or not the panels were hidden with Tab.
-  st.setLeftOpen(true);
-  st.setLeftTab('outliner');
+  st.setCatalogOpen(true);
+  st.setCatalogTab('outliner');
   window.setTimeout(() => window.dispatchEvent(new CustomEvent<RenameEntityDetail>(RENAME_ENTITY_EVENT, { detail: { id } })), 0);
 }
 
@@ -65,7 +65,7 @@ export function requestWindowRename(engine: Engine, wallId: string, windowId: st
   const st = useStore.getState();
   if (st.presentation) return;
   if (!engine.isSelected(wallId)) engine.select([wallId]);
-  st.setRightOpen(true);
+  st.setInspectorOpen(true);
   st.selectWindow(wallId, windowId);
   window.setTimeout(() => window.dispatchEvent(new CustomEvent<RenameWindowDetail>(RENAME_WINDOW_EVENT, { detail: { wallId, windowId } })), 0);
 }
@@ -121,6 +121,7 @@ export function setLocked(engine: Engine, ids: string[], locked: boolean): void 
 export function duplicateSelection(engine: Engine, ids: string[]): void {
   const { clones, idMap } = duplicateEntities(engine.doc, ids);
   if (!clones.length) return;
+  if (!engine.acceptsWalls(clones.filter(c => c.type === 'led-wall').length)) return;
   engine.run(cmdAddEntities(engine, clones, clones.length === 1 ? `Duplicate ${clones[0].name}` : `Duplicate ${clones.length} objects`));
   engine.select(ids.map(id => idMap.get(id)).filter(Boolean) as string[]);
   engine.history.commit();

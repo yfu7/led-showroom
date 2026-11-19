@@ -1,5 +1,120 @@
 # Changelog
 
+## 2.1.0 — 2026-11-18
+
+A CAD drawing sheet, folds on hand-painted wall shapes, the two docks swapped, and an audit of what
+happens when one scene holds many objects rather than one.
+
+### Generate render
+
+A third export beside Save image and Record video, and the first that produces a drawing rather than
+a picture. Third-angle projection — Top above Front, Right beside Front, an isometric in the fourth
+cell — on ANSI A or B, A4 or A3, at 150 or 300 dpi, with a title strip across the foot carrying the
+project, the date, the panel count and LED area, each distinct wall resolution and the overall size.
+
+The three orthographic views share one standard scale picked from the usual set (1:24, 1:48, 1:96…),
+the largest at which every view still fits its cell, and the camera frustums are derived from that
+ratio instead of zoom-to-fit, so the printed "1 : 48" and the scale bar are exact rather than
+approximate and a dimension carries from one view to the next with a straightedge. The isometric is
+fitted to its own cell and labelled NTS, which is what a pictorial is.
+
+Hidden lines go without a CPU line solver: every surface is re-materialised paper white and pushed
+back a hair with `polygonOffset`, then black edges are drawn over it, so the depth buffer does the
+occlusion. Photo cutouts are billboards that turn to face the camera and would be a plausible-looking
+lie in an elevation, so each is replaced by the outline of the entity's declared dimensions box.
+Content windows, the pixel grid and the 3D annotations are left out — the sheet draws its own
+dimensions, and a construction drawing is about the structure rather than what is playing on it. An
+edge budget drops the remaining meshes to bounding-box outlines rather than stalling the tab, and
+says so on the sheet when it does.
+
+### Folds on a hand-painted shape
+
+A custom shape and a mitred corner fold now compose. Painting a panel into the column left of the
+shape renumbers every column, so a fold recorded as "after column 2" has to become "after column 3"
+to stay on the same physical joint; it did not, and the whole wall folded one joint over the moment
+the shape grew leftwards. Fold indices are re-keyed by the same translation the shape normaliser
+applies, then pruned.
+
+The shape grid also reads at the sizes people actually paint: a cell has an 18 px floor and the grid
+scrolls sideways past roughly fourteen columns, instead of shrinking every cell to a sliver.
+
+### The inspector is on the left
+
+The two docks changed sides: the inspector and the scene tree now open on the left, the catalog on
+the right. Inside each dock the editable fields come first and the read-only specifications sit at
+the foot, so the things you change are under the cursor and the numbers you check are where a
+specification sheet keeps them. No panel knows which side it is on — the assignment is two CSS
+`grid-area`s and the two top-bar toggles that name the sides to the user.
+
+### Many objects in one scene
+
+The architecture is a show canvas holding idempotent items, each with its own specifications, and an
+audit of it against N items fixed eleven defects. The ones worth naming:
+
+- Deleting a parent took its children with it but recorded only the parent, so undo brought the
+  parent back and left the children gone with no entry left to restore them.
+- The per-wall content-window selection existed twice, in the engine and in the panel. Clicking a
+  window in the viewport left the panel pointing at a different one, and the next edit landed on the
+  wrong window. The engine's map is now the only owner, it emits its changes, and it forgets walls
+  the document no longer has.
+- The wall cap was enforced in the catalog alone, so duplicate, paste and the inspector's Duplicate
+  button walked straight past it — and then the catalog refused every further wall because the scene
+  already held more than the limit. Every path that adds walls asks one gate now.
+- In span mode the walls share one canvas, but an item was re-rendered only when its own JSON
+  changed, so resizing wall 2 or deleting wall 1 left wall 3 showing a stale slice. What a wall reads
+  from its neighbours is now part of the scene's global key.
+- A k-entity gizmo drag copied the whole document k times per frame; one pass over the entity list
+  does it once.
+- Selection outlines cached an `EdgesGeometry` per geometry in a `WeakMap` and dropped them without
+  `dispose()`, which leaks the buffers for the life of the context because three keeps its own
+  strong reference. They are now owned, capped and freed.
+- Changing the selection ends any in-flight edit gesture, so two items edited inside the merge window
+  can no longer fold into one history entry whose undo reverts the first and whose redo re-applies
+  only the second.
+- Windows left hanging outside a wall after a cols/rows edit, a shape paint or a product swap are
+  re-clamped through one shared function rather than three.
+
+### Diagnostic view
+
+An administrative view behind a PIN, off by default and dropped on reload, that adds raw engine state
+to the inspector and the render dialog: ids, the stored shape and corner arrays, sheet layout numbers
+and per-phase compose timings. The standard view renders none of it — each caller guards on the flag
+itself, so the normal inspector is byte-for-byte what it was.
+
+### Fixed
+
+- One typed edit pushed two undo entries. Enter committed and then blurred, and the blur handler
+  committed the same text again against a `value` prop React had not refreshed, so a second command
+  ran outside the merge window. Every number, length and colour field was affected, on single and
+  multiple selection, and the visible symptom was a first Ctrl+Z that appeared to do nothing. One
+  commit per focus session now; arrow stepping and scrub-drag are untouched by the guard.
+- A multi-step shape paint merges into one history entry, and a merged entry redoes with the last
+  step's command: the fold re-keying was written as a shift of whatever wall the patch landed on, so
+  redoing a gesture that had grown the shape leftwards by three columns moved the fold by one. Both
+  paint paths now compute the whole shape patch as a finished state, in one shared function.
+- Escape in a name field committed the abandoned text as a rename, because the blur handler ran
+  before React re-rendered with the restored name.
+- Escape in a number or length field left the history merge window open, so an unrelated edit within
+  a second and a half folded into the abandoned field's entry.
+- Focusing a number field and leaving it without typing committed the displayed value, writing the
+  rounded number back over the stored one. An untouched field now commits nothing.
+- A drawing sheet of an empty scene printed `OVERALL 1 in × 1 in × 1 in` at `1 : 1`, in the title
+  strip and again under every view. The unit cube is there to keep the layout maths finite, not to
+  be measured; nothing on a blank sheet states a scale or a size now.
+
+### Known limitations
+
+- A multiple selection shows the primary item's value in each field and applies an edit as a shared
+  delta. There is no "mixed" indicator to say the others differ.
+- Encoding the drawing sheet to PNG dominates its cost at high resolution: on one 17-mesh scene, 150
+  dpi took 78 ms in total and 300 dpi took 2.3 s, almost all of it in the encode. The diagnostic view
+  reports the three phases separately.
+- Loading a scene file that contains two entities with the same id renames the second rather than
+  remapping what referred to it. A duplicate id makes any such reference genuinely ambiguous, so it
+  is reported instead of guessed.
+
+888 tests across 47 files, no type errors.
+
 ## 2.0.0 — 2026-09-06
 
 The first release of Veloxity Showroom, a ground-up rebuild of the single-file v1 app as a to-scale

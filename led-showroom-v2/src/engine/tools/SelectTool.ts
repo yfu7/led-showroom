@@ -680,6 +680,7 @@ export class SelectTool implements Tool {
     if (!eng.selection.length) return;
     const { clones, idMap } = duplicateEntities(eng.doc, eng.selection);
     if (!clones.length) return;
+    if (!eng.acceptsWalls(clones.filter(c => c.type === 'led-wall').length)) return;
     eng.run(cmdAddEntities(eng, clones, clones.length === 1 ? `Duplicate ${clones[0].name}` : `Duplicate ${clones.length} objects`));
     // select the clones of what was selected (children of duplicated groups follow their parent)
     eng.select(eng.selection.map(id => idMap.get(id)).filter(Boolean) as string[]);

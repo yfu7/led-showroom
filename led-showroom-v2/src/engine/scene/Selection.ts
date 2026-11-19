@@ -19,6 +19,14 @@ export class SelectionHelper {
   private hoverMat: THREE.LineBasicMaterial;
   private boxMat: THREE.LineBasicMaterial;
   private geomCache = new WeakMap<THREE.BufferGeometry, THREE.EdgesGeometry>();
+  /**
+   * Strong refs to what the WeakMap handed out, because three's renderer keeps its own strong ref
+   * to every geometry it has drawn: dropping an EdgesGeometry without `dispose()` leaks its
+   * buffers for the life of the context. Every cols/rows/corner edit rebuilds a wall's geometry
+   * and so mints another one, hence the cap.
+   */
+  private edgeGeoms = new Set<THREE.EdgesGeometry>();
+  private static readonly EDGE_CACHE_MAX = 96;
 
   constructor(colors: SelectionColors = DEFAULT_SELECTION_COLORS) {
     this.group.name = 'selection';
@@ -43,7 +51,12 @@ export class SelectionHelper {
 
   private edgesFor(mesh: THREE.Mesh, mat: THREE.LineBasicMaterial): THREE.LineSegments {
     let eg = this.geomCache.get(mesh.geometry);
-    if (!eg) { eg = new THREE.EdgesGeometry(mesh.geometry, 20); this.geomCache.set(mesh.geometry, eg); }
+    if (!eg) {
+      if (this.edgeGeoms.size >= SelectionHelper.EDGE_CACHE_MAX) this.disposeEdgeCache();
+      eg = new THREE.EdgesGeometry(mesh.geometry, 20);
+      this.geomCache.set(mesh.geometry, eg);
+      this.edgeGeoms.add(eg);
+    }
     const ls = new THREE.LineSegments(eg, mat);
     ls.userData.helper = true;
     ls.userData.unpickable = true;
@@ -107,8 +120,16 @@ export class SelectionHelper {
 
   clear(): void { this.setSelected([]); this.setHover([]); this.setBounds(null); }
 
+  /** Free every cached outline. Safe at any time: the next hover/selection rebuilds what it needs. */
+  private disposeEdgeCache(): void {
+    for (const g of this.edgeGeoms) g.dispose();
+    this.edgeGeoms.clear();
+    this.geomCache = new WeakMap();
+  }
+
   dispose(): void {
     this.clear();
+    this.disposeEdgeCache();
     this.selectedMat.dispose(); this.hoverMat.dispose(); this.boxMat.dispose();
     this.box.geometry.dispose();
   }

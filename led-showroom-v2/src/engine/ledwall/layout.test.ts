@@ -4,7 +4,7 @@ import {
   wallDims, computeColumnLayout, computeSegments, cornerExtension, miterCutsForColumn, pruneCorners,
   cellKey, parseCell, isRectWall, filledCells, shapeBBox, filledCount,
   isContiguous, wouldStayContiguous, classifyShapeEdit, toggleShapeCell, paintShapeCell,
-  normalizeShape, ghostCells, computeShapeEdgeRuns,
+  normalizeShape, shiftCorners, ghostCells, computeShapeEdgeRuns,
   panelLocalPosition, rowCenterY, wallLocalBounds, localPointToWallPixel, wallPixelToLocal,
   accessoryPlacements, BASE_PLATE_Z_OFFSET_IN,
 } from './layout';
@@ -253,7 +253,31 @@ describe('normalizeShape', () => {
   it('handles negative coordinates (growing left/up) and clamps to 1x1 for empty', () => {
     const n = normalizeShape(['-1,0', '0,0', '0,-1']);
     expect(n.cells).toEqual(set('0,1', '1,1', '1,0'));
-    expect(normalizeShape([])).toEqual({ cells: set(), cols: 1, rows: 1 });
+    expect(n.shiftC).toBe(1);
+    expect(n.shiftR).toBe(1);
+    expect(normalizeShape([])).toEqual({ cells: set(), cols: 1, rows: 1, shiftC: 0, shiftR: 0 });
+  });
+});
+
+describe('shiftCorners', () => {
+  const folds = [{ afterCol: 0, angle: 90 }, { afterCol: 2, angle: -45 }];
+  it('is a prune when nothing moved', () => {
+    expect(shiftCorners(folds, 0, 4)).toEqual(folds);
+  });
+  it('follows the columns right when the shape grows leftwards', () => {
+    // one new column on the left renumbers every column +1; the folds must stay on their joints
+    expect(shiftCorners(folds, 1, 5)).toEqual([{ afterCol: 1, angle: 90 }, { afterCol: 3, angle: -45 }]);
+  });
+  it('follows the columns left when the first column is emptied', () => {
+    expect(shiftCorners(folds, -1, 3)).toEqual([{ afterCol: 1, angle: -45 }]); // afterCol -1 is off the grid
+  });
+  it('prunes folds past the last joint of the new grid', () => {
+    expect(shiftCorners(folds, 0, 2)).toEqual([{ afterCol: 0, angle: 90 }]);
+  });
+  it('leaves the input array untouched', () => {
+    const src = [{ afterCol: 1, angle: 90 }];
+    shiftCorners(src, 2, 6);
+    expect(src).toEqual([{ afterCol: 1, angle: 90 }]);
   });
 });
 

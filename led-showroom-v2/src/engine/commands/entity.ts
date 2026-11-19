@@ -4,7 +4,7 @@
  */
 import type { Command } from './History';
 import type { Document, Entity, Transform } from '../document/types';
-import { addEntity, getEntity, removeEntities, withEntity } from '../document/Document';
+import { addEntity, descendants, getEntity, removeEntities, withEntity } from '../document/Document';
 import { cloneJson } from '../math';
 
 export interface DocHost {
@@ -36,7 +36,10 @@ export function cmdRemoveEntities(host: DocHost, ids: string[], label?: string):
     label: label ?? (ids.length === 1 ? `Delete ${getEntity(host.doc, ids[0])?.name ?? 'object'}` : `Delete ${ids.length} objects`),
     do() {
       const doc = host.doc;
+      // `removeEntities` takes descendants with it, so capture them too: undoing a deleted parent
+      // used to bring the parent back and leave its children deleted with no entry to restore them.
       const set = new Set(ids);
+      for (const id of Array.from(set)) for (const d of descendants(doc, id)) set.add(d.id);
       removed = doc.entities.map((e, i) => ({ entity: cloneJson(e), index: i })).filter(x => set.has(x.entity.id));
       detached = doc.entities.filter(e => e.attachedTo && set.has(e.attachedTo) && !set.has(e.id)).map(e => ({ id: e.id, attachedTo: e.attachedTo! }));
       host.setDoc(removeEntities(doc, ids));
@@ -77,21 +80,23 @@ export function cmdUpdateEntities(host: DocHost, patches: { id: string; patch: P
     label: opts.label ?? `Edit ${patches.length} objects`,
     mergeKey: opts.mergeKey,
     do() {
-      let d = host.doc;
+      const d = host.doc;
       if (!before) { before = new Map(); for (const p of patches) { const e = getEntity(d, p.id); if (e) before.set(p.id, cloneJson(e)); } }
-      for (const p of patches) {
-        const cur = getEntity(d, p.id);
-        if (!cur) continue;
-        const next = typeof p.patch === 'function' ? p.patch(cur) : ({ ...cur, ...p.patch } as Entity);
-        d = withEntity(d, p.id, () => next);
-      }
-      host.setDoc(d);
+      // One pass over `entities`, one array copy. Patching through `withEntity` per id made a
+      // k-entity gizmo drag copy the whole document k times per frame.
+      const byId = new Map<string, (Partial<Entity> | ((e: Entity) => Entity))[]>();
+      for (const p of patches) { const a = byId.get(p.id); if (a) a.push(p.patch); else byId.set(p.id, [p.patch]); }
+      host.setDoc({ ...d, entities: d.entities.map(e => {
+        const list = byId.get(e.id);
+        if (!list) return e;
+        return list.reduce<Entity>((cur, patch) => (typeof patch === 'function' ? patch(cur) : { ...cur, ...patch } as Entity), e);
+      }) });
     },
     undo() {
       if (!before) return;
-      let d = host.doc;
-      for (const [id, e] of before) d = withEntity(d, id, () => cloneJson(e));
-      host.setDoc(d);
+      const prev = before;
+      const d = host.doc;
+      host.setDoc({ ...d, entities: d.entities.map(e => { const b = prev.get(e.id); return b ? cloneJson(b) : e; }) });
     },
   };
 }

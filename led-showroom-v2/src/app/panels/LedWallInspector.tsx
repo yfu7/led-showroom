@@ -6,7 +6,7 @@ import { Minus, PencilRuler, Plus } from 'lucide-react';
 import { useEngine, useStore } from '@/app/store';
 import { Button, IconButton } from '@/app/components/Button';
 import { NumberField } from '@/app/components/NumberField';
-import { Prop, Section, Stat } from '@/app/components/Section';
+import { Prop, Section } from '@/app/components/Section';
 import { Segmented } from '@/app/components/Segmented';
 import { Select } from '@/app/components/Select';
 import { Slider } from '@/app/components/Slider';
@@ -14,15 +14,15 @@ import { ToggleRow } from '@/app/components/Toggle';
 import type { LedWallEntity } from '@/engine/document/types';
 import { LIMITS, PANEL_SPECS, brightnessToNits } from '@/engine/ledwall/specs';
 import { cellKey, filledCells, filledCount, isRectWall, pruneCorners, shapeBBox, wallDims } from '@/engine/ledwall/layout';
-import { GRID_THRESHOLD_OPTIONS_IN } from '@/engine/ledwall/pixelGrid';
-import { formatDims } from '@/engine/units';
 import { walls as docWalls } from '@/engine/document/Document';
 import { cmdUpdateEntities } from '@/engine/commands/entity';
 import { TransformSection } from '@/app/panels/TransformSection';
 import { CornersSection } from '@/app/panels/CornersSection';
 import { ShapeEditor } from '@/app/panels/ShapeEditor';
 import { ContentPanel } from '@/app/panels/ContentPanel';
-import { reclampWindows } from '@/app/panels/contentActions';
+import { SpecsSection } from '@/app/panels/SpecsSection';
+import { GodOnly, Raw } from '@/app/shell/GodMode';
+import { reclampWindows } from '@/engine/ledwall/contentWindows';
 
 interface Props { wall: LedWallEntity }
 
@@ -96,7 +96,6 @@ export function LedWallInspector({ wall }: Props) {
   };
 
   const products = Object.values(PANEL_SPECS).map(s => ({ value: s.id, label: s.name }));
-  const gridOptions = GRID_THRESHOLD_OPTIONS_IN.map(v => ({ value: v, label: `${v / 12} ft` }));
   const nits = brightnessToNits(wall.brightness, dims.spec);
 
   const stepper = (label: string, value: number, max: number, set: (v: number) => void) => (
@@ -123,7 +122,6 @@ export function LedWallInspector({ wall }: Props) {
           </>
         ) : (
           <>
-            <Stat label="Bounding box" value={`${bbox.cols} × ${bbox.rows} panels`} />
             {!editingShape && (
               <Button block size="sm" icon={<PencilRuler size={14} strokeWidth={1.5} />} onClick={() => engine.tools.activate('shape')} active={tool === 'shape'}>
                 Edit shape
@@ -135,12 +133,6 @@ export function LedWallInspector({ wall }: Props) {
         <Prop label="Product">
           <Select value={wall.product} options={products} onChange={setProduct} className="grow" />
         </Prop>
-        <div className="divider" />
-        <Stat label="Total panels" value={filledCount(wall)} />
-        <Stat label="Resolution" value={`${dims.wallWPx} × ${dims.wallHPx} px`} />
-        <Stat label="Physical size" value={formatDims([dims.totalW, dims.totalH], unit)} />
-        {unit !== 'ft' && <Stat label="Size (ft)" value={formatDims([dims.totalW, dims.totalH], 'ft')} />}
-        <Stat label="Pixel pitch" value={dims.spec.pitchMm ? `${dims.spec.pitchMm} mm` : `${(dims.inPerPxX * 25.4).toFixed(2)} mm`} />
       </Section>
 
       <CornersSection wall={wall} />
@@ -149,12 +141,10 @@ export function LedWallInspector({ wall }: Props) {
         <ToggleRow label="Bezels" checked={wall.bezels} onChange={v => patch({ bezels: v }, v ? 'Show bezels' : 'Hide bezels')} hint="Show the seam between panels" />
         <ToggleRow label="Double-sided" checked={wall.doubleSided} onChange={v => patch({ doubleSided: v }, 'Double-sided')} hint="Mirror the content onto the back face" />
         <ToggleRow label="Show base" checked={rect && wall.accessories} disabled={!rect} onChange={v => patch({ accessories: v }, 'Show base')} hint={rect ? 'Floor base plate and back supports, one set per panel column' : 'The base fits rectangular walls only'} />
-        <ToggleRow label="Pixel grid" checked={wall.pixelGrid} onChange={v => patch({ pixelGrid: v }, 'Pixel grid')} hint="LED pixel structure, visible up close" />
-        {wall.pixelGrid && (
-          <Prop label="Appears within" title="Camera distance inside which the pixel grid fades in">
-            <Select value={pixelGridDistIn} options={gridOptions} onChange={v => engine.patchSettings({ pixelGridDistIn: v }, 'Pixel grid distance')} className="grow" />
-          </Prop>
-        )}
+        {/* The fade distance is one document-wide setting, so it lives in the scene inspector:
+            an item's inspector only edits that item. */}
+        <ToggleRow label="Pixel grid" checked={wall.pixelGrid} onChange={v => patch({ pixelGrid: v }, 'Pixel grid')}
+          hint={`LED pixel structure, visible within ${pixelGridDistIn / 12} ft (scene setting)`} />
         <ToggleRow label="Dimensions" checked={wall.showDimensions} onChange={v => patch({ showDimensions: v }, 'Dimensions')} hint="Engineering-style size annotations" />
         <div className="prop wide" style={{ marginTop: 4 }}>
           <div className="row">
@@ -169,6 +159,30 @@ export function LedWallInspector({ wall }: Props) {
       </Section>
 
       <ContentPanel wall={wall} />
+
+      {/* Computed last, always: see SpecsSection. */}
+      <SpecsSection entity={wall} />
+
+      {/* Admin view only; renders nothing in the standard view. The stored shape and corner
+          arrays are what the normal UI draws the grid and the folds from, so seeing them raw is
+          how you tell a bad fold from a bad render of a good fold. */}
+      <GodOnly>
+        <Section title="Raw state">
+          <Raw label="id" value={wall.id} />
+          <Raw label="product" value={wall.product} />
+          <Raw label="grid" value={`${wall.cols} x ${wall.rows}`} />
+          <Raw label="shape.mode" value={wall.shape.mode} />
+          {/* `cells` is optional even in custom mode — undefined is the state right after the mode
+              flips and before anything is painted, and worth telling apart from an empty array. */}
+          <Raw label="shape.cells" value={wall.shape.mode !== 'custom' ? '(rect: implied)'
+            : wall.shape.cells ? `${wall.shape.cells.length}: ${wall.shape.cells.join(' ')}` : '(undefined)'} />
+          <Raw label="corners" value={wall.corners.length ? wall.corners.map(c => `after ${c.afterCol} @ ${c.angle}deg`).join(', ') : '(none)'} />
+          <Raw label="windows" value={wall.contentWindows.length ? wall.contentWindows.map(w => w.id).join(' ') : '(none)'} />
+          <Raw label="transform.position" value={wall.transform.position.map(n => n.toFixed(3)).join(', ')} />
+          <Raw label="transform.rotation" value={wall.transform.rotation.map(n => n.toFixed(3)).join(', ')} />
+          <Raw label="transform.scale" value={wall.transform.scale.map(n => n.toFixed(3)).join(', ')} />
+        </Section>
+      </GodOnly>
     </>
   );
 }

@@ -1,15 +1,16 @@
 /**
  * Scene inspector — the right-dock body when nothing is selected. Venue, floor & grid, lighting,
- * units & snapping, scene actions, presets and exports. (RightDock supplies the panel head and
+ * units & snapping, scene actions, presets and exports. (InspectorDock supplies the panel head and
  * the scrolling body; this renders a display-font intro block plus the sections.)
  */
 import { Eraser, Maximize } from 'lucide-react';
 import type { Document, LightingPreset, SnapSettings } from '@/engine/document/types';
-import { UNITS, formatLength } from '@/engine/units';
+import { UNITS } from '@/engine/units';
+import { GRID_THRESHOLD_OPTIONS_IN } from '@/engine/ledwall/pixelGrid';
 import { useDoc, useEngine } from '@/app/store';
 import { Button } from '@/app/components/Button';
 import { LengthField, NumberField } from '@/app/components/NumberField';
-import { Prop, Section, Stat } from '@/app/components/Section';
+import { Prop, Section } from '@/app/components/Section';
 import { Segmented } from '@/app/components/Segmented';
 import { Select } from '@/app/components/Select';
 import { Slider } from '@/app/components/Slider';
@@ -18,19 +19,12 @@ import { requestClearScene } from '@/app/shell/ClearSceneDialog';
 import { VenuePanel } from './VenuePanel';
 import { PresetsPanel } from './PresetsPanel';
 import { ExportPanel } from './ExportPanel';
+import { SceneSpecsSection } from './SpecsSection';
 
 type Env = Document['environment'];
 
-const TYPE_LABELS: { type: Document['entities'][number]['type']; one: string; many: string }[] = [
-  { type: 'led-wall', one: 'LED wall', many: 'LED walls' },
-  { type: 'stage', one: 'Stage deck', many: 'Stage decks' },
-  { type: 'equipment', one: 'Equipment item', many: 'Equipment items' },
-  { type: 'model', one: 'Model', many: 'Models' },
-  { type: 'splat', one: 'Splat', many: 'Splats' },
-  { type: 'room', one: 'Venue space', many: 'Venue spaces' },
-  { type: 'dimension', one: 'Measurement', many: 'Measurements' },
-  { type: 'group', one: 'Group', many: 'Groups' },
-];
+/* The per-type tally that used to live here now comes from `sceneSpecs` in the engine, so the
+   canvas is described by the same pure derivation every item uses. */
 
 export function SceneInspector() {
   const engine = useEngine();
@@ -42,7 +36,6 @@ export function SceneInspector() {
   const patchEnv = (fn: (e: Env) => Env, label: string, mergeKey?: string) => engine.patchEnvironment(fn, label, mergeKey);
   const patchSnap = (p: Partial<SnapSettings>, label = 'Snapping') => engine.patchSettings({ snap: { ...settings.snap, ...p } }, label);
 
-  const counts = TYPE_LABELS.map(t => ({ ...t, n: doc.entities.filter(e => e.type === t.type).length })).filter(t => t.n > 0);
   const total = doc.entities.length;
   const unitLong = UNITS.find(u => u.id === unit)?.long.toLowerCase() ?? unit;
 
@@ -69,6 +62,12 @@ export function SceneInspector() {
         <Prop label="Floor size">
           <LengthField inches={env.floor.sizeIn} unit={unit} min={120} max={12000} scrub="S"
             onChange={v => patchEnv(e => ({ ...e, floor: { ...e.floor, sizeIn: v } }), 'Floor size', 'env:floor.size')} />
+        </Prop>
+        {/* Pixel grid fade is document-wide: it used to sit inside one wall's Display section,
+            where changing it silently moved every other wall's threshold. */}
+        <Prop label="Pixel grid fade" title="Camera distance inside which LED pixel structure appears, on every wall">
+          <Select value={settings.pixelGridDistIn} options={GRID_THRESHOLD_OPTIONS_IN.map(v => ({ value: v, label: `${v / 12} ft` }))}
+            onChange={v => engine.patchSettings({ pixelGridDistIn: v }, 'Pixel grid distance')} className="grow" />
         </Prop>
         <ToggleRow label="Reflective floor" checked={env.floor.reflective} onChange={v => patchEnv(e => ({ ...e, floor: { ...e.floor, reflective: v } }), 'Reflective floor')} />
       </Section>
@@ -108,11 +107,7 @@ export function SceneInspector() {
       </Section>
 
       <Section title="Scene">
-        {counts.length === 0
-          ? <div className="hint">The scene is empty. Drag items in from the catalog to begin.</div>
-          : counts.map(c => <Stat key={c.type} label={c.n === 1 ? c.one : c.many} value={c.n} />)}
-        <Stat label="Floor" value={formatLength(env.floor.sizeIn, unit)} />
-        <div className="grid-2" style={{ marginTop: 6 }}>
+        <div className="grid-2">
           <Button size="sm" icon={<Maximize size={14} strokeWidth={1.5} />} onClick={() => engine.frameAll()}>Frame all</Button>
           <Button size="sm" variant="ghost" icon={<Eraser size={14} strokeWidth={1.5} />} onClick={requestClearScene}>Clear scene</Button>
         </div>
@@ -120,6 +115,9 @@ export function SceneInspector() {
 
       <Section title="Presets" defaultOpen={false}><PresetsPanel /></Section>
       <Section title="Export"><ExportPanel /></Section>
+
+      {/* The canvas's own tally closes the panel, the way an item's specs close its inspector. */}
+      <SceneSpecsSection />
     </>
   );
 }

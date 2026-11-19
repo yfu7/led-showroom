@@ -10,13 +10,15 @@ import { useEngine } from '@/app/store';
 import { Button } from '@/app/components/Button';
 import type { LedWallEntity } from '@/engine/document/types';
 import {
-  cellKey, classifyShapeEdit, filledCells, ghostCells, normalizeShape, paintShapeCell, pruneCorners, shapeBBox, toggleShapeCell, wallDims,
+  cellKey, classifyShapeEdit, filledCells, ghostCells, paintShapeCell, shapeBBox, toggleShapeCell,
 } from '@/engine/ledwall/layout';
-import { reclampWindows } from '@/app/panels/contentActions';
+import { shapeEditFields } from '@/engine/ledwall/shapeEdit';
 
 interface Props { wall: LedWallEntity }
 
 const PAD = 1;
+/** Floor on a shape cell's width (px). Below this the grid scrolls rather than shrink further. */
+const CELL_MIN_PX = 18;
 
 export function ShapeEditor({ wall }: Props) {
   const engine = useEngine();
@@ -36,13 +38,16 @@ export function ShapeEditor({ wall }: Props) {
   const gridCols = Math.max(1, bbox.cols) + 2 * PAD;
   const gridRows = Math.max(1, bbox.rows) + 2 * PAD;
 
-  /** Write a new cell set: normalise, update cols/rows, prune corners, re-clamp content windows. */
+  /**
+   * Write a new cell set: normalise, update cols/rows, re-key and prune corners, re-clamp content
+   * windows. Read against the live entity rather than the `wall` prop — several paint events can
+   * land before React re-renders — and applied as a finished state, which is what makes a merged
+   * multi-step gesture redo onto the right joints (see `shapeEditFields`).
+   */
   const commitCells = (next: Set<string>, merge: boolean) => {
-    const n = normalizeShape(next);
-    engine.update<LedWallEntity>(wall.id, w => {
-      const patched: LedWallEntity = { ...w, shape: { mode: 'custom', cells: Array.from(n.cells) }, cols: n.cols, rows: n.rows, corners: pruneCorners(n.cols, w.corners) };
-      return { ...patched, contentWindows: reclampWindows(w.contentWindows, wallDims(patched)) };
-    }, { label: 'Edit shape', mergeKey: merge ? `shape:${wall.id}` : undefined });
+    const fields = shapeEditFields(engine.entity<LedWallEntity>(wall.id) ?? wall, next);
+    engine.update<LedWallEntity>(wall.id, w => ({ ...w, ...fields }),
+      { label: 'Edit shape', mergeKey: merge ? `shape:${wall.id}` : undefined });
   };
 
   /** Always read the live cell set: several paint events can land before React re-renders. */
@@ -107,7 +112,7 @@ export function ShapeEditor({ wall }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div className="shape-grid" style={{ gridTemplateColumns: `repeat(${gridCols}, 1fr)`, touchAction: 'none' }} onPointerLeave={() => setHover(null)}>
+      <div className="shape-grid" style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(${CELL_MIN_PX}px, 1fr))`, touchAction: 'none' }} onPointerLeave={() => setHover(null)}>
         {rows}
       </div>
       <div className="row">

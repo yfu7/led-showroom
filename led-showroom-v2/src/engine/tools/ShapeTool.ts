@@ -8,7 +8,8 @@ import type { Engine } from '../Engine';
 import type { Tool, PointerInfo } from './Tool';
 import type { LedWallRenderer } from '../entities/LedWallRenderer';
 import type { LedWallEntity } from '../document/types';
-import { cellKey, classifyShapeEdit, filledCells, ghostCells, isRectWall, normalizeShape, paintShapeCell, panelLocalPosition, parseCell, pruneCorners } from '../ledwall/layout';
+import { cellKey, classifyShapeEdit, filledCells, ghostCells, isRectWall, paintShapeCell, panelLocalPosition, parseCell } from '../ledwall/layout';
+import { shapeEditFields } from '../ledwall/shapeEdit';
 import { createWallMaterials, ghostPanelGeometry } from '../ledwall/geometry';
 import { rayFromNdc } from '../scene/Picking';
 
@@ -122,8 +123,11 @@ export class ShapeTool implements Tool {
     }
     const next = paintShapeCell(cells, key, mode);
     if (!next) return;
-    const norm = normalizeShape(next);
-    this.engine.update<LedWallEntity>(wall.id, w => ({ ...w, cols: norm.cols, rows: norm.rows, shape: { mode: 'custom', cells: Array.from(norm.cells) }, corners: pruneCorners(norm.cols, w.corners) }), { label: 'Edit shape', mergeKey: merge ? 'shape-paint' : undefined });
+    // Computed from the live wall, outside the patch, and applied as a finished state: see
+    // `shapeEditFields` for why a merged paint gesture requires that.
+    const fields = shapeEditFields(wall, next);
+    this.engine.update<LedWallEntity>(wall.id, w => ({ ...w, ...fields }),
+      { label: 'Edit shape', mergeKey: merge ? `shape-paint:${wall.id}` : undefined });
   }
 
   onPointerDown(p: PointerInfo): boolean {

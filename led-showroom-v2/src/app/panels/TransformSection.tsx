@@ -11,7 +11,7 @@
  * drops it to the floor. While an object rides a deck, moving it horizontally or yawing it here
  * carries the deck along (v1's bidirectional wall ↔ deck sync).
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, Crosshair, RotateCcw } from 'lucide-react';
 import { useEngine, useStore } from '@/app/store';
 import { LengthField, NumberField } from '@/app/components/NumberField';
@@ -184,7 +184,14 @@ export function TransformSection({ ids }: Props) {
     }, { label: `Attach to ${stage.name}` });
   };
 
+  /**
+   * Escape reverts: it calls `setName` and then blurs, and the blur handler would run before React
+   * re-rendered with the restored name — committing the abandoned text as a rename.
+   */
+  const reverting = useRef(false);
+
   const commitName = () => {
+    if (reverting.current) { reverting.current = false; setName(primary.name); return; }
     const n = name.trim();
     if (!n || n === primary.name) { setName(primary.name); return; }
     engine.update(primary.id, { name: n }, { label: 'Rename' });
@@ -196,7 +203,7 @@ export function TransformSection({ ids }: Props) {
         <Prop label="Name">
           <div className="field text grow">
             <input value={name} maxLength={40} aria-label="Name" onChange={e => setName(e.target.value)} onBlur={commitName}
-              onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') { setName(primary.name); (e.target as HTMLInputElement).blur(); } }} />
+              onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') { reverting.current = true; setName(primary.name); (e.target as HTMLInputElement).blur(); } }} />
           </div>
         </Prop>
       )}

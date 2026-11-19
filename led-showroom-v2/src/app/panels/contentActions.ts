@@ -9,7 +9,7 @@ import type { Engine } from '@/engine/Engine';
 import type { ContentFitMode, ContentSource, ContentWindow, LedWallEntity, PxRect } from '@/engine/document/types';
 import { createContentWindow } from '@/engine/document/defaults';
 import { LIMITS } from '@/engine/ledwall/specs';
-import { wallDims, type WallDims } from '@/engine/ledwall/layout';
+import { wallDims } from '@/engine/ledwall/layout';
 import {
   alignRect, canReorderWindow, clampWindowRect, defaultWindowRect, lockedAspectRatio, reorderWindows, setRectField, type AlignKey,
 } from '@/engine/ledwall/contentWindows';
@@ -21,14 +21,6 @@ const EDIT_LABEL = 'Edit content window';
 const VIDEO_EXT = /\.(mp4|m4v|webm|ogv|ogg|mov)$/i;
 
 export const isVideoFile = (file: File): boolean => file.type.startsWith('video/') || VIDEO_EXT.test(file.name);
-
-/** Re-clamp every window to a (possibly new) wall size (v1 applyAllWindowRects). */
-export function reclampWindows(windows: ContentWindow[], dims: WallDims): ContentWindow[] {
-  return windows.map(w => {
-    const rect = clampWindowRect(w.rect, w.mode, dims);
-    return rect.x === w.rect.x && rect.y === w.rect.y && rect.w === w.rect.w && rect.h === w.rect.h ? w : { ...w, rect };
-  });
-}
 
 /** Patch one window inside a wall's `contentWindows` array. */
 export function updateWindow(

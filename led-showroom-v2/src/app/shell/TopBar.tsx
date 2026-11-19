@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Box, ChevronDown, Eraser, FolderOpen, Image, Import, Maximize, Moon, PanelLeft, PanelRight,
-  CircleQuestionMark, Redo2, Save, Settings2, Sun, Undo2, Video,
+  CircleQuestionMark, Redo2, Ruler, Save, Settings2, ShieldCheck, Sun, Undo2, Video,
 } from 'lucide-react';
 import { useStore } from '@/app/store';
 import { Button, IconButton } from '@/app/components/Button';
 import { Menu, type MenuItem } from '@/app/components/Menu';
 import { Select } from '@/app/components/Select';
-import { ExportGltfDialog, RecordVideoDialog, SaveImageDialog } from '@/app/panels/exportDialogs';
+import { ExportGltfDialog, GenerateDrawingDialog, RecordVideoDialog, SaveImageDialog } from '@/app/panels/exportDialogs';
 import { UNITS, type Unit } from '@/engine/units';
 import type { Engine } from '@/engine/Engine';
 import { importV1Presets } from '@/engine/persistence/presets';
 import { exportSceneFile, importSceneFile, downloadBlob, sceneFileName } from '@/engine/persistence/sceneFile';
 import { ClearSceneDialog, requestClearScene } from './ClearSceneDialog';
+import { GodPinDialog } from './GodMode';
 
 
 /** Application header: brand, file menu, scene name, history, units, theme, layout and settings. */
@@ -24,12 +25,15 @@ export function TopBar() {
   const undoLabel = useStore(s => s.undoLabel);
   const redoLabel = useStore(s => s.redoLabel);
   const theme = useStore(s => s.theme);
-  const leftOpen = useStore(s => s.leftOpen);
-  const rightOpen = useStore(s => s.rightOpen);
-  const setLeftOpen = useStore(s => s.setLeftOpen);
-  const setRightOpen = useStore(s => s.setRightOpen);
+  const catalogOpen = useStore(s => s.catalogOpen);
+  const inspectorOpen = useStore(s => s.inspectorOpen);
+  const setCatalogOpen = useStore(s => s.setCatalogOpen);
+  const setInspectorOpen = useStore(s => s.setInspectorOpen);
   const setPresentation = useStore(s => s.setPresentation);
   const setShortcutsOpen = useStore(s => s.setShortcutsOpen);
+  const godMode = useStore(s => s.godMode);
+  const setGodMode = useStore(s => s.setGodMode);
+  const setGodPinOpen = useStore(s => s.setGodPinOpen);
   // Kept in the store so a running take is not tied to this header's lifetime.
   const dialog = useStore(s => s.exportDialog);
   const setDialog = useStore(s => s.setExportDialog);
@@ -72,6 +76,9 @@ export function TopBar() {
     { label: 'Import v1 presets', icon: <Import />, onSelect: importPresets },
     'sep',
     { label: 'Save image…', icon: <Image />, onSelect: () => setDialog('image') },
+    // Also in the Export panel, but that panel only renders with nothing selected, and a drawing is
+    // most often wanted right after laying an item out.
+    { label: 'Generate render…', icon: <Ruler />, onSelect: () => setDialog('drawing') },
     { label: 'Record video…', icon: <Video />, onSelect: () => setDialog('video') },
     { label: 'Export glTF…', icon: <Box />, onSelect: () => setDialog('gltf') },
     'sep',
@@ -100,6 +107,13 @@ export function TopBar() {
     { label: 'Pan-first', radio: true, checked: s.navigation === 'pan', onSelect: set(() => engine.setNavigation('pan')) },
     'sep',
     { label: 'Live websites in recordings', checked: s.liveWebsiteInRecordings, onSelect: set(() => engine.setLiveWebsite(!s.liveWebsiteInRecordings)) },
+    'sep',
+    // The only way in or out of the admin view. Leaving needs no PIN: locking someone out of
+    // their own standard view would be the wrong way round.
+    {
+      label: 'Diagnostic view', icon: <ShieldCheck />, checked: godMode,
+      onSelect: () => (godMode ? setGodMode(false) : setGodPinOpen(true)),
+    },
   ];
 
   return (
@@ -128,8 +142,8 @@ export function TopBar() {
         {theme === 'dark' ? <Sun /> : <Moon />}
       </IconButton>
       <span style={{ width: 1, height: 18, background: 'var(--line-strong)', margin: '0 2px' }} />
-      <IconButton tip="Left panel" kbd="Tab" active={leftOpen} onClick={() => setLeftOpen(!leftOpen)}><PanelLeft /></IconButton>
-      <IconButton tip="Right panel" kbd="Tab" active={rightOpen} onClick={() => setRightOpen(!rightOpen)}><PanelRight /></IconButton>
+      <IconButton tip="Inspector (left)" kbd="Tab" active={inspectorOpen} onClick={() => setInspectorOpen(!inspectorOpen)}><PanelLeft /></IconButton>
+      <IconButton tip="Catalog (right)" kbd="Tab" active={catalogOpen} onClick={() => setCatalogOpen(!catalogOpen)}><PanelRight /></IconButton>
       <IconButton tip="Presentation mode" kbd="Ctrl+\" onClick={() => setPresentation(true)}><Maximize /></IconButton>
       <IconButton tip="Keyboard shortcuts" kbd="?" onClick={() => setShortcutsOpen(true)}><CircleQuestionMark /></IconButton>
       <Menu
@@ -141,9 +155,11 @@ export function TopBar() {
       />
 
       <ClearSceneDialog />
+      <GodPinDialog />
       {dialog === 'image' && <SaveImageDialog onClose={closeDialog} />}
       {dialog === 'video' && <RecordVideoDialog onClose={closeDialog} />}
       {dialog === 'gltf' && <ExportGltfDialog onClose={closeDialog} />}
+      {dialog === 'drawing' && <GenerateDrawingDialog onClose={closeDialog} />}
     </header>
   );
 }

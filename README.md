@@ -10,7 +10,7 @@ npm run dev
 
 See [led-showroom-v2/README.md](led-showroom-v2/README.md) for how to run it,
 [ARCHITECTURE.md](led-showroom-v2/ARCHITECTURE.md) for how it is put together, and
-[CHANGELOG.md](led-showroom-v2/CHANGELOG.md) for what shipped in 2.0.0.
+[CHANGELOG.md](led-showroom-v2/CHANGELOG.md) for what shipped in 2.1.0.
 
 Live at https://led-showroom-v2.vercel.app.
 

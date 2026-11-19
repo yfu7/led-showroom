@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import type { ContentWindow } from '../document/types';
+import { createDocument, createLedWall } from '../document/defaults';
+import type { ContentWindow, Document, LedWallEntity } from '../document/types';
 import { wallDims, type WallDims } from './layout';
 import {
   ALIGN_KEYS, activeAlign, alignRect, canReorderWindow, clampWindowRect, defaultWindowRect, dragRect, lockedAspectRatio,
-  promoteToCustomRect, pxToUnit, rectCoverage, rectInches, reorderWindows, setRectField, spanInfo, unitStep, unitToPx,
+  promoteToCustomRect, pxToUnit, rectCoverage, rectInches, reorderWindows, setRectField, spanInfo, spanSignature, unitStep, unitToPx,
   windowAtPixel,
 } from './contentWindows';
 
@@ -329,5 +330,55 @@ describe('reorderWindows', () => {
     expect(canReorderWindow(list, 'a', -1)).toBe(false);
     expect(canReorderWindow(list, 'c', 1)).toBe(false);
     expect(canReorderWindow(list, 'zzz', -1)).toBe(false);
+  });
+});
+
+describe('spanSignature', () => {
+  /** Two walls, span mode on, content on the first — the state the renderers share a canvas in. */
+  function spanned(a: Partial<Parameters<typeof createLedWall>[0]> = {}, b: Partial<Parameters<typeof createLedWall>[0]> = {}): { doc: Document; walls: LedWallEntity[] } {
+    const w1 = createLedWall({ cols: 3, rows: 2, ...a });
+    const w2 = createLedWall({ cols: 2, rows: 2, ...b });
+    w1.contentWindows = [{ ...w1.contentWindows[0], source: { type: 'color', color: '#ff0000' } } as ContentWindow];
+    const doc: Document = { ...createDocument(), entities: [w1, w2] };
+    doc.settings.spanContent = true;
+    return { doc, walls: [w1, w2] };
+  }
+
+  it('is empty unless span mode can actually apply', () => {
+    const { doc } = spanned();
+    expect(spanSignature({ ...doc, settings: { ...doc.settings, spanContent: false } })).toBe('');
+    expect(spanSignature({ ...doc, entities: [doc.entities[0]] })).toBe('');
+    expect(spanSignature(doc)).not.toBe('');
+  });
+
+  it('changes when a neighbour is resized', () => {
+    const { doc, walls } = spanned();
+    const before = spanSignature(doc);
+    // Wall 2 grows: wall 1's own fields are untouched, but its slice of the shared canvas moved,
+    // so the signature has to move with it or SceneManager never re-renders wall 1.
+    const resized = { ...doc, entities: [walls[0], { ...walls[1], cols: 5 }] };
+    expect(spanSignature(resized)).not.toBe(before);
+  });
+
+  it('changes when the walls are reordered, since span order is document order', () => {
+    const { doc, walls } = spanned();
+    expect(spanSignature({ ...doc, entities: [walls[1], walls[0]] })).not.toBe(spanSignature(doc));
+  });
+
+  it('changes when the source window on the first wall changes', () => {
+    const { doc, walls } = spanned();
+    const recoloured = { ...walls[0], contentWindows: [{ ...walls[0].contentWindows[0], source: { type: 'color', color: '#00ff00' } } as ContentWindow] };
+    expect(spanSignature({ ...doc, entities: [recoloured, walls[1]] })).not.toBe(spanSignature(doc));
+  });
+
+  it('ignores fields that do not reach the shared canvas', () => {
+    const { doc, walls } = spanned();
+    const renamed = { ...doc, entities: [{ ...walls[0], name: 'Renamed' }, { ...walls[1], brightness: 40 }] };
+    expect(spanSignature(renamed)).toBe(spanSignature(doc));
+  });
+
+  it('is stable: the same document reads the same twice', () => {
+    const { doc } = spanned();
+    expect(spanSignature(doc)).toBe(spanSignature(doc));
   });
 });

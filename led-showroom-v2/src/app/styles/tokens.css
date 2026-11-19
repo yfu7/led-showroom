@@ -37,8 +37,8 @@
   --r-xs: 6px; --r-sm: 8px; --r-md: 12px; --r-lg: 18px; --r-pill: 999px;
   --topbar-h: 50px;
   --statusbar-h: 28px;
-  --left-w: 292px;
-  --right-w: 328px;
+  --catalog-w: 292px;
+  --inspector-w: 328px;
 
   /* motion — Veloxity's easing, short and flat */
   --ease: cubic-bezier(.4, 0, .2, 1);

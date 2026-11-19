@@ -25,10 +25,13 @@ modelling engine is the core; the UI is a thin layer over it.
 src/
   main.tsx                     boot: mount React
   app/                         React UI (a Zustand store mirrors engine state)
-    App.tsx                    shell: TopBar / LeftDock / Viewport / RightDock / StatusBar
+    App.tsx                    shell: TopBar / InspectorDock / Viewport / CatalogDock / StatusBar
+                               (the docks are named for their contents, not their side: which side
+                               each one opens on is two CSS grid-areas in App.tsx)
     store.ts                   zustand store, subscribed to engine events
-    shell/                     TopBar, LeftDock, RightDock, StatusBar, ViewportOverlay, ViewCube,
-                               Hud, CalibrationOverlay, ShortcutsSheet
+    shell/                     TopBar, InspectorDock, CatalogDock, StatusBar, ViewportOverlay,
+                               ViewCube, Hud, CalibrationOverlay, ShortcutsSheet, GodMode,
+                               ClearSceneDialog
     panels/                    Catalog (+ catalogItems), Outliner, Inspector, LedWallInspector,
                                ContentPanel (+ contentActions), CornersSection, ShapeEditor,
                                TransformSection, SceneInspector, EntityInspectors, VenuePanel,

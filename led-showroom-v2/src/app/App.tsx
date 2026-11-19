@@ -4,8 +4,8 @@ import { registerDefaultRenderers } from '@/engine/entities';
 import { registerDefaultTools } from '@/engine/tools';
 import { useStore } from './store';
 import { TopBar } from './shell/TopBar';
-import { LeftDock } from './shell/LeftDock';
-import { RightDock } from './shell/RightDock';
+import { CatalogDock } from './shell/CatalogDock';
+import { InspectorDock } from './shell/InspectorDock';
 import { StatusBar } from './shell/StatusBar';
 import { ViewportOverlay } from './shell/ViewportOverlay';
 import { Toasts } from './components/Toasts';
@@ -29,8 +29,8 @@ export function App() {
   const engine = useStore(s => s.engine);
   const attach = useStore(s => s.attach);
   const presentation = useStore(s => s.presentation);
-  const leftOpen = useStore(s => s.leftOpen);
-  const rightOpen = useStore(s => s.rightOpen);
+  const catalogOpen = useStore(s => s.catalogOpen);
+  const inspectorOpen = useStore(s => s.inspectorOpen);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -65,13 +65,13 @@ export function App() {
   return (
     <div className={`app${presentation ? ' presentation' : ''}`}>
       <TopBar />
-      <aside className={`dock dock-left${leftOpen ? '' : ' collapsed'}`}>{ready && <LeftDock />}</aside>
+      <aside className={`dock dock-inspector${inspectorOpen ? '' : ' collapsed'}`}>{ready && <InspectorDock />}</aside>
       <main className="viewport-area">
         <div ref={hostRef} className="sr-viewport" />
         {ready && <ViewportOverlay />}
         <Toasts />
       </main>
-      <aside className={`dock dock-right${rightOpen ? '' : ' collapsed'}`}>{ready && <RightDock />}</aside>
+      <aside className={`dock dock-catalog${catalogOpen ? '' : ' collapsed'}`}>{ready && <CatalogDock />}</aside>
       <StatusBar />
       {ready && <ShortcutsSheet />}
     </div>

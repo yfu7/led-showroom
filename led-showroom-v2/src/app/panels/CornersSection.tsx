@@ -1,6 +1,7 @@
 /**
  * Corners: folds between columns (v1 5905-6032). One corner per joint, angle −270…90° in 5°
- * steps. Rectangular walls only — custom shapes cannot fold.
+ * steps. Custom shapes fold too: a fold is a property of the column walk, so the filled-cell
+ * pattern simply rides along with the columns it belongs to.
  */
 import { Plus, X } from 'lucide-react';
 import { useEngine } from '@/app/store';
@@ -9,18 +10,16 @@ import { NumberField } from '@/app/components/NumberField';
 import { Section } from '@/app/components/Section';
 import { Select } from '@/app/components/Select';
 import type { Corner, LedWallEntity } from '@/engine/document/types';
-import { isRectWall } from '@/engine/ledwall/layout';
 
 interface Props { wall: LedWallEntity }
 
 export function CornersSection({ wall }: Props) {
   const engine = useEngine();
-  const rect = isRectWall(wall);
   const joints = Math.max(0, wall.cols - 1);
   const used = new Set(wall.corners.map(c => c.afterCol));
   let free = 0;
   while (used.has(free) && free < joints) free++;
-  const canAdd = rect && free < joints;
+  const canAdd = free < joints;
 
   const write = (corners: Corner[], label: string, mergeKey?: string) => engine.update<LedWallEntity>(wall.id, { corners }, { label, mergeKey });
 
@@ -44,10 +43,9 @@ export function CornersSection({ wall }: Props) {
     <Section title="Corners" id="corners" right={
       <Button size="sm" variant="ghost" icon={<Plus size={14} strokeWidth={1.5} />} onClick={add} disabled={!canAdd}>Add corner</Button>
     }>
-      {!rect && <div className="hint">Corners are available for rectangular walls. Switch the shape back to Rectangle to fold this wall.</div>}
-      {rect && joints === 0 && <div className="hint">Add a second column to fold the wall.</div>}
-      {rect && wall.corners.length === 0 && joints > 0 && <div className="hint">A flat wall. Add a corner to fold it between two columns.</div>}
-      {rect && sorted.map(({ c, i }) => {
+      {joints === 0 && <div className="hint">Add a second column to fold the wall.</div>}
+      {wall.corners.length === 0 && joints > 0 && <div className="hint">A flat wall. Add a corner to fold it between two columns.</div>}
+      {sorted.map(({ c, i }) => {
         const options = [];
         for (let j = 0; j < joints; j++) if (!used.has(j) || j === c.afterCol) options.push({ value: j, label: String(j + 1) });
         return (

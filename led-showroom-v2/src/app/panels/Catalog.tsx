@@ -196,7 +196,7 @@ function dropPoint(engine: Engine, d: DropDetail): Vec3 | undefined {
 
 /**
  * Listen for `showroom:catalog-drop` (dispatched by the viewport overlay after an HTML5 drop) and
- * add the item at the drop point. Mounted by LeftDock so it stays live whichever tab is showing.
+ * add the item at the drop point. Mounted by CatalogDock so it stays live whichever tab is showing.
  */
 export function useCatalogDropListener(engine: Engine | null): void {
   useEffect(() => {

@@ -45,8 +45,11 @@ svg { display: block; }
 
 .topbar { grid-area: top; }
 .dock { display: flex; flex-direction: column; min-height: 0; background: var(--bg-1); }
-.dock-left { grid-area: left; width: var(--left-w); border-right: 1px solid var(--line); }
-.dock-right { grid-area: right; width: var(--right-w); border-left: 1px solid var(--line); }
+/* Side assignment lives here: swap the two `grid-area`s (and the border sides with them) to put
+   the inspector back on the right. No panel component knows its side; the only other places that
+   do are the TopBar toggles, which name the sides to the user in their tooltips and icons. */
+.dock-inspector { grid-area: left; width: var(--inspector-w); border-right: 1px solid var(--line); }
+.dock-catalog { grid-area: right; width: var(--catalog-w); border-left: 1px solid var(--line); }
 .dock.collapsed { width: 0; overflow: hidden; border: 0; }
 .viewport-area { grid-area: viewport; position: relative; min-width: 0; min-height: 0; background: var(--bg-0); }
 .statusbar { grid-area: status; }

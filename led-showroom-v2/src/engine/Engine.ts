@@ -11,6 +11,7 @@ import { Clipboard } from './clipboard';
 import type { Document, Entity, ViewState } from './document/types';
 import { createDocument, createLedWall } from './document/defaults';
 import { addEntity, getEntity } from './document/Document';
+import { LIMITS } from './ledwall/specs';
 import { Renderer, type GpuPreference, probeGpus } from './scene/Renderer';
 import { CameraRig, type ViewPreset } from './scene/CameraRig';
 import { Environment, DARK_THEME, LIGHT_THEME, type EnvTheme } from './scene/Environment';
@@ -36,6 +37,8 @@ export interface EngineEvents extends Record<string, unknown> {
   frame: number;
   theme: 'dark' | 'light';
   toast: { kind: 'info' | 'error' | 'success'; message: string };
+  /** Per-wall content-window selection, whole snapshot (see `Engine.selectWindow`). */
+  window: Record<string, string | null>;
 }
 
 export interface EngineSettings {
@@ -77,7 +80,12 @@ export class Engine extends Emitter<EngineEvents> implements DocHost {
    * frame / home view clears it again.
    */
   restoredView = false;
-  /** Content window selected per wall (UI state, not persisted in the document). */
+  /**
+   * Content window selected per wall (UI state, not persisted in the document). This map is the
+   * only owner: write it through {@link selectWindow} so the `window` event carries the change to
+   * the UI. The panel used to keep its own copy, so clicking a window in the viewport left the
+   * panel pointing at a different one and the next edit landed on the wrong window.
+   */
   selectedWindow = new Map<string, string | null>();
 
   private ctx: RenderContext;
@@ -175,6 +183,7 @@ export class Engine extends Emitter<EngineEvents> implements DocHost {
     const ids = new Set(this.doc.entities.map(e => e.id));
     const sel = this.selection.filter(id => ids.has(id));
     if (sel.length !== this.selection.length) this.select(sel);
+    this.pruneWindowSelection();
     if (!meta.silent) this.emit('document', this.doc);
     this.scheduleAutosave();
     this.invalidate();
@@ -300,6 +309,7 @@ export class Engine extends Emitter<EngineEvents> implements DocHost {
   paste(at?: Vec3): string[] {
     const { clones, idMap } = this.clipboard.paste(this.doc, at);
     if (!clones.length) return [];
+    if (!this.acceptsWalls(clones.filter(c => c.type === 'led-wall').length)) return [];
     this.run(cmdAddEntities(this, clones, clones.length === 1 ? `Paste ${clones[0].name}` : `Paste ${clones.length} objects`));
     const ids = new Set(clones.map(c => c.id));
     const tops = clones.filter(c => !c.parentId || !ids.has(c.parentId)).map(c => c.id);
@@ -310,6 +320,39 @@ export class Engine extends Emitter<EngineEvents> implements DocHost {
 
   /* ───────────── selection ───────────── */
 
+  /** Snapshot for the UI. The store holds no window state of its own, it mirrors this. */
+  windowSelection(): Record<string, string | null> { return Object.fromEntries(this.selectedWindow); }
+
+  /** Choose a wall's active content window (viewport click, panel click, or the default pick). */
+  selectWindow(wallId: string, windowId: string | null): void {
+    if (this.selectedWindow.get(wallId) === windowId) return;
+    this.selectedWindow.set(wallId, windowId);
+    this.emit('window', this.windowSelection());
+  }
+
+  /** Forget per-wall window state for walls the document no longer has. */
+  private pruneWindowSelection(): void {
+    let changed = false;
+    for (const id of Array.from(this.selectedWindow.keys())) {
+      if (!getEntity(this.doc, id)) { this.selectedWindow.delete(id); changed = true; }
+    }
+    if (changed) this.emit('window', this.windowSelection());
+  }
+
+  /**
+   * Whether `n` more LED walls fit under `LIMITS.maxWalls`, toasting when they do not. Every path
+   * that adds walls asks this. The cap was enforced in the catalog alone, so duplicate, paste and
+   * the inspector's Duplicate button walked past it — and then the catalog refused every further
+   * wall while the scene already held more than the limit.
+   */
+  acceptsWalls(n: number): boolean {
+    if (n <= 0) return true;
+    const have = this.doc.entities.filter(e => e.type === 'led-wall').length;
+    if (have + n <= LIMITS.maxWalls) return true;
+    this.toast('error', `Up to ${LIMITS.maxWalls} LED walls per scene`);
+    return false;
+  }
+
   select(ids: string[], mode: 'replace' | 'add' | 'toggle' = 'replace'): void {
     let next: string[];
     if (mode === 'replace') next = ids.slice();
@@ -318,6 +361,10 @@ export class Engine extends Emitter<EngineEvents> implements DocHost {
     next = next.filter(id => !!getEntity(this.doc, id));
     if (next.length === this.selection.length && next.every((id, i) => id === this.selection[i])) return;
     this.selection = next;
+    // Selecting something else ends any in-flight edit gesture. Without this, two items edited
+    // inside the merge window could fold into one history entry whose undo reverts the first
+    // item and whose redo re-applies only the second.
+    this.history.commit();
     this.refreshSelectionHelper();
     this.emit('selection', next);
     this.invalidate();

@@ -167,6 +167,17 @@ export function pruneCorners(cols: number, corners: Corner[]): Corner[] {
   return kept.length === corners.length ? corners : kept;
 }
 
+/**
+ * Re-key folds after {@link normalizeShape} translated the grid sideways, then prune. Painting a
+ * panel into the column left of the shape renumbers every existing column (+1), so a fold stored
+ * as "after column 2" must become "after column 3" to stay on the same physical joint — otherwise
+ * the whole wall folds one joint over the moment the shape grows leftwards.
+ */
+export function shiftCorners(corners: Corner[], deltaCols: number, cols: number): Corner[] {
+  if (!corners.length || deltaCols === 0) return pruneCorners(cols, corners);
+  return pruneCorners(cols, corners.map(c => ({ ...c, afterCol: c.afterCol + deltaCols })));
+}
+
 /** A flat run of columns between corners (inclusive indices). */
 export interface Segment { startCol: number; endCol: number }
 
@@ -391,8 +402,12 @@ export function paintShapeCell(cells: Set<string>, key: string, mode: 'add' | 'r
  * Translate the cells so the bounding box starts at (0,0) and report its size (v1 normalizeShape
  * 2715-2733 + commitShapeEdit 2737-2741). `cols`/`rows` are clamped to >= 1 as v1 does when writing
  * them back to the wall. Always returns a fresh Set.
+ *
+ * `shiftC`/`shiftR` are how far every cell moved (growing one column to the LEFT gives
+ * `shiftC = +1`). Anything else keyed by column index — folds above all — has to move with it;
+ * see {@link shiftCorners}.
  */
-export function normalizeShape(cells: Iterable<string>): { cells: Set<string>; cols: number; rows: number } {
+export function normalizeShape(cells: Iterable<string>): { cells: Set<string>; cols: number; rows: number; shiftC: number; shiftR: number } {
   const src = Array.from(cells);
   const bbox = shapeBBox(src);
   const next = new Set<string>();
@@ -400,7 +415,7 @@ export function normalizeShape(cells: Iterable<string>): { cells: Set<string>; c
     const [c, r] = parseCell(key);
     next.add(cellKey(c - bbox.minC, r - bbox.minR));
   }
-  return { cells: next, cols: Math.max(1, bbox.cols), rows: Math.max(1, bbox.rows) };
+  return { cells: next, cols: Math.max(1, bbox.cols), rows: Math.max(1, bbox.rows), shiftC: bbox.minC === 0 ? 0 : -bbox.minC, shiftR: bbox.minR === 0 ? 0 : -bbox.minR };
 }
 
 /**

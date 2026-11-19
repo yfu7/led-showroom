@@ -3,14 +3,14 @@
  * models, Gaussian splats and measurements. Each takes the entity as a prop and writes through the
  * engine (continuous edits carry a mergeKey so scrubbing collapses into one undo entry).
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Trash, Upload, X } from 'lucide-react';
 import type {
   ContentSource, DimensionEntity, EquipmentEntity, ModelEntity, RoomEntity, SplatEntity, StageEntity, SurfaceMedia,
 } from '@/engine/document/types';
 import type { Vec3 } from '@/engine/math';
-import { v3dist, v3eq } from '@/engine/math';
-import { DEG, UNITS, formatDims, formatLength, fromInches, unitDecimals } from '@/engine/units';
+import { v3eq } from '@/engine/math';
+import { DEG, UNITS, formatLength } from '@/engine/units';
 import { STAGE_HEIGHTS_IN } from '@/engine/ledwall/specs';
 import { createStage, ledWallDatum } from '@/engine/document/defaults';
 import { uniqueName } from '@/engine/document/Document';
@@ -18,11 +18,13 @@ import { equipmentDef } from '@/engine/catalog/equipment';
 import { useDoc, useEngine, useStore } from '@/app/store';
 import { Button, IconButton } from '@/app/components/Button';
 import { LengthField, NumberField } from '@/app/components/NumberField';
-import { Prop, Section, Stat } from '@/app/components/Section';
+import { Prop, Section } from '@/app/components/Section';
 import { Select } from '@/app/components/Select';
 import { Slider } from '@/app/components/Slider';
 import { ToggleRow } from '@/app/components/Toggle';
 import { DropZone } from '@/app/components/DropZone';
+import { TransformSection } from '@/app/panels/TransformSection';
+import { SpecsSection } from '@/app/panels/SpecsSection';
 
 /* ───────── shared: colour field ───────── */
 
@@ -34,7 +36,12 @@ export interface ColorFieldProps { value: string; onChange(v: string): void; onC
 export function ColorField({ value, onChange, onCommit, disabled }: ColorFieldProps) {
   const [text, setText] = useState(value);
   useEffect(() => { setText(value); }, [value]);
+  // Enter commits and then blurs, and `onBlur` would commit the same text again against a `value`
+  // prop React has not refreshed yet — one typed colour, two undo entries. One commit per focus.
+  const committed = useRef(false);
   const commit = () => {
+    if (committed.current) return;
+    committed.current = true;
     const t = text.trim().toLowerCase();
     const full = /^#?[0-9a-f]{6}$/.test(t) ? (t.startsWith('#') ? t : `#${t}`) : null;
     if (full) { if (full !== value.toLowerCase()) onChange(full); onCommit?.(); }
@@ -47,6 +54,7 @@ export function ColorField({ value, onChange, onCommit, disabled }: ColorFieldPr
         type="text" value={text} disabled={disabled} spellCheck={false} maxLength={7}
         style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-xs)', letterSpacing: 0 }}
         onChange={e => setText(e.target.value)}
+        onFocus={() => { committed.current = false; }}
         onBlur={commit}
         onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') { commit(); (e.target as HTMLInputElement).blur(); } }}
       />
@@ -67,7 +75,10 @@ export function StageInspector({ entity }: { entity: StageEntity }) {
   const [customH, setCustomH] = useState(false);
   // Inspector reuses this instance across selections, so the 'Custom' choice must not leak to another deck.
   useEffect(() => setCustomH(false), [entity.id]);
-  const up = (patch: Partial<StageEntity>, mergeKey?: string, label?: string) => engine.update<StageEntity>(entity.id, patch, { mergeKey, label });
+  // Every mergeKey is scoped to this entity: a bare 'stage:w' would let a width edit on one deck
+  // merge with a width edit on the next deck selected inside the merge window.
+  const up = (patch: Partial<StageEntity>, mergeKey?: string, label?: string) =>
+    engine.update<StageEntity>(entity.id, patch, { mergeKey: mergeKey ? `${mergeKey}:${entity.id}` : undefined, label });
 
   const std = (STAGE_HEIGHTS_IN as readonly number[]).includes(entity.heightIn);
   const heightSel = std && !customH ? String(entity.heightIn) : 'custom';
@@ -91,6 +102,7 @@ export function StageInspector({ entity }: { entity: StageEntity }) {
 
   return (
     <>
+      <TransformSection ids={[entity.id]} />
       <Section title="Deck">
         <Prop label="Size">
           <LengthField inches={entity.widthIn} unit={unit} min={6} scrub="W" onChange={v => up({ widthIn: v }, 'stage:w')} />
@@ -107,7 +119,6 @@ export function StageInspector({ entity }: { entity: StageEntity }) {
         <Prop label="Colour">
           <ColorField value={entity.color ?? '#1a1a1c'} onChange={v => up({ color: v }, 'stage:color')} />
         </Prop>
-        <Stat label="Top at" value={formatLength(entity.transform.position[1] + entity.heightIn, unit)} />
       </Section>
       <Section title="Adjacent decks">
         <div className="hint">Add another deck of the same size flush against this one.</div>
@@ -118,6 +129,7 @@ export function StageInspector({ entity }: { entity: StageEntity }) {
           <Button size="sm" onClick={() => addAdjacent(0, -1)}>Add −Z</Button>
         </div>
       </Section>
+      <SpecsSection entity={entity} />
     </>
   );
 }
@@ -130,7 +142,8 @@ export function EquipmentInspector({ entity }: { entity: EquipmentEntity }) {
   const engine = useEngine();
   const unit = useDoc().settings.units;
   const def = equipmentDef(entity.catalogId);
-  const up = (patch: Partial<EquipmentEntity>, mergeKey?: string, label?: string) => engine.update<EquipmentEntity>(entity.id, patch, { mergeKey, label });
+  const up = (patch: Partial<EquipmentEntity>, mergeKey?: string, label?: string) =>
+    engine.update<EquipmentEntity>(entity.id, patch, { mergeKey: mergeKey ? `${mergeKey}:${entity.id}` : undefined, label });
 
   const setDim = (i: 0 | 1 | 2, v: number) => { const d = [...entity.dims] as Vec3; d[i] = v; up({ dims: d }, `eq:dims:${i}`); };
   const variantValue = def?.variants?.find(v => v3eq(v.dims, entity.dims))?.name ?? 'custom';
@@ -150,11 +163,9 @@ export function EquipmentInspector({ entity }: { entity: EquipmentEntity }) {
 
   return (
     <>
+      <TransformSection ids={[entity.id]} />
       <Section title="Item">
-        <Stat label="Catalog" value={def?.name ?? entity.catalogId} />
         {def?.description && <div className="hint">{def.description}</div>}
-        {/* Published spec sheet for the real rental products, shown as Veloxity's label/value rows. */}
-        {def?.specs?.map(s => <Stat key={s.label} label={s.label} value={s.value} />)}
         {variantOptions.length > 0 && (
           <Prop label="Variant">
             <Select value={variantValue} options={variantOptions} onChange={n => { const v = def?.variants?.find(x => x.name === n); if (v) up({ dims: [...v.dims] as Vec3 }, undefined, 'Change variant'); }} />
@@ -186,6 +197,7 @@ export function EquipmentInspector({ entity }: { entity: EquipmentEntity }) {
           )}
         </Section>
       )}
+      <SpecsSection entity={entity} />
     </>
   );
 }
@@ -216,7 +228,8 @@ export function RoomInspector({ entity }: { entity: RoomEntity }) {
   const engine = useEngine();
   const doc = useDoc();
   const unit = doc.settings.units;
-  const up = (patch: Partial<RoomEntity>, mergeKey?: string, label?: string) => engine.update<RoomEntity>(entity.id, patch, { mergeKey, label });
+  const up = (patch: Partial<RoomEntity>, mergeKey?: string, label?: string) =>
+    engine.update<RoomEntity>(entity.id, patch, { mergeKey: mergeKey ? `${mergeKey}:${entity.id}` : undefined, label });
 
   // "Wall from back" is derived from the transform (v1 `#vsWallFromBack`): the gap between the
   // rear face of the LED walls and the room's back wall, which is the room's local origin.
@@ -291,6 +304,7 @@ export function RoomInspector({ entity }: { entity: RoomEntity }) {
           );
         })}
       </Section>
+      <SpecsSection entity={entity} />
     </>
   );
 }
@@ -302,7 +316,8 @@ export function ModelInspector({ entity }: { entity: ModelEntity }) {
   const unit = useDoc().settings.units;
   // re-render when the model finishes loading so the measured dims appear
   const loading = useStore(s => s.loading.has(entity.id));
-  const up = (patch: Partial<ModelEntity>, mergeKey?: string, label?: string) => engine.update<ModelEntity>(entity.id, patch, { mergeKey, label });
+  const up = (patch: Partial<ModelEntity>, mergeKey?: string, label?: string) =>
+    engine.update<ModelEntity>(entity.id, patch, { mergeKey: mergeKey ? `${mergeKey}:${entity.id}` : undefined, label });
 
   const root = engine.scene.get(entity.id)?.root;
   const measured = (root?.userData.measuredDims as Vec3 | undefined) ?? entity.dims ?? null;
@@ -316,13 +331,8 @@ export function ModelInspector({ entity }: { entity: ModelEntity }) {
 
   return (
     <>
+      <TransformSection ids={[entity.id]} />
       <Section title="Model">
-        <Stat label="File" value={<span className="truncate" style={{ maxWidth: 170, display: 'inline-block' }} title={entity.fileName}>{entity.fileName}</span>} />
-        <Stat label="Format" value={entity.format.toUpperCase()} />
-        <Stat label="Measured" value={loading ? 'Loading…' : measured ? formatDims(measured, unit) : '—'} />
-        {measured && (scale[0] !== 1 || scale[1] !== 1 || scale[2] !== 1) && (
-          <Stat label="Scaled" value={formatDims([measured[0] * scale[0], measured[1] * scale[1], measured[2] * scale[2]], unit)} />
-        )}
         <Prop label="Source unit">
           <Select value={entity.sourceUnit} options={UNITS.map(u => ({ value: u.id, label: u.long }))} onChange={v => up({ sourceUnit: v }, undefined, 'Model source unit')} />
         </Prop>
@@ -334,6 +344,9 @@ export function ModelInspector({ entity }: { entity: ModelEntity }) {
         </Prop>
         <div className="hint">Sets a uniform scale so the model's measured height matches.</div>
       </Section>
+      {/* The real bounding box is only known once the file has parsed, so it is measured here
+          and handed to the pure spec derivation rather than looked up inside it. */}
+      <SpecsSection entity={entity} extras={{ measured, measuring: loading }} />
     </>
   );
 }
@@ -345,16 +358,12 @@ export function SplatInspector({ entity }: { entity: SplatEntity }) {
   const unit = useDoc().settings.units;
   const t = entity.transform;
   const setT = (patch: Partial<SplatEntity['transform']>, key: string) =>
-    engine.update<SplatEntity>(entity.id, { transform: { ...t, ...patch } }, { mergeKey: `splat:${key}`, label: 'Align splat' });
+    engine.update<SplatEntity>(entity.id, { transform: { ...t, ...patch } }, { mergeKey: `splat:${key}:${entity.id}`, label: 'Align splat' });
   const setRot = (i: 0 | 1 | 2, v: number) => { const r = [...t.rotation] as Vec3; r[i] = v; setT({ rotation: r }, `rot${i}`); };
   const setPos = (i: 0 | 1 | 2, v: number) => { const p = [...t.position] as Vec3; p[i] = v; setT({ position: p }, `pos${i}`); };
 
   return (
     <>
-      <Section title="Splat">
-        <Stat label="File" value={<span className="truncate" style={{ maxWidth: 170, display: 'inline-block' }} title={entity.fileName}>{entity.fileName}</span>} />
-        <Stat label="Format" value={entity.format.toUpperCase()} />
-      </Section>
       <Section title="Alignment">
         <Prop label="Scale">
           <NumberField value={t.scale[0] * 100} min={1} max={10000} step={5} decimals={0} unit="%" scrub="S"
@@ -376,6 +385,7 @@ export function SplatInspector({ entity }: { entity: SplatEntity }) {
         </Prop>
         <div className="hint">Align the reconstruction to real scale: set the scale so a known feature measures true (a 13 ft back wall, say), then level and position it.</div>
       </Section>
+      <SpecsSection entity={entity} />
     </>
   );
 }
@@ -385,16 +395,13 @@ export function SplatInspector({ entity }: { entity: SplatEntity }) {
 export function DimensionInspector({ entity }: { entity: DimensionEntity }) {
   const engine = useEngine();
   const unit = useDoc().settings.units;
-  const d = unitDecimals(unit);
-  const pt = (p: Vec3) => p.map(v => (unit === 'ft' ? formatLength(v, 'ft') : `${+fromInches(v, unit).toFixed(d)}`)).join(', ') + (unit === 'ft' || unit === 'in' ? '' : ` ${unit}`);
   return (
-    <Section title="Measurement">
-      <Stat label="Length" value={formatLength(v3dist(entity.a, entity.b), unit)} />
-      <Stat label="Point A" value={<span className="mono" style={{ fontSize: 'var(--fs-2xs)' }}>{pt(entity.a)}</span>} />
-      <Stat label="Point B" value={<span className="mono" style={{ fontSize: 'var(--fs-2xs)' }}>{pt(entity.b)}</span>} />
-      {entity.label && <Stat label="Label" value={entity.label} />}
-      <div className="hint">Endpoints are set with the measure tool; drag the endpoints in the viewport to adjust.</div>
-      <Button variant="danger" size="sm" icon={<Trash size={14} strokeWidth={1.5} />} onClick={() => engine.remove([entity.id])}>Delete measurement</Button>
-    </Section>
+    <>
+      <Section title="Measurement">
+        <div className="hint">Endpoints are set with the measure tool; drag the endpoints in the viewport to adjust.</div>
+        <Button variant="danger" size="sm" icon={<Trash size={14} strokeWidth={1.5} />} onClick={() => engine.remove([entity.id])}>Delete measurement</Button>
+      </Section>
+      <SpecsSection entity={entity} />
+    </>
   );
 }

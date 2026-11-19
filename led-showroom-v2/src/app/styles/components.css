@@ -413,7 +413,9 @@
 .kbd-group { margin-bottom: 14px; }
 
 /* ───────── shape editor grid ───────── */
-.shape-grid { display: grid; gap: 2px; padding: 8px; background: var(--bg-2); border-radius: var(--r-md); border: 1px solid var(--line); }
+/* `minmax(--shape-cell-min, 1fr)` (set inline per grid) keeps a cell legible and clickable on a
+   wide shape: past ~14 columns the grid scrolls sideways instead of shrinking cells to slivers. */
+.shape-grid { display: grid; gap: 3px; padding: 8px; background: var(--bg-2); border-radius: var(--r-md); border: 1px solid var(--line); overflow-x: auto; overscroll-behavior-x: contain; }
 .shape-cell { aspect-ratio: 1.331; border-radius: 3px; background: var(--bg-3); cursor: pointer; transition: background var(--t-fast); }
 .shape-cell.on { background: var(--accent); }
 .shape-cell.ghost { background: var(--bg-4); }

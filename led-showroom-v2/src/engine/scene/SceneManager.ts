@@ -8,6 +8,7 @@ import type { Document, Entity, EntityType } from '../document/types';
 import { jsonEq } from '../math';
 import type { EntityRenderer, RenderContext, RendererFactory } from '../entities/EntityRenderer';
 import { applyTransform } from '../entities/EntityRenderer';
+import { spanSignature } from '../ledwall/contentWindows';
 
 export class SceneManager {
   readonly scene = new THREE.Scene();
@@ -29,10 +30,14 @@ export class SceneManager {
   all(): EntityRenderer[] { return Array.from(this.renderers.values()); }
   rootOf(id: string): THREE.Object3D | undefined { return this.renderers.get(id)?.root; }
 
-  /** Fields outside the entity that change how entities render. */
+  /**
+   * Fields outside the entity that change how entities render. An item is otherwise re-rendered
+   * only when its own JSON changed, so anything an item reads from its neighbours has to show up
+   * here — `spanSignature` is the one such cross-item input (see `spanSignature`).
+   */
   private globalKey(doc: Document): string {
     const s = doc.settings;
-    return JSON.stringify([s.units, s.spanContent, s.pixelGridDistIn, s.autoRotate, doc.environment.lighting, doc.environment.backdrop.photo?.url ?? null]);
+    return JSON.stringify([s.units, s.spanContent, s.pixelGridDistIn, s.autoRotate, doc.environment.lighting, doc.environment.backdrop.photo?.url ?? null, spanSignature(doc)]);
   }
 
   /** Reconcile the scene with `doc`. Returns ids that were created/updated/removed. */

@@ -73,7 +73,7 @@ export class ContentDragTool implements Tool {
     if (!h) return false;
     if (!this.engine.isSelected(h.wallId)) this.engine.select([h.wallId]);
     if (!h.win) return true; // claimed: selecting the wall, no orbit
-    this.engine.selectedWindow.set(h.wallId, h.win.id);
+    this.engine.selectWindow(h.wallId, h.win.id);
     let win = h.win;
     if (win.mode !== 'custom') {
       const promoted = promoteToCustomRect(win, h.renderer.dims);

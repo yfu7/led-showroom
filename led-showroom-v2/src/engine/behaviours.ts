@@ -390,7 +390,7 @@ export function installSceneBehaviours(engine: Engine): () => void {
       if (!isLedWall(e) || !e.contentWindows.length) continue;
       const cur = engine.selectedWindow.get(id);
       if (cur && e.contentWindows.some(w => w.id === cur)) continue;
-      engine.selectedWindow.set(id, e.contentWindows[0].id);
+      engine.selectWindow(id, e.contentWindows[0].id);
     }
   };
   ensureWindowSelection();

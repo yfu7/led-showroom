@@ -76,7 +76,7 @@ export function Outliner() {
   const doc = useDoc();
   const selection = useStore(s => s.selection);
   const hovered = useStore(s => s.hovered);
-  const setLeftTab = useStore(s => s.setLeftTab);
+  const setCatalogTab = useStore(s => s.setCatalogTab);
   const unit = doc.settings.units;
 
   const rows = useMemo(() => buildRows(doc.entities), [doc.entities]);
@@ -196,7 +196,7 @@ export function Outliner() {
         <span className="panel-title">Objects</span>
         <span className="muted num" style={{ fontSize: 'var(--fs-xs)' }}>{count}</span>
         <span className="spacer" />
-        <Button size="sm" variant="ghost" icon={<Plus size={14} strokeWidth={1.5} />} onClick={() => setLeftTab('catalog')} tip="Open the catalog">Add</Button>
+        <Button size="sm" variant="ghost" icon={<Plus size={14} strokeWidth={1.5} />} onClick={() => setCatalogTab('catalog')} tip="Open the catalog">Add</Button>
       </div>
       <div className="panel-body" ref={listRef} tabIndex={0} onKeyDown={onListKey} style={{ outline: 'none', padding: count ? '6px 6px 12px' : 0 }}>
         {count === 0 ? (
@@ -204,7 +204,7 @@ export function Outliner() {
             <Monitor />
             <div className="title">An empty floor</div>
             <div className="hint">Add an LED wall from the catalog</div>
-            <Button size="sm" onClick={() => setLeftTab('catalog')}>Browse catalog</Button>
+            <Button size="sm" onClick={() => setCatalogTab('catalog')}>Browse catalog</Button>
           </div>
         ) : (
           <div

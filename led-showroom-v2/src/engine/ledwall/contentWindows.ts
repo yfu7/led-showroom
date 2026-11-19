@@ -14,8 +14,8 @@
  *  - spanInfo                   → v1 5743-5752 (getSpanInfo) + 4754-4762 (per-wall slice mapping)
  *  - dragRect                   → v1 8046-8070 (content drag mousemove)
  */
-import type { ContentFitMode, ContentWindow, PxRect } from '../document/types';
-import type { WallDims } from './layout';
+import type { ContentFitMode, ContentWindow, Document, LedWallEntity, PxRect } from '../document/types';
+import { wallDims, type WallDims } from './layout';
 
 /** Unit the content-window inputs are shown in: raw wall pixels, panel counts, or percent of the wall. */
 export type CwUnit = 'px' | 'panels' | 'pct';
@@ -284,6 +284,41 @@ export function spanInfo(walls: readonly { id: string; dims: WallDims }[]): Span
   }
   for (const s of slices) s.yOffsetPx = maxHPx - s.hPx;
   return { totalWPx, maxHPx, walls: slices };
+}
+
+/**
+ * Re-clamp every window after the wall's pixel size changed (a cols/rows edit, a shape paint, a
+ * product swap). Shared by the inspector, the shape editor and the shape tool: a window left
+ * hanging outside the new wall is invisible content the user cannot get back without dragging.
+ * Returns the same array identity-wise where nothing moved.
+ */
+export function reclampWindows(windows: ContentWindow[], dims: WallDims): ContentWindow[] {
+  return windows.map(w => {
+    const rect = clampWindowRect(w.rect, w.mode, dims);
+    return rect.x === w.rect.x && rect.y === w.rect.y && rect.w === w.rect.w && rect.h === w.rect.h ? w : { ...w, rect };
+  });
+}
+
+/**
+ * Everything *outside* one wall that changes how that wall renders in span mode: the ordered wall
+ * list, every wall's pixel size, and the source window, which is taken from the first wall.
+ *
+ * `SceneManager` only re-runs a renderer when its own entity changed, which is right for an
+ * independent item and wrong in span mode: the walls share one canvas, so resizing wall 2 or
+ * deleting wall 1 moves wall 3's slice of it. Folding this signature into the scene's global key
+ * is what makes the whole row follow. Empty string when span mode cannot apply, so the common
+ * case costs nothing.
+ */
+export function spanSignature(doc: Document): string {
+  if (!doc.settings.spanContent) return '';
+  const walls = doc.entities.filter(e => e.type === 'led-wall') as LedWallEntity[];
+  if (walls.length < 2) return '';
+  const first = walls[0];
+  const src = first.contentWindows.find(w => w.source) ?? first.contentWindows[0];
+  return JSON.stringify([
+    walls.map(w => { const d = wallDims(w); return [w.id, d.wallWPx, d.wallHPx]; }),
+    src ? [src.source, src.opacity, src.visible] : null,
+  ]);
 }
 
 /**

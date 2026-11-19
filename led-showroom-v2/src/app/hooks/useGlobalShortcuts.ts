@@ -162,8 +162,8 @@ export function useGlobalShortcuts(engine: Engine | null): void {
         case 'g': engine.patchEnvironment(env => ({ ...env, grid: { ...env.grid, visible: !env.grid.visible } }), 'Toggle grid'); return handled();
         case '?': st.setShortcutsOpen(true); return handled();
         case 'Tab': {
-          const both = st.leftOpen || st.rightOpen;
-          st.setLeftOpen(!both); st.setRightOpen(!both);
+          const both = st.catalogOpen || st.inspectorOpen;
+          st.setCatalogOpen(!both); st.setInspectorOpen(!both);
           return handled();
         }
       }
