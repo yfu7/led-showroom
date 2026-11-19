@@ -1,0 +1,153 @@
+/**
+ * Physical metrics of a box truss and of the half coupler that grips it.
+ *
+ * Single source of truth shared by the DRAWING (`entities/equipmentGeometry.ts`) and the PLANNING
+ * (`ledwall/trussRig.ts`). It has to be one source. A half coupler has no slack across its chord:
+ * a clamp placed from one set of numbers onto a chord drawn from another misses it by exactly the
+ * difference, and the picture quietly stops being the thing you would build.
+ *
+ * Pure arithmetic. No three.js, no document, no catalog lookup — the section size is the only
+ * input, because it is the one number every truss in the fleet actually publishes.
+ */
+
+/**
+ * Main chord tube, outside diameter.
+ *
+ * 50 mm on both systems we hold: the DT-GP drawing calls out "50 x 3 mm" chords and Global Truss
+ * F34 is a 290 mm square on 50 mm chords. It is also what the 8002 coupler is sold to fit
+ * (48–51 mm), which is the real cross-check — the clamp and the chord are one engineered pair.
+ */
+export const CHORD_OD_IN = 50 / 25.4;
+
+/** Diagonal bracing, outside diameter: "25 x 2 mm" on the same drawing — exactly half the chord. */
+export const DIAGONAL_OD_IN = 25 / 25.4;
+
+/**
+ * Chord radius for a box truss of the given section.
+ *
+ * A real chord is 50 mm whatever the section, so this is a constant until the section gets too
+ * small to carry one — the junction blocks build their hub and arms from a nominal section that
+ * can be a few inches across, and a 50 mm tube inside a 3 in hub would be mostly tube.
+ */
+export function chordRadiusIn(sectionIn: number): number {
+  return Math.min(CHORD_OD_IN / 2, sectionIn * 0.12);
+}
+
+/** Diagonal radius: half the chord, which is 25 mm against a 50 mm chord. */
+export function diagonalRadiusIn(sectionIn: number): number {
+  return chordRadiusIn(sectionIn) / 2;
+}
+
+/**
+ * Section centre to a chord axis, in each of the section's two axes.
+ *
+ * The published section is the OUTSIDE of the square, so the chords are inset by their own radius:
+ * 11.156 in DT-GP on 50 mm chords puts them 4.59375 in off the axis, and F34's 290 mm square gives
+ * the 240 mm chord centres that system is spec'd by — which is the check that this reading of
+ * "section" is the right one.
+ */
+export function chordOffsetIn(sectionIn: number): number {
+  return sectionIn / 2 - chordRadiusIn(sectionIn);
+}
+
+/** The four chord positions of a square section, as (right, back) offsets from its axis. */
+export function chordOffsets(sectionIn: number): { right: number; back: number }[] {
+  const o = chordOffsetIn(sectionIn);
+  return [
+    { right: -o, back: -o }, { right: o, back: -o },
+    { right: -o, back: o }, { right: o, back: o },
+  ];
+}
+
+/**
+ * What a half coupler measures, derived from the same arithmetic `buildClamp` draws it with.
+ *
+ * `reachIn` is the number the whole rig hangs off: back face of the bolt plate to the axis of the
+ * chord in the jaw. The plate sits flat on a cabinet with its bolt in a mount hole, so a chord has
+ * to pass exactly `reachIn` behind that hole, along the hole's own normal.
+ */
+export interface ClampMetrics {
+  /** Thickness of the flat plate that bolts to the cabinet. */
+  plateDIn: number;
+  /** Outer radius of the jaw. */
+  jawRadiusIn: number;
+  /** Bolt face to chord axis — the standoff a chord must sit at. */
+  reachIn: number;
+  /** Bore the jaw closes around: the largest chord it can take. */
+  boreDiaIn: number;
+}
+
+/**
+ * Metrics for a coupler of `dims` = [width, height, depth] inches.
+ *
+ * The plate carries the declared height and the jaw is sized from the depth left behind it, which
+ * is how the part is drawn: a jaw as tall as the declared height would be as deep as it is tall,
+ * and a coupler declared tall and thin would bulge outside its own box.
+ */
+export function clampMetrics(dims: readonly [number, number, number]): ClampMetrics {
+  const [, h, d] = dims;
+  const plateDIn = Math.min(d * 0.25, h * 0.4);
+  const jawRadiusIn = Math.min(h, d - plateDIn) / 2;
+  return { plateDIn, jawRadiusIn, reachIn: plateDIn + jawRadiusIn, boreDiaIn: jawRadiusIn * 0.84 * 2 };
+}
+
+/** Will this coupler close around that chord? The 8002 is sold for 48–51 mm and ours is 50. */
+export function clampFitsChord(clamp: ClampMetrics, sectionIn: number): boolean {
+  return clamp.boreDiaIn >= chordRadiusIn(sectionIn) * 2 - 1e-9;
+}
+
+/* ---------------------------- brace nodes ---------------------------- */
+
+/**
+ * Thickness of the plate under a `truss-upright` base.
+ *
+ * Shared with the planner because it sets the lowest a clamp can sit: the jaw has to clear the
+ * plate it stands on, and that clearance is what decides whether a wall has to rise at all.
+ */
+export const BASE_PLATE_THICK_IN = 0.5;
+
+/**
+ * Where the diagonals meet a chord, as distances from one end of a stick of `lenIn`.
+ *
+ * A half coupler cannot close over a weld, so the planner has to know this, and it has to be the
+ * SAME arithmetic the stick is drawn with (`trussAlong`'s zig-zag) or the clamps it rejects will
+ * not be the ones the picture shows a brace at. That is the whole reason this lives here.
+ *
+ * The zig-zag turns at every panel boundary, and the two end frames add a ring of their own just
+ * inside each end.
+ */
+const nodeCache = new Map<string, readonly number[]>();
+
+export function braceNodesAlong(lenIn: number, sectionIn: number): readonly number[] {
+  const key = `${lenIn}|${sectionIn}`;
+  const hit = nodeCache.get(key);
+  if (hit) return hit;
+  // Frozen: the array is handed out by reference, so a caller that pushed to it would poison
+  // the cache for every later clamp on a stick of this length.
+  const out = Object.freeze(computeBraceNodes(lenIn, sectionIn));
+  // Bounded: a rig asks for a handful of (length, section) pairs, and the planner asks repeatedly
+  // while it searches for a wall height that puts no coupler on a weld.
+  if (nodeCache.size < 256) nodeCache.set(key, out);
+  return out;
+}
+
+function computeBraceNodes(lenIn: number, sectionIn: number): number[] {
+  const n = Math.max(1, Math.round(lenIn / Math.max(sectionIn, 12)));
+  const step = lenIn / n;
+  const br = diagonalRadiusIn(sectionIn);
+  const out = new Set<number>([br, lenIn - br]);
+  for (let i = 0; i <= n; i++) out.add(i * step);
+  return [...out].sort((a, b) => a - b);
+}
+
+/**
+ * Can a jaw `jawHalfIn` long each way sit at `alongIn` on a stick of `lenIn`?
+ *
+ * The jaw has to miss every weld by its own half length plus the diagonal's radius, which is the
+ * condition for the two solids not to touch.
+ */
+export function clearOfBraceNodes(alongIn: number, lenIn: number, sectionIn: number, jawHalfIn: number): boolean {
+  if (alongIn < 0 || alongIn > lenIn) return false;
+  const keepOut = jawHalfIn + diagonalRadiusIn(sectionIn);
+  return braceNodesAlong(lenIn, sectionIn).every(x => Math.abs(alongIn - x) >= keepOut);
+}

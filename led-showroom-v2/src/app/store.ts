@@ -142,7 +142,10 @@ export const useStore = create<UiState>((set, get) => ({
       engine.on('toast', t => {
         const id = toastSeq++;
         set(s => ({ toasts: [...s.toasts, { id, ...t }].slice(-4) }));
-        window.setTimeout(() => get().dismissToast(id), t.kind === 'error' ? 8000 : 3200);
+        // Long enough to read what it says: a rig report runs to a sentence or two, where a
+        // "Copied 1 object" does not, and a toast nobody can finish reading may as well not fire.
+        const ms = t.kind === 'error' ? 8000 : Math.min(9000, 3200 + t.message.length * 25);
+        window.setTimeout(() => get().dismissToast(id), ms);
       }),
       engine.camera.on('projection', projection => set({ projection })),
       engine.camera.on('flyMode', flyMode => set({ flyMode })),

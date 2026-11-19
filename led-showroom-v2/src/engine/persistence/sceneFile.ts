@@ -221,7 +221,8 @@ const ENTITY_TYPES = new Set(['led-wall', 'stage', 'equipment', 'model', 'splat'
 
 /** Runtime mirror of the `EquipmentGeometry` union (the record keeps it exhaustive at compile time). */
 const EQUIPMENT_GEOMETRY: Record<EquipmentGeometry, true> = {
-  box: true, cylinder: true, kiosk: true, totem: true, truss: true, 'truss-upright': true, figure: true, 'table-round': true,
+  box: true, cylinder: true, kiosk: true, totem: true, truss: true, 'truss-upright': true, 'truss-vertical': true,
+  figure: true, 'table-round': true,
   'truss-corner': true, 'truss-tee': true, 'truss-block': true, clamp: true,
   'table-rect': true, chair: true, sofa: true, screen: true, drape: true, podium: true, speaker: true, counter: true, plant: true, locker: true, photo: true,
   cad: true,
@@ -334,8 +335,11 @@ function migrateTyped(raw: Record<string, unknown>, e: Record<string, unknown>):
       if (label !== undefined) e.label = label; else delete e.label;
       return e;
     }
-    case 'group':
-      return e; // createGroup(): no typed fields beyond the base
+    case 'group': {
+      const rigFor = optStr(raw.rigFor);
+      if (rigFor !== undefined) e.rigFor = rigFor; else delete e.rigFor;
+      return e;
+    }
     default:
       return null;
   }

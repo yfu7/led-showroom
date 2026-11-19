@@ -393,10 +393,12 @@
   padding: 8px 14px; border-radius: var(--r-pill); background: var(--glass); backdrop-filter: blur(12px);
   box-shadow: var(--shadow-island); font-size: var(--fs-xs); color: var(--fg-0); animation: rise var(--t-med) var(--ease);
   display: flex; align-items: center; gap: 8px; pointer-events: auto;
+  /* Wrap a long message instead of growing one pill off both edges of the viewport. */
+  max-width: min(520px, calc(100vw - 48px));
 }
 .toast.error { color: #ffb4a6; }
 .toast.success { color: #a8e6c6; }
-.toast::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.toast::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .toast.error::before { background: var(--danger); }
 .toast.success::before { background: var(--success); }
 

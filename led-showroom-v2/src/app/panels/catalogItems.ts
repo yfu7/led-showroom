@@ -70,6 +70,7 @@ const EQUIPMENT_ICON: Record<EquipmentGeometry, CatalogIconKind> = {
   totem: 'totem',
   truss: 'truss',
   'truss-upright': 'truss',
+  'truss-vertical': 'truss',
   'truss-corner': 'truss',
   'truss-tee': 'truss',
   'truss-block': 'truss',

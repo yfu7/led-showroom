@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+### Auto truss: the rig behind the wall
+
+A build is a wall plus whatever holds it up, and the app could only draw the wall. The truss was a
+catalogue you placed by hand, a leg at a time, with nothing checking that a coupler could reach the
+cabinet it was meant to bolt to.
+
+Right-click a wall and there is an Auto truss item. It plans a free-standing rig behind the wall and
+puts the whole thing in with one command: a 36 in raised base behind each cabinet column, GP sticks
+stacked on it to reach the top row, and a half coupler at every mount hole it can get a jaw to.
+
+The geometry is the point of it. A coupler has a fixed reach - 1.97 in from the back face of its
+bolt plate to the axis of the chord in its jaw - so a chord either lies exactly on a line of mount
+holes or nowhere near one. Each leg is placed so one of its 50 mm main chords runs straight up that
+column's line of holes, inboard of it, which also lands the whole 11.16 in section behind the
+cabinet it carries instead of hanging nine inches past the edge of the wall. Couplers go on the main
+chords only, never on the 25 mm diagonals, and never within a jaw's length of a weld: a half coupler
+cannot close over a joint.
+
+That last rule is why the wall comes up off the deck. The lowest hole on a cabinet standing on the
+floor sits 1.2 in up, which puts a jaw right on the end frame of the base it is gripping, and an
+inch of lift clears it. Taller walls want more, because every row has to clear at once and two
+sticks meeting stand their end frames back to back in a 3.2 in dead band: a four-row wall settles
+at 7.6 in, which is where all eight of its holes land in clear tube. A wall hanging off truss does
+not care what height it hangs at, so the planner hunts upward in tenths of an inch, through a bay's
+worth of travel, for the height that strands the fewest couplers, and says how far it moved the
+wall. If no height clears everything it keeps the best one and reports what it had to leave off.
+The floor-stand kit comes off at the same time, because its back supports stand exactly where the
+legs do. All of it - the legs, the couplers, the raise, the kit - is one undo.
+
+Folds are handled rather than skirted. Each leg squares up to its own run, and a fold tight enough
+to mitre away a column's near line of holes sends that leg to the column's far line instead, rather
+than leaving the cabinet at the corner with nothing under it.
+
+It also says what the rig would cost. A wall wanting eight raised bases says so against the six on
+the sales order: a plan you cannot build today is still the right plan, but it is worth saying out
+loud. Auto truss on a wall that already has a rig replaces it rather than standing a second one
+inside the first, and Remove truss rig takes it off and leaves the wall where it stands.
+
+**Existing scenes look slightly different.** Truss chords are now drawn at their real 50 mm
+diameter rather than a stylised 0.6 in radius - which is what makes a coupler placed on paper land
+on the chord in the picture - and the plate under a truss upright is drawn at its declared footprint
+instead of twice it, 11.16 in rather than 22.3 in. The old plate reached 2.8 in past the face of any
+cabinet its leg stood behind, and overlapped itself on a single-column wall.
+
 ### The cabinets show their bolt holes, and you can measure to them
 
 Every iPoster cabinet has an M10 hole at each of the four corners of its back face, each one

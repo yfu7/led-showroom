@@ -8,7 +8,9 @@ import {
   BOOTH_PRESETS, createBoothForScene, createDimension, createDocument, createEquipment, createGroup, createLedWall, createModel,
   createRoom, createSplat, createStage, defaultEnvironment, defaultSettings, defaultView,
 } from '../document/defaults';
-import type { DimensionEntity, Document, EquipmentEntity, LedWallEntity, ModelEntity, RoomEntity, SplatEntity, StageEntity } from '../document/types';
+import type {
+  DimensionEntity, Document, EquipmentEntity, GroupEntity, LedWallEntity, ModelEntity, RoomEntity, SplatEntity, StageEntity,
+} from '../document/types';
 import { EQUIPMENT_BY_ID } from '../catalog/equipment';
 import { STAGE_SIZE_IN } from '../ledwall/specs';
 
@@ -347,6 +349,18 @@ describe('migrateDocument', () => {
       expect(g.type).toBe('group');
       expect(g.parentId).toBeNull();
       expect(g.attachedTo).toBeNull();
+    });
+    it('group: a truss rig keeps the wall it was planned for', () => {
+      // Re-running auto-truss finds the old rig by `rigFor` and replaces it. Lose the field on
+      // save and reopening a scene leaves a second rig standing inside the first.
+      const [keep, junk, plain] = ents([
+        { type: 'group', name: 'Truss rig', rigFor: 'wall-7' },
+        { type: 'group', name: 'Truss rig', rigFor: 42 },
+        { type: 'group', name: 'Group' },
+      ]) as GroupEntity[];
+      expect(keep.rigFor).toBe('wall-7');
+      expect('rigFor' in junk).toBe(false);
+      expect('rigFor' in plain).toBe(false);
     });
   });
 });

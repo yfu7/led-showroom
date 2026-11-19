@@ -115,6 +115,8 @@ export interface StageEntity extends EntityBase {
 
 export type EquipmentGeometry =
   | 'box' | 'cylinder' | 'kiosk' | 'totem' | 'truss' | 'truss-upright' | 'figure' | 'table-round'
+  /** A stick stood on end, origin at its foot and no base plate: what a tower stacks. */
+  | 'truss-vertical'
   /** Truss junctions. `dims` is the overall extent, arms included — not the section. */
   | 'truss-corner' | 'truss-tee' | 'truss-block'
   /** Truss hardware. `dims` is the overall extent of the part. */
@@ -210,6 +212,13 @@ export interface DimensionEntity extends EntityBase {
 
 export interface GroupEntity extends EntityBase {
   type: 'group';
+  /**
+   * Set on a generated truss rig: the id of the LED wall it was planned for.
+   *
+   * Re-running auto-truss finds the old rig by this and replaces it. Matching on the name would
+   * strand the rig the moment anyone renamed the group, and leave a second one behind.
+   */
+  rigFor?: string;
 }
 
 export type Entity = LedWallEntity | StageEntity | EquipmentEntity | ModelEntity | SplatEntity | RoomEntity | DimensionEntity | GroupEntity;

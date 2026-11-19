@@ -11,6 +11,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { BASE_PLATE_THICK_IN, chordRadiusIn, clampMetrics, diagonalRadiusIn } from '../catalog/trussMetrics';
 import type { EquipmentEntity, EquipmentGeometry } from '../document/types';
 
 export interface EquipmentBuild {
@@ -210,7 +211,8 @@ const buildTotem: Builder = (p, w, h, d) => {
  * All chords and braces are merged into ONE mesh (see `Parts.tubes`).
  */
 function trussAlong(p: Parts, len: number, sh: number, sd: number, mat: THREE.Material, cy: number): THREE.Mesh {
-  const r = Math.min(0.6, sh * 0.06), br = r * 0.55;
+  // Real tube sizes, shared with the rig planner: a clamp is placed on the chord this draws.
+  const r = chordRadiusIn(sh), br = diagonalRadiusIn(sh);
   const hx = len / 2, hy = sh / 2 - r, hz = sd / 2 - r;
   const segs: TubeSeg[] = [];
   const seg = (a: THREE.Vector3, b: THREE.Vector3, rr: number, segments: number) => segs.push({ a, b, r: rr, segments });
@@ -280,9 +282,8 @@ const buildTrussBlock: Builder = trussJunction(['-x', '+x', '-z', '+z']);
  * it is tall, and a part declared tall and thin would then bulge far outside its own box.
  */
 const buildClamp: Builder = (p, w, h, d) => {
-  const plateD = Math.min(d * 0.25, h * 0.4);
-  const ro = Math.min(h, d - plateD) / 2;          // jaw outer radius
-  const ri = ro * 0.84;                            // bore: the chord it closes around
+  const { plateDIn: plateD, jawRadiusIn: ro, boreDiaIn } = clampMetrics([w, h, d]);
+  const ri = boreDiaIn / 2;                        // bore: the chord it closes around
   const backZ = -d / 2;
   const cz = backZ + plateD + ro;                  // jaw centre, clear of the plate
 
@@ -306,14 +307,34 @@ const buildClamp: Builder = (p, w, h, d) => {
 };
 
 const buildTrussUpright: Builder = (p, w, h, d) => {
-  const plateH = 0.5;
-  const plate = Math.max(w, d) * 2;
+  const plateH = BASE_PLATE_THICK_IN;
+  // The declared footprint, not twice it. The catalog calls the plate size nominal, and a plate
+  // 5.6 in proud of its own box reaches past the back of a cabinet the leg is rigged behind, so
+  // the one number that was guesswork anyway was deciding whether the rig fits.
+  const plate = Math.max(w, d);
   p.box(plate, plateH, plate, p.pal.dark);
   // build a horizontal truss centred on the origin, then stand it up (+X → +Y)
   const len = h - plateH;
   const truss = trussAlong(p, len, w, d, p.pal.alloy, 0);
   truss.rotation.z = Math.PI / 2;
   truss.position.set(0, plateH + len / 2, 0);
+};
+
+/**
+ * A truss stick standing on end: origin at the FOOT, chords parallel to Y, no base plate.
+ *
+ * `truss-upright` is the complete leg, plate included, which is right for a base and wrong for
+ * anything stacked on one: a tower is a base and then sticks, and a stick carrying its own plate
+ * would put a slab across the joint at every splice.
+ *
+ * `dims` is [section, height, section], so the four chords land at x, z = +/-`chordOffsetIn` and the
+ * stick spans y in [0, h]. That is what lets a tower be laid out by adding heights and a clamp be
+ * placed from the section alone, with no knowledge of which stick it happens to grip.
+ */
+const buildTrussVertical: Builder = (p, w, h, d) => {
+  const truss = trussAlong(p, h, w, d, p.pal.alloy, 0);   // along X, then stood up (+X -> +Y)
+  truss.rotation.z = Math.PI / 2;
+  truss.position.set(0, h / 2, 0);
 };
 
 /** Stylised human, proportions of a 69" figure scaled to `h`. Faces +Z. */
@@ -532,6 +553,7 @@ const BUILDERS: Record<EquipmentGeometry, Builder> = {
   'totem': buildTotem,
   'truss': buildTruss,
   'truss-upright': buildTrussUpright,
+  'truss-vertical': buildTrussVertical,
   'truss-corner': buildTrussCorner,
   'truss-tee': buildTrussTee,
   'truss-block': buildTrussBlock,

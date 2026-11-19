@@ -6,18 +6,20 @@
  * whose effect is off screen (isolate, select-all-of-type, paste) raises a toast.
  */
 import {
-  ArrowDown, ArrowDownToLine, ArrowUp, Box, Copy, CopyPlus, Eraser, Eye, EyeOff, Focus, Grid2x2, Layers, Lock, LockOpen,
+  ArrowDown, ArrowDownToLine, ArrowUp, Box, Construction, Copy, CopyPlus, Eraser, Eye, EyeOff, Focus, Grid2x2, Layers,
+  Lock, LockOpen,
   Maximize2, Monitor, MousePointer2, Pencil, Plus, RotateCcw, Ruler, Scissors, Shapes, Trash2, X,
 } from 'lucide-react';
 import type { Engine } from '@/engine/Engine';
 import type { Entity, EntityType, LedWallEntity, StageEntity } from '@/engine/document/types';
 import { isLedWall, isStage } from '@/engine/document/types';
-import { cmdAddEntities, cmdUpdateEntities } from '@/engine/commands/entity';
+import { cmdAddEntities, cmdPatchDocument, cmdUpdateEntities } from '@/engine/commands/entity';
 import { descendants, uniqueName } from '@/engine/document/Document';
 import { createStage } from '@/engine/document/defaults';
 import { duplicateEntities } from '@/engine/tools/SelectTool';
 import { stageTopY } from '@/engine/behaviours';
 import { canReorderWindow } from '@/engine/ledwall/contentWindows';
+import { applyTrussRig, planTrussRig, rigEntityIds } from '@/engine/ledwall/trussRig';
 import { hiddenEntityIds } from '@/engine/tools/BoxSelect';
 import { STAGE_HEIGHTS_IN } from '@/engine/ledwall/specs';
 import type { Vec3 } from '@/engine/math';
@@ -240,9 +242,13 @@ export function buildEntityMenu(engine: Engine, ids: string[], opts: EntityMenuO
   return items;
 }
 
-/** The "Wall" block of the entity menu: content, shape and the four display toggles. */
+/** The "Wall" block of the entity menu: content, shape, the display toggles and the rig. */
 function wallSection(engine: Engine, wall: LedWallEntity): MenuItem[] {
   const patch = (p: Partial<LedWallEntity>, label: string) => engine.update<LedWallEntity>(wall.id, p, { label });
+  const hasRig = rigEntityIds(engine.doc, wall.id).size > 0;
+  const rigItems: MenuItem[] = hasRig
+    ? [{ label: 'Remove truss rig', icon: <Eraser />, onSelect: () => removeTrussRig(engine, wall) }]
+    : [];
   return [
     'sep',
     { label: 'Wall', header: true },
@@ -253,8 +259,53 @@ function wallSection(engine: Engine, wall: LedWallEntity): MenuItem[] {
     { label: 'Dimensions', checked: wall.showDimensions, onSelect: () => patch({ showDimensions: !wall.showDimensions }, wall.showDimensions ? 'Hide dimensions' : 'Show dimensions') },
     { label: 'Accessories', checked: wall.accessories, onSelect: () => patch({ accessories: !wall.accessories }, wall.accessories ? 'Hide base and support' : 'Show base and support') },
     { label: 'Mount holes', checked: wall.mountHoles, onSelect: () => patch({ mountHoles: !wall.mountHoles }, wall.mountHoles ? 'Hide mount holes' : 'Show mount holes') },
+    'sep',
+    {
+      label: hasRig ? 'Rebuild truss rig' : 'Auto truss',
+      icon: <Construction />,
+      onSelect: () => autoTruss(engine, wall),
+    },
+    ...rigItems,
   ];
 }
+
+/* ---------------------------- auto truss ---------------------------- */
+
+/**
+ * Plan a truss rig for `wall` and put the whole thing in with one command.
+ *
+ * One `cmdPatchDocument`, because a rig is one thing: the group, every leg and coupler, the raise
+ * the wall needs for its lowest coupler to clear a base plate, and the floor-stand kit coming off
+ * because its back supports stand where the legs do. A single undo takes all of it back out, which
+ * is what makes trying it safe.
+ *
+ * Only `entities` is patched, and the next document is computed once rather than inside the
+ * command: a redo that re-ran the planner would mint fresh ids and strand anything holding the
+ * old ones.
+ */
+function autoTruss(engine: Engine, wall: LedWallEntity): void {
+  const plan = planTrussRig(engine.doc, wall);
+  if (!plan.towers.length) {
+    engine.toast('error', plan.warnings[0] ?? 'There is nothing on this wall to bolt a coupler into.');
+    return;
+  }
+  const rebuild = rigEntityIds(engine.doc, wall.id).size > 0;
+  const next = applyTrussRig(engine.doc, wall, plan);
+  engine.run(cmdPatchDocument(engine, { entities: next.entities }, {
+    label: rebuild ? 'Rebuild truss rig' : 'Auto truss',
+  }));
+
+  const legs = plan.towers.length, cl = plan.clamps.length;
+  const head = `${legs} ${legs === 1 ? 'leg' : 'legs'}, ${cl} ${cl === 1 ? 'half coupler' : 'half couplers'}`;
+  engine.toast('success', [head, ...plan.warnings].join(' - '));
+}
+
+/** Take the generated rig off a wall. The wall stays where the rig left it. */
+function removeTrussRig(engine: Engine, wall: LedWallEntity): void {
+  const ids = [...rigEntityIds(engine.doc, wall.id)];
+  if (ids.length) engine.remove(ids);
+}
+
 
 /* ───────────────────────────── empty viewport menu ───────────────────────────── */
 

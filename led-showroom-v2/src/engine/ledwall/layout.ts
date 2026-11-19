@@ -523,7 +523,7 @@ export function panelLocalPosition(dims: WallDims, layout: ColumnPlacement[], co
 }
 
 /** Rotate a column-local offset (lx to the right, lz towards the screen) by the column's yaw and add the column centre. */
-function columnLocalToWall(col: { x: number; z: number; rotY: number }, lx: number, ly: number, lz: number): Vec3 {
+export function columnLocalToWall(col: { x: number; z: number; rotY: number }, lx: number, ly: number, lz: number): Vec3 {
   const cos = Math.cos(col.rotY), sin = Math.sin(col.rotY);
   return [col.x + lx * cos + lz * sin, ly, col.z - lx * sin + lz * cos];
 }
