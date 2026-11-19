@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+### Build list: what the scene asks the warehouse to pull
+
+The app knew a wall was six columns of four. The warehouse needed to know it was sixteen cabinets,
+six of them powered, two of those mitred on the right - and the person in between was counting it
+off a screenshot.
+
+File -> Build list, or the button under Export, counts it. Cabinets first, split powered against
+regular and flat against cut, then the crates they ship in, then every catalog item standing in
+the scene with its quantity and whether we own that many. Copy as text drops the whole thing into
+an email or straight into the allocation sheet.
+
+The counting rules are not this app's. They are the ones the fleet is actually scheduled by, out of
+"LED Alloc 2026 - Rules & Assumptions", and the sheet already cites this app for its cabinet
+dimensions, so the two now agree in both directions. The unit is the cabinet, never the panel: a
+cabinet is six panels, and a list that said "panels" would pull six times too much, which is why
+that figure appears only in the diagnostic view and says what it is when it does. Every column
+carries one powered cabinet of its own cut, so a column with a mitred end wants a powered cabinet
+with a mitred end rather than a flat one out of the general pile. A double-sided build is two sides
+of one grid - twice the cabinets, twice the powered, one set of base plates under it. Crates take
+eight cabinets and are pooled over the whole scene: six posters are twenty-four cabinets and three
+crates, not six part-full ones. Set the sheet's money20/20 order up in the app - six 7 x 6 V-walls,
+twenty posters, thirty double-sided - and it counts the 104 powered flat, 360 regular flat and
+6 / 6 / 6 and 30 / 30 / 30 corner cabinets the sheet states, 572 in all. The 72 crates that holds
+are the app's own arithmetic on the eight-to-a-crate rule.
+
+Two things it says out loud rather than quietly getting wrong. A mitred corner is what the fold
+implies, not what the build has to use - the HubSpot U-wall was butted with flats - so the cut
+counts come with that caveat attached. And a wall folded at every joint might close into a ring,
+which the geometry does not model: the app will show a Left and a Right where a cube wants two
+Doubles, and now tells you so instead of leaving you to find out on the floor.
+
+Shortfalls read off the same catalog the truss planner warns from, so the two screens cannot
+disagree about what we own. A quoted part is not stock and is not counted as zero either; it simply
+carries no shortfall, because how many we hold is not something an estimate says.
+
 ### Auto truss: the rig behind the wall
 
 A build is a wall plus whatever holds it up, and the app could only draw the wall. The truss was a

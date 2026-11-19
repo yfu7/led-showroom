@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  Box, ChevronDown, Eraser, FolderOpen, HardDrive, Image, Import, Maximize, Moon, PanelLeft, PanelRight,
+  Box, ChevronDown, ClipboardList, Eraser, FolderOpen, HardDrive, Image, Import, Maximize, Moon, PanelLeft,
+  PanelRight,
   CircleQuestionMark, Redo2, Ruler, Save, Settings2, ShieldCheck, Sun, Undo2, Video,
 } from 'lucide-react';
 import { useStore } from '@/app/store';
@@ -8,6 +9,7 @@ import { Button, IconButton } from '@/app/components/Button';
 import { Menu, type MenuItem } from '@/app/components/Menu';
 import { Select } from '@/app/components/Select';
 import { ExportGltfDialog, GenerateDrawingDialog, RecordVideoDialog, SaveImageDialog } from '@/app/panels/exportDialogs';
+import { BuildListDialog } from '@/app/panels/BuildListDialog';
 import { SavedBuildsDialog } from '@/app/panels/SavedBuildsDialog';
 import { UNITS, type Unit } from '@/engine/units';
 import type { Engine } from '@/engine/Engine';
@@ -97,6 +99,7 @@ export function TopBar() {
     // Also in the Export panel, but that panel only renders with nothing selected, and a drawing is
     // most often wanted right after laying an item out.
     { label: 'Generate render…', icon: <Ruler />, onSelect: () => setDialog('drawing') },
+    { label: 'Build list…', icon: <ClipboardList />, onSelect: () => setDialog('buildlist') },
     { label: 'Record video…', icon: <Video />, onSelect: () => setDialog('video') },
     { label: 'Export glTF…', icon: <Box />, onSelect: () => setDialog('gltf') },
     'sep',
@@ -180,6 +183,7 @@ export function TopBar() {
       {dialog === 'gltf' && <ExportGltfDialog onClose={closeDialog} />}
       {dialog === 'drawing' && <GenerateDrawingDialog onClose={closeDialog} />}
       {dialog === 'builds' && <SavedBuildsDialog onClose={closeDialog} />}
+      {dialog === 'buildlist' && <BuildListDialog onClose={closeDialog} />}
     </header>
   );
 }

@@ -15,7 +15,7 @@ export type Theme = 'dark' | 'light';
  * Export panel unmounting (selecting an object swaps the inspector) — the app stays live while
  * recording, so that happens constantly.
  */
-export type ExportDialog = 'image' | 'video' | 'gltf' | 'drawing' | 'builds' | null;
+export type ExportDialog = 'image' | 'video' | 'gltf' | 'drawing' | 'builds' | 'buildlist' | null;
 
 export interface Toast { id: number; kind: 'info' | 'error' | 'success'; message: string }
 

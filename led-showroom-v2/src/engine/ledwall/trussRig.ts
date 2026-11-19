@@ -25,7 +25,7 @@
  */
 import * as THREE from 'three';
 import { parentMatrix, worldMatrix } from '../behaviours';
-import { equipmentDef, type EquipmentDef } from '../catalog/equipment';
+import { equipmentDef, ownedCount, type EquipmentDef } from '../catalog/equipment';
 import {
   BASE_PLATE_THICK_IN, chordOffsetIn, clampMetrics, clearOfBraceNodes, diagonalRadiusIn,
 } from '../catalog/trussMetrics';
@@ -115,19 +115,6 @@ const v3 = (v: Vec3): THREE.Vector3 => new THREE.Vector3(v[0], v[1], v[2]);
 
 /** Yaw of a pure-Y quaternion, radians. */
 const yawOf = (q: THREE.Quaternion): number => new THREE.Euler().setFromQuaternion(q, 'YXZ').y;
-
-/**
- * Owned quantity from a catalog `Owned` row, or undefined when it is not a count.
- *
- * The rows read "6 (Sales Order #735958)" for the DT-GP stock and "Quoted, not purchased" for the
- * F34 estimates, so the count is the number the row starts with, and a row starting with a word
- * deliberately yields nothing. A quote is not stock.
- */
-function ownedCount(def: EquipmentDef | undefined): number | undefined {
-  const row = def?.specs?.find(s => s.label === 'Owned')?.value;
-  const m = row ? /^\s*(\d+)/.exec(row) : null;
-  return m ? Number(m[1]) : undefined;
-}
 
 /** A square footprint on the floor, for the collision check. */
 interface Footprint { x: number; z: number; size: number; rotY: number }

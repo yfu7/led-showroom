@@ -350,5 +350,23 @@ export function equipmentDef(id: string): EquipmentDef | undefined {
   return EQUIPMENT_BY_ID[id];
 }
 
+/**
+ * Owned quantity from a catalog `Owned` row, or undefined when the row is not a count.
+ *
+ * An `Owned` row reads "6 (Sales Order #735958)", so the count is the number it starts with, and a
+ * row starting with a word deliberately yields nothing. The F34 estimates carry their quantity
+ * under `Quoted` and have no `Owned` row at all, which is the point: a quote is not stock, and it
+ * is not zero stock either -- how many we hold is simply not something the paperwork says.
+ *
+ * Shared by the truss planner (which warns when a rig wants more legs than we hold) and the build
+ * list (which flags the same shortfall on every line), because a shortfall is one idea and the two
+ * screens must not disagree about it.
+ */
+export function ownedCount(def: EquipmentDef | undefined): number | undefined {
+  const row = def?.specs?.find(s => s.label === 'Owned')?.value;
+  const m = row ? /^\s*(\d+)/.exec(row) : null;
+  return m ? Number(m[1]) : undefined;
+}
+
 /** Order the catalog groups appear in. */
 export const CATEGORY_ORDER: CatalogCategory[] = ['charging', 'display', 'structure', 'furniture', 'reference', 'staging'];
