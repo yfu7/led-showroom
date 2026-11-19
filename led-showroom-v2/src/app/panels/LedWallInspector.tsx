@@ -12,7 +12,7 @@ import { Select } from '@/app/components/Select';
 import { Slider } from '@/app/components/Slider';
 import { ToggleRow } from '@/app/components/Toggle';
 import type { LedWallEntity } from '@/engine/document/types';
-import { LIMITS, PANEL_SPECS, brightnessToNits } from '@/engine/ledwall/specs';
+import { LIMITS, PANEL_SPECS, brightnessToNits, mountHoles } from '@/engine/ledwall/specs';
 import { cellKey, filledCells, filledCount, isRectWall, pruneCorners, shapeBBox, wallDims } from '@/engine/ledwall/layout';
 import { walls as docWalls } from '@/engine/document/Document';
 import { cmdUpdateEntities } from '@/engine/commands/entity';
@@ -28,7 +28,7 @@ interface Props { wall: LedWallEntity }
 
 type ShapeMode = 'rect' | 'custom';
 
-const DISPLAY_KEYS = ['bezels', 'doubleSided', 'accessories', 'pixelGrid', 'showDimensions', 'brightness'] as const;
+const DISPLAY_KEYS = ['bezels', 'doubleSided', 'accessories', 'pixelGrid', 'showDimensions', 'mountHoles', 'brightness'] as const;
 
 export function LedWallInspector({ wall }: Props) {
   const engine = useEngine();
@@ -97,6 +97,7 @@ export function LedWallInspector({ wall }: Props) {
 
   const products = Object.values(PANEL_SPECS).map(s => ({ value: s.id, label: s.name }));
   const nits = brightnessToNits(wall.brightness, dims.spec);
+  const mount = dims.spec.mount;
 
   const stepper = (label: string, value: number, max: number, set: (v: number) => void) => (
     <Prop label={label}>
@@ -146,6 +147,17 @@ export function LedWallInspector({ wall }: Props) {
         <ToggleRow label="Pixel grid" checked={wall.pixelGrid} onChange={v => patch({ pixelGrid: v }, 'Pixel grid')}
           hint={`LED pixel structure, visible within ${pixelGridDistIn / 12} ft (scene setting)`} />
         <ToggleRow label="Dimensions" checked={wall.showDimensions} onChange={v => patch({ showDimensions: v }, 'Dimensions')} hint="Engineering-style size annotations" />
+        <ToggleRow label="Mount holes" checked={wall.mountHoles} disabled={!mount} onChange={v => patch({ mountHoles: v }, 'Mount holes')}
+          hint={mount
+            ? `${mount.bolt} bolt holes on the back, ${mount.holeInsetIn} in in from each corner — and the measure tool snaps to them`
+            : 'No mount pattern is recorded for this product'} />
+        {wall.mountHoles && mount && (
+          <GodOnly>
+            <Raw label="pattern" value={`${mount.bolt} · ${mount.pattern} · ${mount.face} face`} />
+            <Raw label="edge → centre" value={`${mount.holeInsetIn} + ⌀${mount.boltDiaIn} / 2 = ${(mount.holeInsetIn + mount.boltDiaIn / 2).toFixed(5)} in`} />
+            <Raw label="panel-local" value={mountHoles(dims.spec).map(h => `(${h.x.toFixed(4)}, ${h.y.toFixed(4)})`).join('  ')} />
+          </GodOnly>
+        )}
         <div className="prop wide" style={{ marginTop: 4 }}>
           <div className="row">
             <span className="k" style={{ fontSize: 'var(--fs-xs)', color: 'var(--fg-1)' }}>Brightness</span>

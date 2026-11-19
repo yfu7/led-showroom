@@ -68,6 +68,10 @@ export interface WallMaterials {
   accessory: THREE.MeshStandardMaterial;
   /** Bezel delineation lines drawn just in front of the screen. */
   bezel: THREE.LineBasicMaterial;
+  /** The bore of a cabinet mount hole. */
+  mountHole: THREE.MeshBasicMaterial;
+  /** The ring drawn around a mount hole to make it findable. */
+  mountRing: THREE.MeshBasicMaterial;
   /** Ghost panel body (translucent blue). */
   ghost: THREE.MeshBasicMaterial;
   /** Ghost panel outline. */
@@ -92,6 +96,41 @@ export const PANEL_FACE_ORDER = ['+x', '-x', '+y', '-y', '+z', '-z'] as const;
 
 /** Distance in front of the screen face at which bezel lines are drawn (v1 4097). */
 export const BEZEL_LINE_OFFSET_IN = 0.03;
+
+/**
+ * Distance a mount-hole marker stands off the back face, inches.
+ *
+ * Enough to clear the z-fight with the face itself and to sit in front of back-side content, which
+ * starts at CONTENT_STANDOFF_IN and steps by CONTENT_Z_STEP - so this clears a double-sided wall's
+ * first fifteen windows. Past that the content covers the markers, which is the right way round:
+ * content is what the wall is for, and a bolt hole behind a video is a bolt hole behind a video.
+ */
+export const MOUNT_MARKER_OFFSET_IN = 0.08;
+
+/**
+ * Ring radii for a mount-hole marker, inches, or null when there is no room for one.
+ *
+ * The hole is 0.39 in across on a 25.2 in cabinet - a pixel or two on screen at any camera distance
+ * you would frame a build from - so what makes it findable is an annotation around it rather than
+ * the bore. Both radii come off the inset (edge to hole CENTRE) instead of being constants, so the
+ * outer edge cannot cross the panel edge however small the cabinet, and the inner edge is held
+ * clear of the bore.
+ */
+export function mountRingRadii(boltDiaIn: number, insetIn: number): { inner: number; outer: number } | null {
+  const outer = insetIn * 0.65;
+  const inner = Math.max(outer * 0.8, boltDiaIn / 2 + 0.02);
+  return outer > inner ? { inner, outer } : null;
+}
+
+/** Disc the size of the bore, in the XY plane facing +Z (orient it with the hole's normal). */
+export function mountHoleGeometry(boltDiaIn: number): THREE.BufferGeometry {
+  return new THREE.CircleGeometry(boltDiaIn / 2, 24);
+}
+
+/** Annulus from {@link mountRingRadii}, in the XY plane facing +Z. */
+export function mountRingGeometry(inner: number, outer: number): THREE.BufferGeometry {
+  return new THREE.RingGeometry(inner, outer, 24);
+}
 
 /** Base emissive intensity of the screen face at 100 % brightness (v1 3224, 7611). */
 export const FRONT_EMISSIVE_BASE = 0.5;
@@ -542,6 +581,10 @@ export function createWallMaterials(): WallMaterials {
     back: new THREE.MeshStandardMaterial({ color: 0xa0a0a8, metalness: 0.4, roughness: 0.55 }),
     accessory: new THREE.MeshStandardMaterial({ color: 0x404048, metalness: 0.7, roughness: 0.28 }),
     bezel: new THREE.LineBasicMaterial({ color: 0x555560 }),
+    // DoubleSide on both: a marker is a flat disc on the back of a cabinet, and a run carried round
+    // a fold can present one edge-on. A marker that vanishes from one side reads as a missing hole.
+    mountHole: new THREE.MeshBasicMaterial({ color: 0x15161a, side: THREE.DoubleSide }),
+    mountRing: new THREE.MeshBasicMaterial({ color: 0xd97706, side: THREE.DoubleSide }),
     ghost: new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.18, depthWrite: false }),
     ghostEdge: new THREE.LineBasicMaterial({ color: 0x93c5fd, transparent: true, opacity: 0.6, depthWrite: false }),
     stageTop: new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9, metalness: 0 }),

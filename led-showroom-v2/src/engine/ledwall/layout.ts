@@ -36,7 +36,7 @@ import type { Corner, LedWallEntity } from '../document/types';
 import { DEG } from '../units';
 import type { Vec3 } from '../math';
 import { clamp } from '../math';
-import { inchesPerPx, panelSpec, type PanelSpec } from './specs';
+import { inchesPerPx, mountHoles, panelSpec, type PanelSpec } from './specs';
 
 /* ───────────────────────────── Dimensions ───────────────────────────── */
 
@@ -700,4 +700,74 @@ export function accessoryPlacements(dims: WallDims, layout: ColumnPlacement[], s
       mirrored,
     })),
   }));
+}
+
+/* ──────────────────────────── Mount holes ──────────────────────────── */
+
+/** One cabinet bolt hole, placed in wall-local space. */
+export interface MountPoint {
+  /** Hole centre, wall-local inches. */
+  pos: Vec3;
+  /** Unit outward normal of the face the hole is in, wall-local. */
+  normal: Vec3;
+  /** The panel it belongs to. */
+  col: number;
+  row: number;
+  /**
+   * False when a fold's mitre has cut the back face out from under this hole.
+   *
+   * The cabinet still HAS the hole. A mitre is how two runs are DRAWN meeting at a corner, not a
+   * cut anyone makes to a cabinet, so the physical count stays four per panel - which is why the
+   * inspector counts holes from the spec and not from here. There is simply no face left to draw
+   * this one on, and a ring hanging in the air beside a fold reads as a bug rather than as a bolt
+   * point. Past a fold of about 107° the trim (panelD / 2 · tan(θ / 2), 0.885 in at 90°) passes the
+   * hole's 1.19685 in offset and this goes false for the holes on that edge.
+   */
+  onFace: boolean;
+}
+
+/**
+ * Every mount hole on a wall, in wall-local space (no v1 equivalent - v1 did not model the holes).
+ *
+ * Four per filled cell, from {@link mountHoles}, on the BACK face of each panel and carried round
+ * by its column's yaw, so a folded wall's holes face out of the back of the run they belong to.
+ * Walks `cells` rather than the cols × rows grid, so a custom shape gets holes on exactly the
+ * panels it actually has.
+ *
+ * Returns nothing for a product whose spec records no mount, or records holes in a face other
+ * than the back - the only face this models, and the only one the measurement covers.
+ */
+export function wallMountPoints(
+  dims: WallDims,
+  layout: ColumnPlacement[],
+  cells: Iterable<string>,
+  corners: Corner[],
+): MountPoint[] {
+  const holes = mountHoles(dims.spec);
+  if (!holes.length || dims.spec.mount?.face !== 'back') return [];
+  const halfW = dims.panelW / 2, halfD = dims.panelD / 2;
+  const cuts = new Map<number, ReturnType<typeof miterCutsForColumn>>();
+  const out: MountPoint[] = [];
+  for (const key of cells) {
+    const [c, r] = parseCell(key);
+    const col = layout[c];
+    if (!col) continue;
+    if (!cuts.has(c)) cuts.set(c, miterCutsForColumn(c, dims, corners));
+    const cut = cuts.get(c)!;
+    const rowY = rowCenterY(dims, r);
+    const normal: Vec3 = [-Math.sin(col.rotY), 0, -Math.cos(col.rotY)];
+    for (const h of holes) {
+      // `back` is how much is trimmed off that edge of the back face; negative = extended, which
+      // is a concave fold and makes the face larger, so the same comparison covers both.
+      const trim = (h.x < 0 ? cut.left?.back : cut.right?.back) ?? 0;
+      out.push({
+        pos: columnLocalToWall(col, h.x, rowY + h.y, -halfD),
+        normal,
+        col: c,
+        row: r,
+        onFace: halfW - Math.abs(h.x) - trim >= 0,
+      });
+    }
+  }
+  return out;
 }

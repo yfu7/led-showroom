@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### The cabinets show their bolt holes, and you can measure to them
+
+Every iPoster cabinet has an M10 hole at each of the four corners of its back face, each one
+starting an inch in from both edges that meet at its corner. That is what a half coupler bolts
+into, and it was nowhere in the app: the back of a wall was a blank grey face, so the one question
+a rigger asks of a model - where does the truss meet this thing - had no answer in it.
+
+Display > Mount holes draws them. The bore is only 0.39 in across on a 25.2 in cabinet, which is a
+pixel or two from anywhere you would frame a build, so each hole gets a ring around it at a
+readable size. Both ring radii come off the inset rather than being fixed, so the marker can never
+cross the panel edge however small the cabinet.
+
+The measure tool snaps to the hole centres, which is the point of drawing them: hole to hole across
+a seam, hole to the floor, hole to a clamp. A hole beats the panel corner beside it when both are
+under the pointer, because someone hovering a hole is aiming at the hole. The centre sits in the
+face, not out at the marker - the marker stands off so it can be seen, and a tape measure does not
+care.
+
+Sharp folds are the one place a hole goes missing. The mitre that lets two runs meet at a corner
+trims the back face, and past about 107 degrees the trim passes the hole's offset: there is no face
+left to draw it on. Those are left undrawn and unsnappable rather than hanging in the air beside the
+fold. The count on the panel stays four - the inspector takes it from the spec, because the mitre is
+how the drawing meets a corner, not a cut anyone makes to a cabinet.
+
 ### The turntable orbits the build
 
 Record video has a Turntable toggle that carries the camera once around over the length of the

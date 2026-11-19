@@ -249,6 +249,56 @@ describe('element snapping', () => {
   });
 });
 
+describe('named point snapping', () => {
+  /**
+   * What a cabinet's bolt holes are to the measure tool: positions the renderer knows and no
+   * amount of geometry inspection would find, since the hole is drawn as a marker standing off
+   * the face rather than cut into it.
+   */
+  it('catches a named point from a floor hit nowhere near any mesh', () => {
+    const cam = camera();
+    const hole = new THREE.Vector3(10, 0, 10);
+    const hit = { point: new THREE.Vector3(10.4, 0, 10.4), object: null, isFloor: true };
+
+    const r = snapPoint(hit, { camera: cam, viewport: VIEW, gridIn: 12, points: [hole] });
+    expect(r.kind).toBe('element');
+    expect(r.point.toArray().map(v => Math.round(v))).toEqual([10, 0, 10]);
+
+    // Without them there is nothing there at all: it is a bare patch of floor.
+    expect(snapPoint(hit, { camera: cam, viewport: VIEW, gridIn: 12 }).kind).not.toBe('element');
+  });
+
+  it('wins the tie against a mesh vertex in the same place', () => {
+    const cam = camera();
+    const mesh = cube();
+    const { hit, rc } = hitOn(mesh, cam, new THREE.Vector3(9.7, 19.7, 10));
+    const { face } = resolveHitFace(mesh, rc);
+    const r = snapPoint({ point: hit.point, object: mesh, face, isFloor: false },
+      { camera: cam, viewport: VIEW, points: [new THREE.Vector3(10, 20, 10)] });
+    expect(r.kind).toBe('element');
+    expect(r.point.toArray().map(v => Math.round(v))).toEqual([10, 20, 10]);
+  });
+
+  it('still loses to a vertex that is genuinely closer', () => {
+    const cam = camera();
+    const mesh = cube();
+    const { hit, rc } = hitOn(mesh, cam, new THREE.Vector3(9.9, 19.9, 10));
+    const { face } = resolveHitFace(mesh, rc);
+    const r = snapPoint({ point: hit.point, object: mesh, face, isFloor: false },
+      { camera: cam, viewport: VIEW, points: [new THREE.Vector3(10.6, 20, 10)] });
+    expect(r.kind).toBe('vertex');
+    expect(r.point.x).toBeCloseTo(10, 5);
+  });
+
+  it('ignores one outside the snap radius', () => {
+    const cam = camera();
+    const hit = { point: new THREE.Vector3(0, 0, 0), object: null, isFloor: true };
+    const far = new THREE.Vector3(60, 0, 60);
+    expect(projectedDistance(cam, VIEW, hit.point, far)).toBeGreaterThan(10);
+    expect(snapPoint(hit, { camera: cam, viewport: VIEW, points: [far] }).kind).not.toBe('element');
+  });
+});
+
 describe('helpers', () => {
   it('nearestGridPoint rounds x/z and pins y', () => {
     expect(nearestGridPoint(new THREE.Vector3(6.1, 3, -6.1), 12).toArray()).toEqual([12, 0, -12]);

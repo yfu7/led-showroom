@@ -52,6 +52,8 @@ export interface SnapOptions {
   viewport: { width: number; height: number };
   /** Boxes whose corners, edge midpoints, face centres and centre snap as `element`. */
   elements?: ElementBox[];
+  /** Named world points that snap as `element` - mount holes and the like. */
+  points?: THREE.Vector3[];
   /** Screen radius (px) inside which a candidate snaps. Default 10. */
   radiusPx?: number;
   /** Ground grid pitch in inches (document `environment.grid.minorIn`). 0 / undefined = no grid snap. */
@@ -215,6 +217,12 @@ export function snapPoint(hit: SnapHit, opts: SnapOptions): SnapResult {
 
   // Element features first: they are the only candidates that do not need the ray to have landed
   // on anything, and considering them before the mesh gives a point that is both the element kind.
+  //
+  // Named points ahead of boxes, and both ahead of the mesh: `consider` keeps the first candidate
+  // at an equal distance, so a bolt hole wins a tie against the box corner or panel vertex beside
+  // it. Someone hovering a hole is aiming at the hole.
+  if (opts.points) for (const p of opts.points) consider(p, 'element');
+
   if (opts.elements) {
     const v = new THREE.Vector3();
     for (const box of opts.elements) elementFeaturePoints(box, p => consider(p, 'element'), v);

@@ -46,6 +46,13 @@ export interface EntityRenderer<E extends Entity = Entity> {
    * local bounds of the entity's own meshes, which is exactly right for anything box-shaped.
    */
   snapBoxes?(): ElementBox[];
+
+  /**
+   * Individual world points this renderer wants the measure tool to snap to, beyond the corners
+   * and midpoints of {@link snapBoxes}. Drawn features only: a snap to something invisible is a
+   * pointer that sticks for no reason anyone can see.
+   */
+  snapPoints?(): THREE.Vector3[];
   /** Height of the top surface at local (x, z) for stacking (stages), or null. */
   topSurfaceY?(): number | null;
   /** Set by renderers that mount CSS3D objects (websites) so the DOM pass runs. */

@@ -111,6 +111,7 @@ export function createLedWall(opts: LedWallOptions = {}): LedWallEntity {
     accessories: opts.accessories ?? false,
     pixelGrid: false,
     showDimensions: false,
+    mountHoles: false,
   };
 }
 

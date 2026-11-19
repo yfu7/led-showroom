@@ -312,29 +312,30 @@ export class MeasureTool implements Tool {
     // Gathered once and passed down every path: a point a few pixels outside a silhouette corner
     // misses the mesh entirely and lands on the floor, or on nothing at all, and that is precisely
     // where someone is trying to catch the corner.
-    const elements = this.elementBoxes(caster.ray, viewport);
+    const { boxes: elements, points } = this.elementTargets(caster.ray, viewport);
     const hit = pickSurface(p.ndc, camera, this.engine.scene.scene);
     if (hit) {
       const isFloor = hit.object.userData.pickable === 'ground';
       const { face, instanceId } = isFloor ? { face: null, instanceId: null } : resolveHitFace(hit.object, caster);
-      return snapPoint({ point: hit.point, object: hit.object, face, instanceId, isFloor }, { camera, viewport, gridIn, elements });
+      return snapPoint({ point: hit.point, object: hit.object, face, instanceId, isFloor }, { camera, viewport, gridIn, elements, points });
     }
     const g = pickGround(p.ndc, camera, 0, new THREE.Vector3());
     if (!g) return null;
-    return snapPoint({ point: g, object: null, isFloor: true }, { camera, viewport, gridIn, elements });
+    return snapPoint({ point: g, object: null, isFloor: true }, { camera, viewport, gridIn, elements, points });
   }
 
   /**
-   * Snap boxes for the elements worth testing against this ray.
+   * Snap targets for the elements worth testing against this ray: boxes, and named points.
    *
    * Everything SELECTED is included wherever it is on screen — that is what lets you pick out the
    * two items you want a distance between and then measure them without the scene in front
    * catching the pointer. Everything else has to be near the ray: its world bounds, grown by what
    * the snap radius is worth in inches at that depth, must meet the ray at all.
    */
-  private elementBoxes(ray: THREE.Ray, viewport: { width: number; height: number }): ElementBox[] {
+  private elementTargets(ray: THREE.Ray, viewport: { width: number; height: number }): { boxes: ElementBox[]; points: THREE.Vector3[] } {
     const selected = new Set(this.engine.selection);
     const boxes: ElementBox[] = [];
+    const points: THREE.Vector3[] = [];
     const world = new THREE.Box3();
     const centre = new THREE.Vector3();
     for (const r of this.engine.scene.all()) {
@@ -349,6 +350,9 @@ export class MeasureTool implements Tool {
         world.expandByScalar(this.inchesPerPixel(centre, viewport) * DEFAULT_SNAP_RADIUS_PX);
         if (!ray.intersectsBox(world)) continue;
       }
+      // Before the snapBoxes early-out, so a renderer that supplies boxes still contributes points.
+      const pts = r.snapPoints?.();
+      if (pts) points.push(...pts);
       const own = r.snapBoxes?.();
       if (own) { boxes.push(...own); continue; }
       let cached = this.localBoxes.get(e.id);
@@ -359,7 +363,7 @@ export class MeasureTool implements Tool {
       const box = elementBoxFromLocal(cached.box, r.root.matrixWorld);
       if (box) boxes.push(box);
     }
-    return boxes;
+    return { boxes, points };
   }
 
   /** World inches one screen pixel covers at `at`, so a pixel radius can grow a world box. */

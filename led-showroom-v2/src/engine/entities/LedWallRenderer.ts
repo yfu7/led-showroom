@@ -12,11 +12,12 @@ import { disposeObject, tagRoot } from './EntityRenderer';
 import type { ElementBox } from '../tools/pointSnap';
 import {
   accessoryPlacements, cellKey, computeColumnLayout, computeSegments, filledCells, isRectWall, miterCutsForColumn,
-  panelLocalPosition, wallDims, wallLocalBounds, localPointToWallPixel, wallPixelToLocal,
-  type ColumnPlacement, type Segment, type WallDims,
+  panelLocalPosition, wallDims, wallLocalBounds, wallMountPoints, localPointToWallPixel, wallPixelToLocal,
+  type ColumnPlacement, type MountPoint, type Segment, type WallDims,
 } from '../ledwall/layout';
 import {
-  BEZEL_LINE_OFFSET_IN, basePlateGeometry, bezelLineGeometry, createWallMaterials, miteredPanelGeometry, onAccessoryGeometry,
+  BEZEL_LINE_OFFSET_IN, MOUNT_MARKER_OFFSET_IN, basePlateGeometry, bezelLineGeometry, createWallMaterials,
+  miteredPanelGeometry, mountHoleGeometry, mountRingGeometry, mountRingRadii, onAccessoryGeometry,
   panelGeometry, panelMaterialArray, setFrontBrightness, supportBracketGeometry, type WallMaterials,
 } from '../ledwall/geometry';
 import {
@@ -32,6 +33,9 @@ import type { Vec3 } from '../math';
 
 const CONTENT_STANDOFF_IN = 0.02;
 const CONTENT_Z_STEP = 0.004;
+
+/** The +Z the marker geometries are built facing, rotated onto each hole's own normal. */
+const MARKER_FORWARD = new THREE.Vector3(0, 0, 1);
 
 let sharedMats: WallMaterials | null = null;
 function mats(): WallMaterials { return (sharedMats ??= createWallMaterials()); }
@@ -88,6 +92,7 @@ export class LedWallRenderer implements EntityRenderer<LedWallEntity> {
   private bezelsGroup = new THREE.Group();
   private accGroup = new THREE.Group();
   private gridGroup = new THREE.Group();
+  private mountGroup = new THREE.Group();
   private dimGroup: THREE.Group | null = null;
   private contentGroup = new THREE.Group();
 
@@ -105,6 +110,9 @@ export class LedWallRenderer implements EntityRenderer<LedWallEntity> {
   private dimKey = '';
   private contentKey = '';
   private spanKey = '';
+  private mountKey = '';
+  /** Every hole on the wall, drawn or not, so {@link snapPoints} need not recompute them. */
+  private mountPoints: MountPoint[] = [];
   needsCss3d = false;
   needsPixelGrid = false;
   private ctx!: RenderContext;
@@ -121,10 +129,11 @@ export class LedWallRenderer implements EntityRenderer<LedWallEntity> {
     tagRoot(this.root, entity);
     this.frontMat = mats().front.clone();
     this.frontMat.userData.perWall = true;
-    for (const g of [this.panelsGroup, this.bezelsGroup, this.accGroup, this.gridGroup, this.contentGroup]) this.inner.add(g);
+    for (const g of [this.panelsGroup, this.bezelsGroup, this.accGroup, this.gridGroup, this.mountGroup, this.contentGroup]) this.inner.add(g);
     this.root.add(this.inner);
     this.bezelsGroup.userData.unpickable = true;
     this.gridGroup.userData.unpickable = true;
+    this.mountGroup.userData.unpickable = true;
     this.update(entity, ctx);
   }
 
@@ -138,6 +147,9 @@ export class LedWallRenderer implements EntityRenderer<LedWallEntity> {
 
     const gKey = sKey + '|' + entity.pixelGrid;
     if (gKey !== this.gridKey) { this.gridKey = gKey; this.rebuildGrid(); }
+
+    const mKey = sKey + '|' + entity.mountHoles;
+    if (mKey !== this.mountKey) { this.mountKey = mKey; this.rebuildMounts(); }
 
     const dKey = sKey + '|' + entity.showDimensions + '|' + ctx.unit;
     if (dKey !== this.dimKey) { this.dimKey = dKey; this.rebuildDimensions(); }
@@ -230,6 +242,58 @@ export class LedWallRenderer implements EntityRenderer<LedWallEntity> {
     }
     // content planes depend on the structure
     this.contentKey = '';
+  }
+
+  /**
+   * The mount-hole overlay: one instanced disc per hole for the bore, one instanced ring around it.
+   *
+   * Only the holes a fold has left face under get drawn, and `snapPoints` offers the same set - a
+   * ring hanging in the air beside a mitre reads as a bug, and a snap to one is a pointer that
+   * sticks for no reason anyone can see. The count on the panel stays four either way: the
+   * inspector takes it from the spec, because the cabinet is not the thing the mitre cut.
+   *
+   * Instanced rather than a mesh each: a 6 x 5 wall is 120 holes, 240 markers, and they are two
+   * geometries repeated. Markers are unpickable - they annotate the panel, they are not a part to
+   * click - which also keeps them out of the bounds the measure tool grows against the ray.
+   */
+  private rebuildMounts(): void {
+    for (const ch of Array.from(this.mountGroup.children)) disposeObject(ch);
+    this.mountGroup.clear();
+    this.mountPoints = [];
+    const e = this.entity;
+    if (!e.mountHoles) return;
+    this.mountPoints = wallMountPoints(this.dims, this.layout, this.cells, e.corners);
+    const drawn = this.mountPoints.filter(p => p.onFace);
+    const mount = this.dims.spec.mount;
+    if (!drawn.length || !mount) return;
+
+    const m = mats();
+    const radii = mountRingRadii(mount.boltDiaIn, mount.holeInsetIn + mount.boltDiaIn / 2);
+    const parts: { geom: THREE.BufferGeometry; mat: THREE.Material }[] =
+      [{ geom: mountHoleGeometry(mount.boltDiaIn), mat: m.mountHole }];
+    if (radii) parts.push({ geom: mountRingGeometry(radii.inner, radii.outer), mat: m.mountRing });
+
+    const q = new THREE.Quaternion();
+    const pos = new THREE.Vector3();
+    const n = new THREE.Vector3();
+    const unit = new THREE.Vector3(1, 1, 1);
+    const mat4 = new THREE.Matrix4();
+    for (const part of parts) {
+      const mesh = new THREE.InstancedMesh(part.geom, part.mat, drawn.length);
+      mesh.userData.sharedMaterial = true;
+      mesh.userData.unpickable = true;
+      for (let i = 0; i < drawn.length; i++) {
+        const p = drawn[i]!;
+        n.set(p.normal[0], p.normal[1], p.normal[2]);
+        q.setFromUnitVectors(MARKER_FORWARD, n);
+        pos.set(p.pos[0], p.pos[1], p.pos[2]).addScaledVector(n, MOUNT_MARKER_OFFSET_IN);
+        mesh.setMatrixAt(i, mat4.compose(pos, q, unit));
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      // The geometry's own sphere covers one marker at the origin; the instances are the wall.
+      mesh.computeBoundingSphere();
+      this.mountGroup.add(mesh);
+    }
   }
 
   private rebuildGrid(): void {
@@ -592,6 +656,23 @@ export class LedWallRenderer implements EntityRenderer<LedWallEntity> {
     return boxes;
   }
 
+  /**
+   * Mount hole centres in world space, for the measure tool.
+   *
+   * The centre of the hole IS in the face, not out at the marker: the marker stands off it so it
+   * can be seen, and a tape measure does not care. Only while the overlay is on - you can measure
+   * to what you can see.
+   */
+  snapPoints(): THREE.Vector3[] {
+    if (!this.entity.mountHoles) return [];
+    this.inner.updateWorldMatrix(true, false);
+    const out: THREE.Vector3[] = [];
+    for (const p of this.mountPoints) {
+      if (p.onFace) out.push(this.inner.localToWorld(new THREE.Vector3(p.pos[0], p.pos[1], p.pos[2])));
+    }
+    return out;
+  }
+
   /** Wall pixel under a world point on the screen surface (or null). */
   pixelAtWorld(p: THREE.Vector3): { px: number; py: number } | null {
     const local = this.inner.worldToLocal(p.clone());
@@ -620,6 +701,7 @@ export class LedWallRenderer implements EntityRenderer<LedWallEntity> {
     for (const m of this.panelMeshes) if (!m.userData.sharedGeometry) m.geometry.dispose();
     this.frontMat.dispose();
     for (const ch of Array.from(this.accGroup.children)) disposeObject(ch);
+    for (const ch of Array.from(this.mountGroup.children)) disposeObject(ch);
     this.root.removeFromParent();
   }
 }

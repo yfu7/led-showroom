@@ -101,6 +101,8 @@ export interface LedWallEntity extends EntityBase {
   pixelGrid: boolean;
   /** Engineering-style dimension annotations. */
   showDimensions: boolean;
+  /** Draw the cabinet mount holes on the back face, and let the measure tool snap to them. */
+  mountHoles: boolean;
 }
 
 export interface StageEntity extends EntityBase {

@@ -261,6 +261,7 @@ function migrateTyped(raw: Record<string, unknown>, e: Record<string, unknown>):
       e.accessories = bool(raw.accessories, d.accessories);
       e.pixelGrid = bool(raw.pixelGrid, d.pixelGrid);
       e.showDimensions = bool(raw.showDimensions, d.showDimensions);
+  e.mountHoles = bool(raw.mountHoles, d.mountHoles);
       return e;
     }
     case 'stage': {

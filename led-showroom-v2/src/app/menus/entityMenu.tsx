@@ -252,6 +252,7 @@ function wallSection(engine: Engine, wall: LedWallEntity): MenuItem[] {
     { label: 'Pixel grid', checked: wall.pixelGrid, onSelect: () => patch({ pixelGrid: !wall.pixelGrid }, wall.pixelGrid ? 'Hide pixel grid' : 'Show pixel grid') },
     { label: 'Dimensions', checked: wall.showDimensions, onSelect: () => patch({ showDimensions: !wall.showDimensions }, wall.showDimensions ? 'Hide dimensions' : 'Show dimensions') },
     { label: 'Accessories', checked: wall.accessories, onSelect: () => patch({ accessories: !wall.accessories }, wall.accessories ? 'Hide base and support' : 'Show base and support') },
+    { label: 'Mount holes', checked: wall.mountHoles, onSelect: () => patch({ mountHoles: !wall.mountHoles }, wall.mountHoles ? 'Hide mount holes' : 'Show mount holes') },
   ];
 }
 
