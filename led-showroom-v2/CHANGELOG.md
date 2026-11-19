@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+### The truss we actually own
+
+The catalog carried two placeholder trusses — a generic 12" box truss and a generic upright. Beside
+them now sit the twelve parts from the Global Truss paperwork, with part numbers, counts and the
+document each came from.
+
+Six documents turned out to describe three purchases, not six. Two of them are the same sales order
+twice (#735903 and #735958 differ in nothing but the order number and the date), and two more are
+one estimate and its revision under a single number, #162181. Summing the stack naively would have
+invented $29,014.97 of truss. What is left is one sales order and two estimates, and the difference
+matters: only Sales Order #735958 was bought. The DT-GP arch package is real — six legs of 5 ft plus
+4 ft, three 8 ft spans, six 6-way corners and six raised bases, which is exactly three arches. The
+F34 parts are quoted and may never have been ordered, so each says so in its own spec rows rather
+than sitting silently alongside the ones we hold.
+
+The two systems do not connect to each other: DT-GP is an 11.156" section bolted with four 5/8"
+Gr.8 bolts, F34 is 11.42" on conical couplers. Both are 6082-T6 aluminium, both ordered black.
+DT-GP entries carry the engineered span table with its basis stated, since "370 plf" without
+"strength plus L/180 deflection, loads at panel points, not additive" reads like a rigging rating.
+There is no equivalent F34 data, so none is shown.
+
+Stick lengths and sections are the manufacturer's own designations and are exact; the F34 segments
+are metric (1.5 m and 1.25 m, not 5 ft and 4 ft). The paperwork gives no geometry for the junction
+blocks or the base plates, so those dimensions are nominal and every one of them says so.
+
+Three new geometry kinds — `truss-corner`, `truss-tee` and `truss-block` — build a junction as a
+vertical hub spanning the full height with horizontal arms reaching the declared faces, so `dims` is
+the overall extent including the arms and the block stands exactly as tall as it claims whichever
+arms it has. Truss sticks take the entity's own colour through a new `alloy` material instead of the
+fixed grey `metal`, because every stick on these orders is black. The raised 36" base plate needed
+no new kind: `truss-upright` is already a plate with a truss riser on it.
+
+The two generic placeholders are kept rather than replaced — a saved scene may reference them.
+
 ### Left drag moves, middle drag orbits
 
 The default navigation scheme is now pan-first: holding the left button drags the view, holding the

@@ -222,6 +222,7 @@ const ENTITY_TYPES = new Set(['led-wall', 'stage', 'equipment', 'model', 'splat'
 /** Runtime mirror of the `EquipmentGeometry` union (the record keeps it exhaustive at compile time). */
 const EQUIPMENT_GEOMETRY: Record<EquipmentGeometry, true> = {
   box: true, cylinder: true, kiosk: true, totem: true, truss: true, 'truss-upright': true, figure: true, 'table-round': true,
+  'truss-corner': true, 'truss-tee': true, 'truss-block': true,
   'table-rect': true, chair: true, sofa: true, screen: true, drape: true, podium: true, speaker: true, counter: true, plant: true, locker: true, photo: true,
   cad: true,
 };

@@ -144,6 +144,165 @@ export const VELOXITY_PRODUCTS: EquipmentDef[] = [
   },
 ];
 
+
+/* --------------------------- truss inventory ---------------------------
+ * The truss on the Global Truss paperwork. Two systems that do NOT connect to each other:
+ *
+ *   DT-GP  11.156" section, joints bolted with (4) 5/8" Gr.8 bolts. Bought - Sales Order #735958.
+ *          Six legs (5 ft + 4 ft), three 8 ft spans, six 6-way corners, six raised bases: three arches.
+ *   F34    11.42" section, conical couplers. QUOTED ONLY - Estimates #162181 rev. and #162195 are
+ *          estimates, not sales orders, so these parts may never have been bought.
+ *
+ * Both are 6082-T6 aluminium, ordered black. Stick lengths and sections are the manufacturer's own
+ * designations and are exact; junction and base-plate sizes are nominal, since the paperwork gives
+ * part numbers and prices but no geometry. Every entry says which it is.
+ */
+
+/** Shared DT-GP spec rows (one engineered system, one set of figures). */
+const GP_SECTION = { label: 'Section', value: '11.156 in square' };
+const GP_BUILD = { label: 'Construction', value: '50 x 3 mm chord, 25 x 2 mm diagonal, 6082-T6 aluminium' };
+const GP_CONN = { label: 'Connection', value: '(4) 5/8 in Gr.8 bolts per joint' };
+const GP_SPAN = { label: 'Rated span (UDL)', value: '888 plf @ 5 ft, 370 plf @ 10 ft, 161 plf @ 15 ft, 88 plf @ 20 ft' };
+const GP_BASIS = { label: 'Load basis', value: 'Strength + L/180 deflection. Loads at panel points only; table values are not additive.' };
+const GP_ENGR = { label: 'Engineering', value: 'Entertainment Engineering Consultants, 06/20/2024, proj. 24.149.02A' };
+
+/** Shared F34 spec rows. */
+const F34_SECTION = { label: 'Section', value: '11.42 in square' };
+const F34_CONN = { label: 'Connection', value: 'Conical couplers' };
+const F34_NOTE = { label: 'Status', value: 'Quoted, not purchased - the paperwork is an estimate, not a sales order' };
+const NOMINAL = { label: 'Overall size', value: 'Nominal - the order gives no geometry' };
+
+export const TRUSS_INVENTORY: EquipmentDef[] = [
+  {
+    id: 'gp-truss-8ft', name: 'DT-GP8 box truss 8 ft', category: 'structure', geometry: 'truss',
+    dims: [96, 11.16, 11.16], color: '#17181b',
+    description: '8 ft end-plated DT-GP box truss, black. The horizontal span of an arch.',
+    specs: [
+      { label: 'Part no.', value: 'GP0001 - DT-GP8-BLK' },
+      { label: 'Owned', value: '3 (Sales Order #735958)' },
+      GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
+    ],
+  },
+  {
+    id: 'gp-truss-5ft', name: 'DT-GP5 box truss 5 ft', category: 'structure', geometry: 'truss',
+    dims: [60, 11.16, 11.16], color: '#17181b',
+    description: '5 ft end-plated DT-GP box truss, black. The lower half of an arch leg.',
+    specs: [
+      { label: 'Part no.', value: 'GP0053 - DT-GP5-BLK' },
+      { label: 'Owned', value: '6 (Sales Order #735958)' },
+      GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
+    ],
+  },
+  {
+    id: 'gp-truss-4ft', name: 'DT-GP4 box truss 4 ft', category: 'structure', geometry: 'truss',
+    dims: [48, 11.16, 11.16], color: '#17181b',
+    description: '4 ft end-plated DT-GP box truss, black. The upper half of an arch leg.',
+    specs: [
+      { label: 'Part no.', value: 'GP0079 - DT-GP4-BLK' },
+      { label: 'Owned', value: '6 (Sales Order #735958)' },
+      GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
+    ],
+  },
+  {
+    id: 'gp-corner-6way', name: 'DT-GP 6-way corner block', category: 'structure', geometry: 'truss-block',
+    dims: [22, 22, 22], color: '#17181b',
+    description: 'Six-way 12 in GP truss corner block, black. The shoulder where a leg meets a span.',
+    specs: [
+      { label: 'Part no.', value: 'GP0352 - DT-6WB-BLK' },
+      { label: 'Owned', value: '6 (Sales Order #735958)' },
+      GP_SECTION, NOMINAL, GP_CONN, GP_ENGR,
+    ],
+  },
+  {
+    id: 'gp-base-36', name: 'DT-GP raised base 36 in', category: 'structure', geometry: 'truss-upright',
+    dims: [11.16, 36, 11.16], color: '#17181b',
+    description: 'Heavy-duty raised 36 in base plate with a GP truss riser, black. One under each leg.',
+    specs: [
+      { label: 'Part no.', value: 'BP0300 - DT-GP-Base36-BLK' },
+      { label: 'Owned', value: '6 (Sales Order #735958)' },
+      { label: 'Riser height', value: '36 in' },
+      GP_SECTION, { label: 'Plate size', value: 'Nominal - the order gives no geometry' }, GP_CONN,
+    ],
+  },
+
+  {
+    id: 'f34-straight-1500', name: 'F34 square truss 1.5 m', category: 'structure', geometry: 'truss',
+    dims: [59.06, 11.42, 11.42], color: '#17181b',
+    description: 'Global Truss F34 straight segment, 1.5 m, black.',
+    specs: [
+      { label: 'Part no.', value: 'SQ-4111 BLK/MTE' },
+      { label: 'Quoted', value: '10 (Estimate #162181 rev.)' },
+      { label: 'Length', value: '1.5 m (59.06 in)' },
+      F34_SECTION, F34_CONN, F34_NOTE,
+    ],
+  },
+  {
+    id: 'f34-straight-1250', name: 'F34 square truss 1.25 m', category: 'structure', geometry: 'truss',
+    dims: [49.21, 11.42, 11.42], color: '#17181b',
+    description: 'Global Truss F34 straight segment, 1.25 m, black.',
+    specs: [
+      { label: 'Part no.', value: 'SQ-4111-1250 BLK/MTE' },
+      { label: 'Quoted', value: '2 (Estimate #162181 rev.)' },
+      { label: 'Length', value: '1.25 m (49.21 in)' },
+      F34_SECTION, F34_CONN, F34_NOTE,
+    ],
+  },
+  {
+    id: 'f34-corner-2way', name: 'F34 2-way 90 deg corner', category: 'structure', geometry: 'truss-corner',
+    dims: [20, 11.42, 20], color: '#17181b',
+    description: 'Global Truss F34 two-way 90 degree corner, black.',
+    specs: [
+      { label: 'Part no.', value: 'SQ-4121 BLK/MTE' },
+      { label: 'Quoted', value: '2 (Estimate #162181 rev.)' },
+      F34_SECTION, NOMINAL, F34_CONN, F34_NOTE,
+    ],
+  },
+  {
+    id: 'f34-tee-3way', name: 'F34 3-way T junction', category: 'structure', geometry: 'truss-tee',
+    dims: [20, 11.42, 20], color: '#17181b',
+    description: 'Global Truss F34 three-way T junction, black.',
+    specs: [
+      { label: 'Part no.', value: 'SQ-4129 BLK/MTE' },
+      { label: 'Quoted', value: '2 (Estimate #162181 rev.)' },
+      F34_SECTION, NOMINAL, F34_CONN, F34_NOTE,
+    ],
+  },
+  {
+    id: 'f34-block-6way', name: 'F34 6-way junction block', category: 'structure', geometry: 'truss-block',
+    dims: [22, 22, 22], color: '#17181b',
+    description: 'Global Truss F34 universal six-way junction block, black.',
+    specs: [
+      { label: 'Part no.', value: 'ST-UJB-12/BLK/MTE' },
+      { label: 'Quoted', value: '2 (Estimate #162181 rev.)' },
+      F34_SECTION, NOMINAL, F34_CONN, F34_NOTE,
+    ],
+  },
+  {
+    id: 'f34-base-1x4', name: 'F34 base plate 1 x 4 ft', category: 'structure', geometry: 'box',
+    dims: [12, 0.75, 48], color: '#17181b',
+    description: 'Steel base plate for F34, 1 ft x 4 ft.',
+    specs: [
+      { label: 'Part no.', value: 'BASE PLATE 1.4S' },
+      { label: 'Quoted', value: '2 (Estimate #162181 rev.)' },
+      { label: 'Plate', value: '1 ft x 4 ft steel' },
+      { label: 'Thickness', value: 'Nominal - the order gives none' },
+      F34_NOTE,
+    ],
+  },
+  {
+    id: 'f34-base-12', name: 'F34 base plate 12 x 12 in', category: 'structure', geometry: 'box',
+    dims: [12, 0.75, 12], color: '#17181b',
+    description: 'Global Truss 12 in x 12 in base plate for F34.',
+    specs: [
+      { label: 'Part no.', value: 'SQ-4137 BLK/MTE' },
+      { label: 'Quoted', value: '2 (Estimate #162195)' },
+      { label: 'Plate', value: '12 in x 12 in' },
+      { label: 'Thickness', value: 'Nominal - the order gives none' },
+      { label: 'Status', value: 'Quoted, not purchased - Estimate #162195 is an estimate, not a sales order' },
+    ],
+  },
+];
+
 /** Generic props with no product photography — parametric geometry, for dressing a room to scale. */
 export const PROPS: EquipmentDef[] = [
   { id: 'truss-12-8ft', name: 'Box truss 12" × 8 ft', category: 'structure', geometry: 'truss', dims: [96, 12, 12], color: '#b9bcc2', description: 'Aluminium box truss, 12" square section.', variants: [{ name: '4 ft', dims: [48, 12, 12] }, { name: '8 ft', dims: [96, 12, 12] }, { name: '10 ft', dims: [120, 12, 12] }] },
@@ -166,7 +325,7 @@ export const PROPS: EquipmentDef[] = [
   { id: 'cylinder', name: 'Custom cylinder', category: 'reference', geometry: 'cylinder', dims: [24, 36, 24], color: '#6b6f78', description: 'A plain cylinder with editable dimensions.' },
 ];
 
-export const EQUIPMENT: EquipmentDef[] = [...VELOXITY_PRODUCTS, ...PROPS];
+export const EQUIPMENT: EquipmentDef[] = [...VELOXITY_PRODUCTS, ...TRUSS_INVENTORY, ...PROPS];
 
 export const EQUIPMENT_BY_ID: Record<string, EquipmentDef> = Object.fromEntries(EQUIPMENT.map(e => [e.id, e]));
 

@@ -37,8 +37,8 @@ function entity(geometry: EquipmentGeometry, dims: [number, number, number], ext
  *  CAD-modelled one are built by EquipmentRenderer from their cutout / mesh, and only fall back to a
  *  plain box here. */
 const ALL_KINDS: EquipmentGeometry[] = [
-  'box', 'cylinder', 'kiosk', 'totem', 'truss', 'truss-upright', 'figure', 'table-round', 'table-rect', 'chair', 'sofa', 'screen',
-  'drape', 'podium', 'speaker', 'counter', 'plant', 'locker',
+  'box', 'cylinder', 'kiosk', 'totem', 'truss', 'truss-upright', 'truss-corner', 'truss-tee', 'truss-block', 'figure',
+  'table-round', 'table-rect', 'chair', 'sofa', 'screen', 'drape', 'podium', 'speaker', 'counter', 'plant', 'locker',
 ];
 
 describe('buildEquipment', () => {

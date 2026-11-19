@@ -33,6 +33,7 @@ interface Palette {
   accent: THREE.MeshStandardMaterial;
   glass: THREE.MeshStandardMaterial;
   metal: THREE.MeshStandardMaterial;
+  alloy: THREE.MeshStandardMaterial;
   dark: THREE.MeshStandardMaterial;
   all: THREE.Material[];
 }
@@ -65,9 +66,12 @@ function makePalette(entity: EquipmentEntity): Palette {
     accent: mk({ color: accent, roughness: 0.4, metalness: 0.15 }),
     glass: mk({ ...SCREEN_GLASS }),
     metal: mk({ color: 0xb7bac0, roughness: 0.35, metalness: 0.85 }),
+    // Truss stock is ordered black as often as silver, so the sticks take the entity's own
+    // colour with a metal finish rather than the fixed `metal` grey the hardware parts use.
+    alloy: mk({ color: body, roughness: 0.35, metalness: 0.85 }),
     dark: mk({ color: 0x1a1a1d, roughness: 0.6, metalness: 0.2 }),
   };
-  return { ...p, all: [p.body, p.accent, p.glass, p.metal, p.dark] };
+  return { ...p, all: [p.body, p.accent, p.glass, p.metal, p.dark, p.alloy] };
 }
 
 /* ───────────────────────────── primitives ───────────────────────────── */
@@ -232,7 +236,40 @@ function trussAlong(p: Parts, len: number, sh: number, sd: number, mat: THREE.Ma
   return m;
 }
 
-const buildTruss: Builder = (p, w, h, d) => { trussAlong(p, w, h, d, p.pal.metal, h / 2); };
+const buildTruss: Builder = (p, w, h, d) => { trussAlong(p, w, h, d, p.pal.alloy, h / 2); };
+
+/**
+ * Junction block (corner / tee / 6-way): a vertical hub spanning the full height, with horizontal
+ * arms reaching the declared faces on the named sides. `dims` is the overall extent including the
+ * arms, so the block stands exactly `h` tall whichever arms it has — the hub alone guarantees that,
+ * and it doubles as the two vertical ways of a 6-way block.
+ */
+type Arm = '+x' | '-x' | '+z' | '-z';
+function trussJunction(arms: readonly Arm[]): Builder {
+  return (p, w, h, d) => {
+    // square section, as deep as the block is tall where the declared box leaves room for it
+    const sec = Math.max(2, Math.min(h, Math.min(w, d) * 0.6));
+    const hub = trussAlong(p, h, sec, sec, p.pal.alloy, 0);   // built along X, then stood up
+    hub.rotation.z = Math.PI / 2;
+    hub.position.set(0, h / 2, 0);
+    for (const a of arms) {
+      const alongX = a === '+x' || a === '-x';
+      const reach = (alongX ? w : d) / 2 - sec / 2;
+      if (reach <= sec * 0.25) continue;                      // no room for an arm on this axis
+      const m = trussAlong(p, reach, sec, sec, p.pal.alloy, 0);
+      const off = (a === '-x' || a === '-z' ? -1 : 1) * (sec + reach) / 2;
+      if (alongX) m.position.set(off, h / 2, 0);
+      else { m.rotation.y = Math.PI / 2; m.position.set(0, h / 2, off); }
+    }
+  };
+}
+
+/** 90 degree corner: two arms meeting at the hub. */
+const buildTrussCorner: Builder = trussJunction(['+x', '+z']);
+/** T junction: a through run plus one branch. */
+const buildTrussTee: Builder = trussJunction(['-x', '+x', '+z']);
+/** 6-way block: four horizontal arms; the hub itself is the up/down pair. */
+const buildTrussBlock: Builder = trussJunction(['-x', '+x', '-z', '+z']);
 
 const buildTrussUpright: Builder = (p, w, h, d) => {
   const plateH = 0.5;
@@ -240,7 +277,7 @@ const buildTrussUpright: Builder = (p, w, h, d) => {
   p.box(plate, plateH, plate, p.pal.dark);
   // build a horizontal truss centred on the origin, then stand it up (+X → +Y)
   const len = h - plateH;
-  const truss = trussAlong(p, len, w, d, p.pal.metal, 0);
+  const truss = trussAlong(p, len, w, d, p.pal.alloy, 0);
   truss.rotation.z = Math.PI / 2;
   truss.position.set(0, plateH + len / 2, 0);
 };
@@ -461,6 +498,9 @@ const BUILDERS: Record<EquipmentGeometry, Builder> = {
   'totem': buildTotem,
   'truss': buildTruss,
   'truss-upright': buildTrussUpright,
+  'truss-corner': buildTrussCorner,
+  'truss-tee': buildTrussTee,
+  'truss-block': buildTrussBlock,
   'figure': buildFigure,
   'table-round': buildTableRound,
   'table-rect': buildTableRect,
