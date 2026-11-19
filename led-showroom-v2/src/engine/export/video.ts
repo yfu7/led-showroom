@@ -282,6 +282,20 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
     overlays = createWebsiteOverlays(engine, rasters);
     engine.selectionHelper.group.visible = false;
     if (opts.turntable) {
+      /*
+       * Frame first, so the turn is around the BUILD.
+       *
+       * OrbitControls spins about `controls.target`, and that is left wherever the last pan, focus
+       * or double-click put it. A turntable from there sweeps the room while the build drifts
+       * across the frame, or out of it. Framing puts the target on the build and the camera at a
+       * distance that fits it, which is what "a 360 of the build" means.
+       *
+       * With something selected it frames THAT instead (frameSelection falls back to everything
+       * when nothing is selected) - a turn around one wall rather than the whole floor. The camera
+       * is left where the take put it rather than restored: that is the view the video is of, and
+       * it is the same state the Frame control gives, so there is nothing surprising to undo.
+       */
+      engine.frameSelection(false);
       controls.autoRotate = true;
       controls.autoRotateSpeed = 60 / Math.max(1, turnSec); // OrbitControls: one turn per 60/speed s
     }

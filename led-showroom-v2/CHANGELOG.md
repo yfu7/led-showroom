@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### The turntable orbits the build
+
+Record video has a Turntable toggle that carries the camera once around over the length of the
+take - a 360° of the build, twelve seconds by default. It span around the wrong thing. OrbitControls
+turns about its target, and that target is left wherever the last pan, focus or double-click put
+it: a corner of the room, a clamp someone had zoomed in on, a point behind the camera. The result
+swept the venue with the build drifting across the frame or out of it.
+
+It now frames before it starts, so the target is on the build and the camera is at a distance that
+fits it. With something selected it frames that instead - a turn around one wall rather than the
+whole floor. The camera is left where the take put it rather than snapped back, because that is the
+view the video is of, and it is the same state the Frame control gives.
+
 ### Builds saved on this computer, not just in the browser
 
 Until now the app's whole memory was browser storage: one autosaved document and up to fifty
