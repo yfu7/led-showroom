@@ -19,7 +19,7 @@ import type { Vec3 } from '../math';
 import { v3dist } from '../math';
 import { formatArea, formatDims, formatLength, fromInches, unitDecimals, type Unit } from '../units';
 import { filledCount, isRectWall, shapeBBox, filledCells, wallDims } from '../ledwall/layout';
-import { brightnessToNits } from '../ledwall/specs';
+import { brightnessToNits, mountHoles } from '../ledwall/specs';
 import { equipmentDef } from '../catalog/equipment';
 import { descendants } from './Document';
 
@@ -68,8 +68,9 @@ export function entitySpecs(entity: Entity, doc: Document, unit: Unit, extras: S
     case 'led-wall': {
       const dims = wallDims(entity);
       const bbox = isRectWall(entity) ? { cols: entity.cols, rows: entity.rows } : shapeBBox(filledCells(entity));
+      const panels = filledCount(entity);
       push('Product', dims.spec.name);
-      push('Panels', String(filledCount(entity)));
+      push('Panels', String(panels));
       push('Grid', `${bbox.cols} × ${bbox.rows}`);
       push('Resolution', `${dims.wallWPx} × ${dims.wallHPx} px`);
       push('Physical size', formatDims([dims.totalW, dims.totalH], unit));
@@ -78,6 +79,12 @@ export function entitySpecs(entity: Entity, doc: Document, unit: Unit, extras: S
       push('Screen area', formatArea(dims.totalW * dims.totalH, unit));
       push('Pixel pitch', dims.spec.pitchMm ? `${dims.spec.pitchMm} mm` : `${(dims.inPerPxX * 25.4).toFixed(2)} mm`);
       push('Brightness', `${Math.round(entity.brightness)} % · ${brightnessToNits(entity.brightness, dims.spec)} nits`);
+      // Holes, not couplers. Nobody bolts a clamp into every hole, and a count labelled as
+      // hardware would be read as an order quantity by the next person to quote off this panel.
+      const holes = mountHoles(dims.spec);
+      if (dims.spec.mount && holes.length) {
+        push(`${dims.spec.mount.bolt} holes`, `${panels * holes.length} · ${holes.length} per panel, at the corners`);
+      }
       if (entity.corners.length) push('Folds', plural(entity.corners.length, 'corner'));
       if (entity.contentWindows.length) push('Content', plural(entity.contentWindows.length, 'window'));
       break;

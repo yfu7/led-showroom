@@ -32,11 +32,11 @@ export interface PanelSpec {
 }
 
 /**
- * The bolt holes a cabinet hangs from.
+ * The bolt holes a cabinet hangs from — what a truss clamp fastens to.
  *
  * `holeInsetIn` is where the hole STARTS: panel edge to the NEAR SIDE of the hole, not to its
- * centre, so the centre is `holeInsetIn + boltDiaIn / 2` in from the edge. Which edges carry holes,
- * and how many per edge, is deliberately absent - nothing measured says so yet.
+ * centre. A corner hole is inset from BOTH of the edges that meet at its corner, so its centre
+ * sits `holeInsetIn + boltDiaIn / 2` in from each of them.
  */
 export interface MountSpec {
   /** Thread designation, e.g. 'M10'. */
@@ -45,6 +45,43 @@ export interface MountSpec {
   boltDiaIn: number;
   /** Panel edge to the NEAR SIDE of the hole (in). */
   holeInsetIn: number;
+  /** `corners` = one hole at each of the four corners of {@link face}, and none anywhere else. */
+  pattern: 'corners';
+  /**
+   * The face the holes are in.
+   *
+   * `back` is the only value the measurement supports, and the only one modelled: the front face
+   * is the LED itself, and a half coupler reaches a cabinet from the truss BEHIND the screen.
+   * It is a field rather than an assumption buried in the geometry so that a cabinet measured
+   * differently is one word to correct.
+   */
+  face: 'back';
+}
+
+/** One mount hole's centre, panel-local inches: origin at the face centre, +x right, +y up. */
+export interface MountHole {
+  x: number;
+  y: number;
+}
+
+/**
+ * The mount hole centres on one panel, panel-local.
+ *
+ * Ordered bottom-left, bottom-right, top-left, top-right, so callers can rely on the order rather
+ * than sorting. Empty when the spec records no mount.
+ *
+ * Also empty — rather than crossed over — when the inset would reach past the middle of the panel.
+ * Four holes stacked across the centre line would be a drawing of a bad spec instead of a report
+ * of one, and a wall of them would look deliberate.
+ */
+export function mountHoles(spec: PanelSpec): MountHole[] {
+  const m = spec.mount;
+  if (!m) return [];
+  const inset = m.holeInsetIn + m.boltDiaIn / 2;
+  const x = spec.widthIn / 2 - inset;
+  const y = spec.heightIn / 2 - inset;
+  if (!(x > 0) || !(y > 0)) return [];
+  return [{ x: -x, y: -y }, { x, y: -y }, { x: -x, y }, { x, y }];
 }
 
 export interface AccessorySpec {
@@ -93,8 +130,10 @@ export const IPOSTER: PanelSpec = {
   // Both accessory sets are confirmed by the CAD to the thousandth of an inch:
   // "LED iPoster - Base.STEP" is 637.0 x 6.3 x 477.0 mm = 25.08 x 0.25 x 18.78 in, and
   // "LED iPoster -LH Back Support.STEP" is 170.2 x 537.0 x 50.8 mm = 6.70 x 21.14 x 2.00 in.
-  // Measured off the cabinet, not read from the CAD: M10 holes, each starting 1 in in from the edge.
-  mount: { bolt: 'M10', boltDiaIn: 0.3937, holeInsetIn: 1 },
+  // Measured off the cabinet, not read from the CAD: an M10 hole at each of the four corners of
+  // the back face, each one starting 1 in in from both edges that meet at its corner. Centres are
+  // therefore 1.19685 in in from each edge, at (±11.40315, ±8.25315) on the 25.2 x 18.9 in face.
+  mount: { bolt: 'M10', boltDiaIn: 0.3937, holeInsetIn: 1, pattern: 'corners', face: 'back' },
   accessories: {
     base: { backW: 25.08, frontW: 9.06, depth: 18.78, thick: 0.25, notch: 5.51 },
     support: { width: 2.0, thick: 1.18, totalH: 21.14, chamfer: 1.0, footD: 6.7, inset: 2.5 },
