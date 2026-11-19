@@ -9,7 +9,7 @@ import { CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
 import type { ContentSource, ContentWindow, Corner, LedWallEntity, PxRect } from '../document/types';
 import type { EntityRenderer, RenderContext, RendererFactory } from './EntityRenderer';
 import { disposeObject, tagRoot } from './EntityRenderer';
-import type { ElementBox } from '../tools/pointSnap';
+import { facesCamera, type ElementBox } from '../tools/pointSnap';
 import {
   accessoryPlacements, cellKey, computeColumnLayout, computeSegments, filledCells, isRectWall, miterCutsForColumn,
   panelLocalPosition, wallDims, wallLocalBounds, wallMountPoints, localPointToWallPixel, wallPixelToLocal,
@@ -661,14 +661,23 @@ export class LedWallRenderer implements EntityRenderer<LedWallEntity> {
    *
    * The centre of the hole IS in the face, not out at the marker: the marker stands off it so it
    * can be seen, and a tape measure does not care. Only while the overlay is on - you can measure
-   * to what you can see.
+   * to what you can see - and only the holes turned towards the camera, since the back of a
+   * cabinet projects to within a pixel or two of the front face directly over it.
+   *
+   * A normal matrix rather than the world quaternion: a wall can be scaled, and a mirrored one
+   * (negative scale) turns its faces round, which a rotation alone would not show.
    */
-  snapPoints(): THREE.Vector3[] {
+  snapPoints(camera: THREE.Camera): THREE.Vector3[] {
     if (!this.entity.mountHoles) return [];
     this.inner.updateWorldMatrix(true, false);
+    const nm = new THREE.Matrix3().getNormalMatrix(this.inner.matrixWorld);
+    const n = new THREE.Vector3();
     const out: THREE.Vector3[] = [];
     for (const p of this.mountPoints) {
-      if (p.onFace) out.push(this.inner.localToWorld(new THREE.Vector3(p.pos[0], p.pos[1], p.pos[2])));
+      if (!p.onFace) continue;
+      n.set(p.normal[0], p.normal[1], p.normal[2]).applyMatrix3(nm).normalize();
+      const world = this.inner.localToWorld(new THREE.Vector3(p.pos[0], p.pos[1], p.pos[2]));
+      if (facesCamera(world, n, camera)) out.push(world);
     }
     return out;
   }

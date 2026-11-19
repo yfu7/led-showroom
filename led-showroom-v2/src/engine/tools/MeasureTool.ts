@@ -351,7 +351,7 @@ export class MeasureTool implements Tool {
         if (!ray.intersectsBox(world)) continue;
       }
       // Before the snapBoxes early-out, so a renderer that supplies boxes still contributes points.
-      const pts = r.snapPoints?.();
+      const pts = r.snapPoints?.(this.engine.camera.camera);
       if (pts) points.push(...pts);
       const own = r.snapBoxes?.();
       if (own) { boxes.push(...own); continue; }

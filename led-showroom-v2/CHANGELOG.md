@@ -18,7 +18,9 @@ The measure tool snaps to the hole centres, which is the point of drawing them: 
 a seam, hole to the floor, hole to a clamp. A hole beats the panel corner beside it when both are
 under the pointer, because someone hovering a hole is aiming at the hole. The centre sits in the
 face, not out at the marker - the marker stands off so it can be seen, and a tape measure does not
-care.
+care. Only the holes turned towards you are offered: snapping goes by distance on screen, and the
+back of a cabinet lands within a pixel or two of the front face directly over it, so without that
+the front of a wall would snap to holes behind two inches of aluminium.
 
 Sharp folds are the one place a hole goes missing. The mitre that lets two runs meet at a corner
 trims the back face, and past about 107 degrees the trim passes the hole's offset: there is no face

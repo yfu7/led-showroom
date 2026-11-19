@@ -123,6 +123,7 @@ const KIND_RANK: Record<SnapKind, number> = { element: 0, vertex: 0, midpoint: 1
 const _pa = new THREE.Vector3();
 const _pb = new THREE.Vector3();
 const _m4 = new THREE.Matrix4();
+const _toEye = new THREE.Vector3();
 const _inst = new THREE.Matrix4();
 
 /**
@@ -185,6 +186,25 @@ function hitWorldMatrix(object: THREE.Object3D, instanceId: number | null | unde
 function vertexAt(geometry: THREE.BufferGeometry, i: number, matrix: THREE.Matrix4, out: THREE.Vector3): THREE.Vector3 {
   const pos = geometry.getAttribute('position') as THREE.BufferAttribute;
   return out.fromBufferAttribute(pos, i).applyMatrix4(matrix);
+}
+
+/**
+ * Is a point on a one-sided feature turned towards the camera?
+ *
+ * Snapping is a screen-distance test, with no notion of depth or of what is in front of what. A
+ * mount hole in the BACK of a cabinet projects to within a pixel or two of the front face directly
+ * over it, so without this the front of a wall snaps to holes behind 1.77 in of aluminium - the
+ * pointer sticking for no reason anyone can see, which is the thing this feature exists not to do.
+ *
+ * Facing, not occlusion: no raycast. A feature turned away is always wrong to offer; one turned
+ * towards the camera and hidden behind something else is the rare case, and it costs a ray per
+ * candidate per pointer move to catch. Edge-on counts as away, which is also what it looks like.
+ */
+export function facesCamera(point: THREE.Vector3, normal: THREE.Vector3, camera: THREE.Camera): boolean {
+  const persp = camera as THREE.PerspectiveCamera;
+  if (persp.isPerspectiveCamera) return normal.dot(_toEye.copy(camera.position).sub(point)) > 0;
+  // Orthographic: every point is seen from the same direction, so position does not come into it.
+  return normal.dot(_toEye.set(0, 0, 1).applyQuaternion(camera.quaternion)) > 0;
 }
 
 /** Nearest grid node on the floor plane for a pitch of `gridIn` (y forced to `floorY`). */

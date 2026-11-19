@@ -51,8 +51,12 @@ export interface EntityRenderer<E extends Entity = Entity> {
    * Individual world points this renderer wants the measure tool to snap to, beyond the corners
    * and midpoints of {@link snapBoxes}. Drawn features only: a snap to something invisible is a
    * pointer that sticks for no reason anyone can see.
+   *
+   * Given the camera so a renderer whose features are one-sided can drop the ones turned away -
+   * see {@link facesCamera}. Screen distance alone cannot tell the back of a cabinet from the
+   * front of it.
    */
-  snapPoints?(): THREE.Vector3[];
+  snapPoints?(camera: THREE.Camera): THREE.Vector3[];
   /** Height of the top surface at local (x, z) for stacking (stages), or null. */
   topSurfaceY?(): number | null;
   /** Set by renderers that mount CSS3D objects (websites) so the DOM pass runs. */

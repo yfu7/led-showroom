@@ -149,7 +149,7 @@ export function LedWallInspector({ wall }: Props) {
         <ToggleRow label="Dimensions" checked={wall.showDimensions} onChange={v => patch({ showDimensions: v }, 'Dimensions')} hint="Engineering-style size annotations" />
         <ToggleRow label="Mount holes" checked={wall.mountHoles} disabled={!mount} onChange={v => patch({ mountHoles: v }, 'Mount holes')}
           hint={mount
-            ? `${mount.bolt} bolt holes on the back, ${mount.holeInsetIn} in in from each corner — and the measure tool snaps to them`
+            ? `${mount.bolt} bolt holes on the back, starting ${mount.holeInsetIn} in from both edges at each corner — and the measure tool snaps to them`
             : 'No mount pattern is recorded for this product'} />
         {wall.mountHoles && mount && (
           <GodOnly>

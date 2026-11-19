@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import {
   elementBoxFromLocal, elementFeaturePoints, nearestGridPoint, projectOntoAxis, projectToScreen,
-  projectedDistance, resolveHitFace, snapPoint, type ElementBox,
+  facesCamera, projectedDistance, resolveHitFace, snapPoint, type ElementBox,
 } from './pointSnap';
 
 const VIEW = { width: 800, height: 600 };
@@ -246,6 +246,48 @@ describe('element snapping', () => {
       { camera: cam, viewport: VIEW, elements: [cubeBox(mesh)] });
     expect(r.kind).toBe('element');
     expect(r.point.toArray().map(v => Math.round(v))).toEqual([10, 20, 10]);
+  });
+});
+
+describe('facesCamera', () => {
+  /** The case it exists for: a hole in the BACK of a cabinet, seen from the front of the wall. */
+  const panelBack = new THREE.Vector3(0, 20, -0.885);
+  const backward = new THREE.Vector3(0, 0, -1);
+
+  it('rejects a feature turned away, however close it projects', () => {
+    const cam = camera();                                  // on +Z, looking at the origin
+    expect(facesCamera(panelBack, backward, cam)).toBe(false);
+    // And the front of the same panel, in the same place on screen, is kept.
+    expect(facesCamera(new THREE.Vector3(0, 20, 0.885), new THREE.Vector3(0, 0, 1), cam)).toBe(true);
+  });
+
+  it('accepts it once the camera is round the back', () => {
+    const cam = camera();
+    cam.position.set(0, 20, -100);
+    cam.lookAt(0, 20, 0);
+    cam.updateMatrixWorld(true);
+    expect(facesCamera(panelBack, backward, cam)).toBe(true);
+  });
+
+  it('counts edge-on as turned away, which is what it looks like', () => {
+    const cam = camera();
+    // Exactly level with the camera's eye, facing straight up: the dot product is zero.
+    expect(facesCamera(new THREE.Vector3(0, 20, 0), new THREE.Vector3(0, 1, 0), cam)).toBe(false);
+  });
+
+  /**
+   * An orthographic camera sees every point from the same direction, so its POSITION must not come
+   * into it: a feature behind the camera's own station point still faces it.
+   */
+  it('goes by view direction alone under an orthographic camera', () => {
+    const ortho = new THREE.OrthographicCamera(-50, 50, 50, -50, 0.1, 1000);
+    ortho.position.set(0, 20, 100);
+    ortho.lookAt(0, 20, 0);
+    ortho.updateMatrixWorld(true);
+    expect(facesCamera(panelBack, backward, ortho)).toBe(false);
+    expect(facesCamera(new THREE.Vector3(0, 20, 0.885), new THREE.Vector3(0, 0, 1), ortho)).toBe(true);
+    // Far behind the camera, still facing it: direction, not distance.
+    expect(facesCamera(new THREE.Vector3(0, 20, 400), new THREE.Vector3(0, 0, 1), ortho)).toBe(true);
   });
 });
 
