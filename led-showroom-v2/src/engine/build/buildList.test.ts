@@ -254,6 +254,19 @@ describe('buildList', () => {
     });
   });
 
+  it('counts ghosts as parts the build still needs', () => {
+    // What the auto truss draws past our stock: three real 8 ft sticks and two ghosts is five
+    // wanted, two short, and the line says the two are the ghosts.
+    const ghost = (): EquipmentEntity => ({ ...stick([96, 11.16, 11.16]), ghost: true });
+    const list = buildList(docWith(
+      stick([96, 11.16, 11.16]), stick([96, 11.16, 11.16]), stick([11.16, 96, 11.16]), ghost(), ghost(),
+    ));
+
+    expect(list.equipment).toHaveLength(1);
+    expect(list.equipment[0]).toMatchObject({ qty: 5, owned: 3, short: 2, ghosts: 2 });
+    expect(buildListText(list, 'in')).toContain('SHORT 2 (3 owned, 2 drawn as ghosts)');
+  });
+
   it('keeps genuinely different sizes apart', () => {
     const list = buildList(docWith(stick([96, 11.16, 11.16]), stick([60, 11.16, 11.16])));
     expect(list.equipment).toHaveLength(2);

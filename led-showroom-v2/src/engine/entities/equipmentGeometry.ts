@@ -11,7 +11,9 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { BASE_PLATE_THICK_IN, chordRadiusIn, clampMetrics, diagonalRadiusIn } from '../catalog/trussMetrics';
+import {
+  BASE_PLATE_THICK_IN, chordRadiusIn, clampMetrics, diagonalRadiusIn, trussBaseProfile,
+} from '../catalog/trussMetrics';
 import type { EquipmentEntity, EquipmentGeometry } from '../document/types';
 
 export interface EquipmentBuild {
@@ -28,6 +30,9 @@ export interface EquipmentBuild {
 
 /** Near-black glossy glass for dark screens. */
 export const SCREEN_GLASS = { color: 0x08080a, metalness: 0.1, roughness: 0.15 } as const;
+
+/** How much of a ghost (a part we would need and do not own) shows: enough to read, not to mistake. */
+export const GHOST_OPACITY = 0.22;
 
 interface Palette {
   body: THREE.MeshStandardMaterial;
@@ -72,7 +77,10 @@ function makePalette(entity: EquipmentEntity): Palette {
     alloy: mk({ color: body, roughness: 0.35, metalness: 0.85 }),
     dark: mk({ color: 0x1a1a1d, roughness: 0.6, metalness: 0.2 }),
   };
-  return { ...p, all: [p.body, p.accent, p.glass, p.metal, p.dark, p.alloy] };
+  const all = [p.body, p.accent, p.glass, p.metal, p.dark, p.alloy];
+  // See-through, and never hiding what stands behind it: a ghost is a gap in the stock, not a part.
+  if (entity.ghost) for (const m of all) { m.transparent = true; m.opacity = GHOST_OPACITY; m.depthWrite = false; }
+  return { ...p, all };
 }
 
 /* ───────────────────────────── primitives ───────────────────────────── */
@@ -270,8 +278,17 @@ function trussJunction(arms: readonly Arm[]): Builder {
 const buildTrussCorner: Builder = trussJunction(['+x', '+z']);
 /** T junction: a through run plus one branch. */
 const buildTrussTee: Builder = trussJunction(['-x', '+x', '+z']);
-/** 6-way block: four horizontal arms; the hub itself is the up/down pair. */
-const buildTrussBlock: Builder = trussJunction(['-x', '+x', '-z', '+z']);
+/**
+ * 6-way block: a cube of the section with a way out of every face, drawn as one short stick stood
+ * on end -- chords at the corners, an end frame top and bottom. A corner or a tee has arms reaching
+ * past its hub; a block's six faces ARE its six ways, and a hub sized to leave room for arms would
+ * draw it at 60% of the truss it joins.
+ */
+const buildTrussBlock: Builder = (p, w, h, d) => {
+  const hub = trussAlong(p, h, w, d, p.pal.alloy, 0);   // along X, then stood up (+X -> +Y)
+  hub.rotation.z = Math.PI / 2;
+  hub.position.set(0, h / 2, 0);
+};
 
 /**
  * Half coupler: a jaw that wraps a truss chord, on a flat plate that bolts to a cabinet.
@@ -335,6 +352,20 @@ const buildTrussVertical: Builder = (p, w, h, d) => {
   const truss = trussAlong(p, h, w, d, p.pal.alloy, 0);   // along X, then stood up (+X -> +Y)
   truss.rotation.z = Math.PI / 2;
   truss.position.set(0, h / 2, 0);
+};
+
+/**
+ * DT-GP raised base: a plate the full declared footprint, and a riser of the GP section standing ON
+ * it, from the plate's top to `h`. The riser's chords therefore start where the planner expects a
+ * jaw can first close (`trussBaseProfile`), and the plate is drawn the size it is on the floor --
+ * it reaches forward under the wall, which is why a wall on these legs sits at the plate's top.
+ */
+const buildTrussBase: Builder = (p, w, h, d) => {
+  const { plateThick, section, riserLen } = trussBaseProfile([w, h, d]);
+  p.box(w, plateThick, d, p.pal.dark);
+  const riser = trussAlong(p, riserLen, section, section, p.pal.alloy, 0);
+  riser.rotation.z = Math.PI / 2;
+  riser.position.set(0, plateThick + riserLen / 2, 0);
 };
 
 /** Stylised human, proportions of a 69" figure scaled to `h`. Faces +Z. */
@@ -554,6 +585,7 @@ const BUILDERS: Record<EquipmentGeometry, Builder> = {
   'truss': buildTruss,
   'truss-upright': buildTrussUpright,
   'truss-vertical': buildTrussVertical,
+  'truss-base': buildTrussBase,
   'truss-corner': buildTrussCorner,
   'truss-tee': buildTrussTee,
   'truss-block': buildTrussBlock,
@@ -585,7 +617,7 @@ export function safeDims(dims: EquipmentEntity['dims'] | undefined): [number, nu
 
 /** Key of everything that changes the built geometry / materials. */
 export function equipmentBuildKey(entity: EquipmentEntity): string {
-  return JSON.stringify([entity.geometry, safeDims(entity.dims), entity.color, entity.accent ?? null]);
+  return JSON.stringify([entity.geometry, safeDims(entity.dims), entity.color, entity.accent ?? null, entity.ghost === true]);
 }
 
 /**
@@ -598,6 +630,7 @@ export function buildEquipment(entity: EquipmentEntity): EquipmentBuild {
   const parts = new Parts(pal);
   const builder = BUILDERS[entity.geometry] ?? buildBox;
   const screen = builder(parts, w, h, d) ?? undefined;
+  if (entity.ghost) for (const m of parts.meshes) m.castShadow = false;
   parts.group.name = `equipment-model:${entity.geometry}`;
   const materials: THREE.Material[] = [...pal.all];
   if (screen) materials.push(screen.material as THREE.Material);

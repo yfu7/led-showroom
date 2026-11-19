@@ -71,6 +71,7 @@ const EQUIPMENT_ICON: Record<EquipmentGeometry, CatalogIconKind> = {
   truss: 'truss',
   'truss-upright': 'truss',
   'truss-vertical': 'truss',
+  'truss-base': 'truss',
   'truss-corner': 'truss',
   'truss-tee': 'truss',
   'truss-block': 'truss',

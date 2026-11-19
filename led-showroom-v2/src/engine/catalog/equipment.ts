@@ -199,14 +199,14 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
     description: '4 ft end-plated DT-GP box truss, black. The upper half of an arch leg.',
     specs: [
       { label: 'Part no.', value: 'GP0079 - DT-GP4-BLK' },
-      { label: 'Owned', value: '6 (Sales Order #735958)' },
+      { label: 'Owned', value: '8 (at least - 6 on Sales Order #735958, more on hand)' },
       GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
     ],
   },
   {
     id: 'gp-corner-6way', name: 'DT-GP 6-way corner block', category: 'structure', geometry: 'truss-block',
-    dims: [22, 22, 22], color: '#17181b',
-    description: 'Six-way 12 in GP truss corner block, black. The shoulder where a leg meets a span.',
+    dims: [11.16, 11.16, 11.16], color: '#17181b',
+    description: 'Six-way GP truss corner block, black: a cube of the section with a way out of every face. The shoulder where a leg meets a span.',
     specs: [
       { label: 'Part no.', value: 'GP0352 - DT-6WB-BLK' },
       { label: 'Owned', value: '6 (Sales Order #735958)' },
@@ -214,14 +214,15 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
     ],
   },
   {
-    id: 'gp-base-36', name: 'DT-GP raised base 36 in', category: 'structure', geometry: 'truss-upright',
-    dims: [11.16, 36, 11.16], color: '#17181b',
-    description: 'Heavy-duty raised 36 in base plate with a GP truss riser, black. One under each leg.',
+    id: 'gp-base-36', name: 'DT-GP raised base 36 in', category: 'structure', geometry: 'truss-base',
+    dims: [36, 36.5, 36], color: '#17181b',
+    description: 'Heavy-duty raised base, black: a 36 x 36 in plate about 1 in thick with a GP truss riser standing on it. One under each leg.',
     specs: [
       { label: 'Part no.', value: 'BP0300 - DT-GP-Base36-BLK' },
       { label: 'Owned', value: '6 (Sales Order #735958)' },
-      { label: 'Riser height', value: '36 in' },
-      GP_SECTION, { label: 'Plate size', value: 'Nominal - the order gives no geometry' }, GP_CONN,
+      { label: 'Plate', value: '36 x 36 in, about 1 in thick (measured)' },
+      { label: 'Riser', value: '35.5 in on the plate, 36.5 in overall - nominal' },
+      GP_SECTION, GP_CONN,
     ],
   },
 

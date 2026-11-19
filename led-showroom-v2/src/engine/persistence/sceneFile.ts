@@ -221,7 +221,7 @@ const ENTITY_TYPES = new Set(['led-wall', 'stage', 'equipment', 'model', 'splat'
 
 /** Runtime mirror of the `EquipmentGeometry` union (the record keeps it exhaustive at compile time). */
 const EQUIPMENT_GEOMETRY: Record<EquipmentGeometry, true> = {
-  box: true, cylinder: true, kiosk: true, totem: true, truss: true, 'truss-upright': true, 'truss-vertical': true,
+  box: true, cylinder: true, kiosk: true, totem: true, truss: true, 'truss-upright': true, 'truss-vertical': true, 'truss-base': true,
   figure: true, 'table-round': true,
   'truss-corner': true, 'truss-tee': true, 'truss-block': true, clamp: true,
   'table-rect': true, chair: true, sofa: true, screen: true, drape: true, podium: true, speaker: true, counter: true, plant: true, locker: true, photo: true,
@@ -289,6 +289,7 @@ function migrateTyped(raw: Record<string, unknown>, e: Record<string, unknown>):
       if (shippedAsset(raw.model, '/models/')) e.model = raw.model; else delete e.model;
       if (shippedAsset(raw.image, '/products/')) e.image = raw.image; else delete e.image;
       if (typeof raw.billboard === 'boolean') e.billboard = raw.billboard; else delete e.billboard;
+      if (raw.ghost === true) e.ghost = true; else delete e.ghost;
       return e;
     }
     case 'model': {

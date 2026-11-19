@@ -3,8 +3,8 @@ import * as THREE from 'three';
 import type { EquipmentEntity, EquipmentGeometry } from '../document/types';
 import { EQUIPMENT } from '../catalog/equipment';
 import {
-  EQUIPMENT_GEOMETRIES, SCREEN_GEOMETRIES, buildEquipment, colorOf, disposeEquipmentBuild, equipmentBounds, equipmentBuildKey, podiumProfile,
-  safeDims,
+  EQUIPMENT_GEOMETRIES, GHOST_OPACITY, SCREEN_GEOMETRIES, buildEquipment, colorOf, disposeEquipmentBuild, equipmentBounds,
+  equipmentBuildKey, podiumProfile, safeDims,
 } from './equipmentGeometry';
 
 /** Local-space bounding box of one mesh of a build (mesh transform applied). */
@@ -37,7 +37,7 @@ function entity(geometry: EquipmentGeometry, dims: [number, number, number], ext
  *  CAD-modelled one are built by EquipmentRenderer from their cutout / mesh, and only fall back to a
  *  plain box here. */
 const ALL_KINDS: EquipmentGeometry[] = [
-  'box', 'cylinder', 'kiosk', 'totem', 'truss', 'truss-upright', 'truss-vertical',
+  'box', 'cylinder', 'kiosk', 'totem', 'truss', 'truss-upright', 'truss-vertical', 'truss-base',
   'truss-corner', 'truss-tee', 'truss-block', 'clamp', 'figure',
   'table-round', 'table-rect', 'chair', 'sofa', 'screen', 'drape', 'podium', 'speaker', 'counter', 'plant', 'locker',
 ];
@@ -206,7 +206,48 @@ describe('buildEquipment', () => {
     disposeEquipmentBuild(build);
   });
 
-  it('build key changes with geometry, dims, colour and accent only', () => {
+  it('draws a raised base as a plate the full footprint, with a riser of the section standing on it', () => {
+    const build = buildEquipment(entity('truss-base', [36, 36.5, 36]));
+    expect(build.meshes).toHaveLength(2);
+    const riser = build.meshes.find(m => m.name === 'truss')!;
+    const plate = meshBox(build.meshes.find(m => m !== riser)!), r = meshBox(riser);
+    for (const [v, want] of [[plate.min.x, -18], [plate.max.x, 18], [plate.min.z, -18], [plate.max.z, 18],
+      [plate.min.y, 0], [plate.max.y, 1]] as const) expect(v).toBeCloseTo(want, 6);
+    expect(r.max.x - r.min.x).toBeCloseTo(11.16, 6);
+    expect(r.max.z - r.min.z).toBeCloseTo(11.16, 6);
+    // The riser's chords start on the plate's top, which is where the planner closes its lowest jaw.
+    expect(r.min.y).toBeCloseTo(1, 6);
+    expect(r.max.y).toBeCloseTo(36.5, 6);
+    disposeEquipmentBuild(build);
+  });
+
+  it('draws a 6-way block as a cube of the section, standing on its base', () => {
+    const build = buildEquipment(entity('truss-block', [11.16, 11.16, 11.16]));
+    expect(build.meshes).toHaveLength(1);
+    const b = meshBox(build.meshes[0]);
+    expect(b.max.x - b.min.x).toBeCloseTo(11.16, 6);
+    expect(b.max.z - b.min.z).toBeCloseTo(11.16, 6);
+    expect(b.min.y).toBeCloseTo(0, 6);
+    expect(b.max.y).toBeCloseTo(11.16, 6);
+    disposeEquipmentBuild(build);
+  });
+
+  it('draws a ghost see-through, hiding nothing behind it and casting no shadow', () => {
+    const solid = buildEquipment(entity('truss-base', [36, 36.5, 36]));
+    const ghost = buildEquipment(entity('truss-base', [36, 36.5, 36], { ghost: true }));
+    for (const m of ghost.meshes) {
+      const mat = m.material as THREE.Material;
+      expect([mat.transparent, mat.opacity, mat.depthWrite, m.castShadow]).toEqual([true, GHOST_OPACITY, false, false]);
+    }
+    for (const m of solid.meshes) {
+      const mat = m.material as THREE.Material;
+      expect([mat.transparent, mat.opacity, m.castShadow]).toEqual([false, 1, true]);
+    }
+    disposeEquipmentBuild(solid);
+    disposeEquipmentBuild(ghost);
+  });
+
+  it('build key changes with geometry, dims, colour, accent and ghosting only', () => {
     const base = entity('chair', [18, 34, 20]);
     const k = equipmentBuildKey(base);
     expect(equipmentBuildKey({ ...base, name: 'other', screen: { type: 'image', url: 'x' } })).toBe(k);
@@ -214,6 +255,7 @@ describe('buildEquipment', () => {
     expect(equipmentBuildKey({ ...base, color: '#ffffff' })).not.toBe(k);
     expect(equipmentBuildKey({ ...base, accent: '#ffffff' })).not.toBe(k);
     expect(equipmentBuildKey({ ...base, geometry: 'sofa' })).not.toBe(k);
+    expect(equipmentBuildKey({ ...base, ghost: true })).not.toBe(k);
   });
 
   it('disposes and detaches', () => {

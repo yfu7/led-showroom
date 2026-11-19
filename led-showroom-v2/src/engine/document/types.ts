@@ -117,6 +117,8 @@ export type EquipmentGeometry =
   | 'box' | 'cylinder' | 'kiosk' | 'totem' | 'truss' | 'truss-upright' | 'figure' | 'table-round'
   /** A stick stood on end, origin at its foot and no base plate: what a tower stacks. */
   | 'truss-vertical'
+  /** A raised base: a plate the full `dims` footprint with a GP riser standing on it (`trussBaseProfile`). */
+  | 'truss-base'
   /** Truss junctions. `dims` is the overall extent, arms included — not the section. */
   | 'truss-corner' | 'truss-tee' | 'truss-block'
   /** Truss hardware. `dims` is the overall extent of the part. */
@@ -149,6 +151,11 @@ export interface EquipmentEntity extends EntityBase {
   model?: string;
   /** Keep a photo cutout turned towards the camera about Y. Default true for photo products. */
   billboard?: boolean;
+  /**
+   * Needed but not owned: drawn see-through. The auto truss sets it on the pieces past our stock,
+   * so a plan shows what it would take rather than quietly stopping at what we have.
+   */
+  ghost?: boolean;
 }
 
 export type ModelFormat = 'glb' | 'gltf' | 'obj' | 'stl' | 'fbx' | 'ply';

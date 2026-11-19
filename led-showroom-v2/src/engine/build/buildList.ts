@@ -102,6 +102,11 @@ export interface EquipmentLine {
   owned: number | null;
   /** How many more than we own this build wants. */
   short: number;
+  /**
+   * Of `qty`, how many the scene draws as ghosts: parts a plan (the auto truss) needs and we do
+   * not have. They count in `qty` and so in `short`, because the build still needs them.
+   */
+  ghosts: number;
 }
 
 export interface BuildList {
@@ -240,7 +245,7 @@ function equipmentLines(items: EquipmentEntity[]): EquipmentLine[] {
   for (const e of items) {
     const key = `${e.catalogId}|${dimsKey(e.dims)}`;
     const hit = groups.get(key);
-    if (hit) { hit.qty++; continue; }
+    if (hit) { hit.qty++; if (e.ghost) hit.ghosts++; continue; }
     const def: EquipmentDef | undefined = equipmentDef(e.catalogId);
     const owned = ownedCount(def);
     groups.set(key, {
@@ -250,6 +255,7 @@ function equipmentLines(items: EquipmentEntity[]): EquipmentLine[] {
       dims: [...e.dims] as Vec3,
       owned: owned ?? null,
       short: 0,
+      ghosts: e.ghost ? 1 : 0,
     });
   }
   const lines = [...groups.values()];
@@ -347,7 +353,8 @@ export function buildListText(list: BuildList, unit: Unit, title?: string): stri
     L.push('HARDWARE');
     for (const e of list.equipment) {
       L.push(`  ${padL(String(e.qty), 3)}  ${pad(e.name, 30)}${pad(formatDims(e.dims, unit), 22)}`
-        + (e.short ? `SHORT ${e.short} (${e.owned ?? 0} owned)` : e.owned !== null ? `${e.owned} owned` : ''));
+        + (e.short ? `SHORT ${e.short} (${e.owned ?? 0} owned${e.ghosts ? `, ${e.ghosts} drawn as ghosts` : ''})`
+          : e.owned !== null ? `${e.owned} owned` : ''));
     }
   }
 

@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+### Auto truss: hidden behind the wall, and built from what we own
+
+2.2.0's rig stood a tower behind every column and stacked it to the top row, which left truss
+showing over the top of most walls and ignored what was on the shelf. A rig is now planned the way
+the Financial Times wall was built.
+
+**Nothing shows from the front.** Every stick, block and riser stands behind the cabinets in front
+of it: no higher than their top, no wider than the wall. Only the base plates reach out, flat on the
+floor under the cabinets. A notched wall is read column by column, so a short column gets a leg
+under its own top rather than one sized for its neighbours.
+
+**Frames, not just towers.** Where a run of full-height columns allows it, the planner builds a
+frame: legs of base, sticks and a 6-way corner block, with 4, 5 and 8 ft spans block to block across
+the top. The header's chords take couplers too, wherever a row of holes lands on one clear of a weld.
+The 11 x 8 Financial Times wall comes out as four legs of base, 4 ft stick and block, spans of
+5 + 8 + 5 ft, the header on the fifth row's top holes, every column held, 18 couplers and nothing
+short. Columns a frame cannot reach get towers, and no two base plates ever overlap, across a fold
+included.
+
+**The stock we own is the limit.** 8 ft: 3. 5 ft: 6. 4 ft: 8. Corner blocks: 6. Raised bases: 6.
+Half couplers: 38. Pieces already standing elsewhere in the scene come off those counts first. What
+a plan needs past them is still drawn, see-through and named "(not owned)", and the toast, the
+build list and Copy as text all say how many of each are ghosts. The F34 is quoted, not owned, so
+the planner does not use it.
+
+**The wall sits on the base plates.** A raised base is now the 36 x 36 in plate, about an inch
+thick, with a 35.5 in GP riser standing on it, and the wall rests on the plates' top: up by the
+plate's thickness, plus at most a quarter-inch shim when that lands a header chord on a row of
+holes. A wall standing higher comes down to the plates. This replaces 2.2.0's hunt upward for a
+height that cleared every weld; a hole on a weld now goes without a coupler and is reported.
+
+The corner block is drawn as the 11.16 in cube it is rather than a 22 in junction, and the 4 ft
+count is 8. Rigs placed before this keep their old pieces until Auto truss runs again.
+
+Known limits: with bezels off no header lands within a quarter inch (it would take 0.37 in), so
+those walls get towers. Two frames meeting at a fold can still put plates on top of each other,
+and the planner says so when they do.
+
 ## 2.2.0 — 2026-11-19
 
 The truss, the clamps and the bolt holes we actually own, the rig that holds a wall up, and the

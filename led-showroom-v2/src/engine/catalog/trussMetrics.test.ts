@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BASE_PLATE_THICK_IN, CHORD_OD_IN, DIAGONAL_OD_IN, braceNodesAlong, chordOffsetIn, chordOffsets,
-  chordRadiusIn, clampFitsChord, clampMetrics, clearOfBraceNodes, diagonalRadiusIn,
+  BASE_PLATE_THICK_IN, CHORD_OD_IN, DIAGONAL_OD_IN, GP_BASE_PLATE_IN, GP_SECTION_IN, braceNodesAlong,
+  chordOffsetIn, chordOffsets, chordRadiusIn, clampFitsChord, clampMetrics, clearOfBraceNodes,
+  diagonalRadiusIn, trussBaseProfile,
 } from './trussMetrics';
 
 /** Published sections, in inches. */
@@ -122,6 +123,19 @@ describe('clearOfBraceNodes', () => {
     const mid = 11.83333 / 2;
     expect(clearOfBraceNodes(mid, SPAN, GP, JAW_HALF)).toBe(true);
     expect(clearOfBraceNodes(mid, SPAN, GP, 8)).toBe(false);
+  });
+});
+
+describe('trussBaseProfile', () => {
+  it('stands the GP riser on the measured 36 in plate, an inch thick, so its chords start an inch up', () => {
+    expect(GP_SECTION_IN).toBe(GP);
+    expect(GP_BASE_PLATE_IN).toEqual({ size: 36, thick: 1 });
+    expect(trussBaseProfile([36, 36.5, 36])).toEqual({ plateThick: 1, section: GP, riserLen: 35.5 });
+  });
+
+  it('keeps a squat base mostly riser, and never draws a riser wider than its plate', () => {
+    expect(trussBaseProfile([20, 2, 20])).toEqual({ plateThick: 0.5, section: GP, riserLen: 1.5 });
+    expect(trussBaseProfile([8, 36, 10]).section).toBe(8);
   });
 });
 

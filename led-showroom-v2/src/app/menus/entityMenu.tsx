@@ -274,10 +274,10 @@ function wallSection(engine: Engine, wall: LedWallEntity): MenuItem[] {
 /**
  * Plan a truss rig for `wall` and put the whole thing in with one command.
  *
- * One `cmdPatchDocument`, because a rig is one thing: the group, every leg and coupler, the raise
- * the wall needs for its lowest coupler to clear a base plate, and the floor-stand kit coming off
- * because its back supports stand where the legs do. A single undo takes all of it back out, which
- * is what makes trying it safe.
+ * One `cmdPatchDocument`, because a rig is one thing: the group, every leg, span and coupler, the
+ * wall set down on the base plates, and the floor-stand kit coming off because its back supports
+ * stand where the legs do. A single undo takes all of it back out, which is what makes trying it
+ * safe.
  *
  * Only `entities` is patched, and the next document is computed once rather than inside the
  * command: a redo that re-ran the planner would mint fresh ids and strand anything holding the
@@ -285,7 +285,7 @@ function wallSection(engine: Engine, wall: LedWallEntity): MenuItem[] {
  */
 function autoTruss(engine: Engine, wall: LedWallEntity): void {
   const plan = planTrussRig(engine.doc, wall);
-  if (!plan.towers.length) {
+  if (!plan.legs.length) {
     engine.toast('error', plan.warnings[0] ?? 'There is nothing on this wall to bolt a coupler into.');
     return;
   }
@@ -295,9 +295,15 @@ function autoTruss(engine: Engine, wall: LedWallEntity): void {
     label: rebuild ? 'Rebuild truss rig' : 'Auto truss',
   }));
 
-  const legs = plan.towers.length, cl = plan.clamps.length;
-  const head = `${legs} ${legs === 1 ? 'leg' : 'legs'}, ${cl} ${cl === 1 ? 'half coupler' : 'half couplers'}`;
-  engine.toast('success', [head, ...plan.warnings].join(' - '));
+  const n = (k: number, one: string, many: string): string => `${k} ${k === 1 ? one : many}`;
+  const parts = [
+    plan.frames ? n(plan.frames, 'frame', 'frames') : '',
+    n(plan.legs.length, 'leg', 'legs'),
+    plan.spans.length ? n(plan.spans.length, 'span', 'spans') : '',
+    n(plan.clamps.length, 'half coupler', 'half couplers'),
+  ].filter(Boolean);
+  const head = `${parts.join(', ')} - ${plan.held} of ${n(plan.columns, 'column', 'columns')} held`;
+  engine.toast(plan.ghosts ? 'info' : 'success', [head, ...plan.warnings].join(' - '));
 }
 
 /** Take the generated rig off a wall. The wall stays where the rig left it. */

@@ -98,13 +98,34 @@ export function clampFitsChord(clamp: ClampMetrics, sectionIn: number): boolean 
 
 /* ---------------------------- brace nodes ---------------------------- */
 
-/**
- * Thickness of the plate under a `truss-upright` base.
- *
- * Shared with the planner because it sets the lowest a clamp can sit: the jaw has to clear the
- * plate it stands on, and that clearance is what decides whether a wall has to rise at all.
- */
+/** Thickness of the plate under a generic `truss-upright` prop. The DT-GP base is {@link GP_BASE_PLATE_IN}. */
 export const BASE_PLATE_THICK_IN = 0.5;
+
+/** DT-GP section: the outside of the square, shared by every GP stick, block and riser. */
+export const GP_SECTION_IN = 11.16;
+
+/**
+ * The DT-GP raised base plate: 36 in square and about 1 in thick, as measured. The order gives no
+ * geometry, so these are nominal.
+ *
+ * Shared with the planner because the plate decides two things a rig cannot fudge. It reaches
+ * forward under the cabinets, so a wall rigged to these legs comes no lower than its top; and the
+ * riser's chords, which take couplers, only start there.
+ */
+export const GP_BASE_PLATE_IN = { size: 36, thick: 1 } as const;
+
+/**
+ * What a `truss-base` of `dims` draws: a plate the full declared footprint, then a riser of the GP
+ * section standing ON it. One function, so the drawing and the planner agree on where the riser's
+ * chords start, which is the lowest a jaw can close.
+ */
+export function trussBaseProfile(dims: readonly [number, number, number]): {
+  plateThick: number; section: number; riserLen: number;
+} {
+  const [w, h, d] = dims;
+  const plateThick = Math.min(GP_BASE_PLATE_IN.thick, h / 4);
+  return { plateThick, section: Math.min(GP_SECTION_IN, w, d), riserLen: h - plateThick };
+}
 
 /**
  * Where the diagonals meet a chord, as distances from one end of a stick of `lenIn`.

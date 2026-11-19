@@ -98,7 +98,11 @@ export function BuildListDialog({ onClose }: { onClose(): void }) {
             {list.equipment.map(e => (
               <Prop key={`${e.catalogId}-${e.dims.join()}`} label={`${e.qty} × ${e.name}`} wide>
                 <span className="muted">{formatDims(e.dims, unit)}</span>
-                {e.short > 0 && <strong style={{ color: 'var(--warn)' }}> — {e.short} more than we own ({e.owned} owned)</strong>}
+                {e.short > 0 && (
+                  <strong style={{ color: 'var(--warn)' }}>
+                    {' '}— {e.short} more than we own ({e.owned} owned{e.ghosts > 0 ? `, ${e.ghosts} drawn as ghosts` : ''})
+                  </strong>
+                )}
               </Prop>
             ))}
           </Section>
