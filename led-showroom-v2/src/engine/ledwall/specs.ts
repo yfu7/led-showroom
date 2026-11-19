@@ -27,6 +27,24 @@ export interface PanelSpec {
   weightLb?: number;
   /** Which accessory set fits this panel. */
   accessories?: AccessorySpec;
+  /** How the cabinet takes a bolt - what a truss clamp fastens to. */
+  mount?: MountSpec;
+}
+
+/**
+ * The bolt holes a cabinet hangs from.
+ *
+ * `holeInsetIn` is where the hole STARTS: panel edge to the NEAR SIDE of the hole, not to its
+ * centre, so the centre is `holeInsetIn + boltDiaIn / 2` in from the edge. Which edges carry holes,
+ * and how many per edge, is deliberately absent - nothing measured says so yet.
+ */
+export interface MountSpec {
+  /** Thread designation, e.g. 'M10'. */
+  bolt: string;
+  /** Nominal bolt diameter (in). M10 = 10 mm = 0.3937 in. */
+  boltDiaIn: number;
+  /** Panel edge to the NEAR SIDE of the hole (in). */
+  holeInsetIn: number;
 }
 
 export interface AccessorySpec {
@@ -75,6 +93,8 @@ export const IPOSTER: PanelSpec = {
   // Both accessory sets are confirmed by the CAD to the thousandth of an inch:
   // "LED iPoster - Base.STEP" is 637.0 x 6.3 x 477.0 mm = 25.08 x 0.25 x 18.78 in, and
   // "LED iPoster -LH Back Support.STEP" is 170.2 x 537.0 x 50.8 mm = 6.70 x 21.14 x 2.00 in.
+  // Measured off the cabinet, not read from the CAD: M10 holes, each starting 1 in in from the edge.
+  mount: { bolt: 'M10', boltDiaIn: 0.3937, holeInsetIn: 1 },
   accessories: {
     base: { backW: 25.08, frontW: 9.06, depth: 18.78, thick: 0.25, notch: 5.51 },
     support: { width: 2.0, thick: 1.18, totalH: 21.14, chamfer: 1.0, footD: 6.7, inset: 2.5 },

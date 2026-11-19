@@ -115,6 +115,8 @@ export type EquipmentGeometry =
   | 'box' | 'cylinder' | 'kiosk' | 'totem' | 'truss' | 'truss-upright' | 'figure' | 'table-round'
   /** Truss junctions. `dims` is the overall extent, arms included — not the section. */
   | 'truss-corner' | 'truss-tee' | 'truss-block'
+  /** Truss hardware. `dims` is the overall extent of the part. */
+  | 'clamp'
   | 'table-rect' | 'chair' | 'sofa' | 'screen' | 'drape' | 'podium' | 'speaker' | 'counter' | 'plant' | 'locker'
   /** A photographed product: a cutout image stood up on the floor, scaled to the real height. */
   | 'photo'

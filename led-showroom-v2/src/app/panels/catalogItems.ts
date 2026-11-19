@@ -73,6 +73,7 @@ const EQUIPMENT_ICON: Record<EquipmentGeometry, CatalogIconKind> = {
   'truss-corner': 'truss',
   'truss-tee': 'truss',
   'truss-block': 'truss',
+  clamp: 'truss',
   figure: 'figure',
   'table-round': 'table',
   'table-rect': 'table',

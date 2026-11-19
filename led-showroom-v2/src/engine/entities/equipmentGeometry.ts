@@ -271,6 +271,40 @@ const buildTrussTee: Builder = trussJunction(['-x', '+x', '+z']);
 /** 6-way block: four horizontal arms; the hub itself is the up/down pair. */
 const buildTrussBlock: Builder = trussJunction(['-x', '+x', '-z', '+z']);
 
+/**
+ * Half coupler: a jaw that wraps a truss chord, on a flat plate that bolts to a cabinet.
+ *
+ * The chord runs along X, the axis `truss` is built on, so a coupler dropped onto a stick needs no
+ * turning. The PLATE carries the declared height and the jaw is sized from whatever depth is left
+ * behind it, rather than the jaw driving the height: a jaw as tall as `dims[1]` would be as deep as
+ * it is tall, and a part declared tall and thin would then bulge far outside its own box.
+ */
+const buildClamp: Builder = (p, w, h, d) => {
+  const plateD = Math.min(d * 0.25, h * 0.4);
+  const ro = Math.min(h, d - plateD) / 2;          // jaw outer radius
+  const ri = ro * 0.84;                            // bore: the chord it closes around
+  const backZ = -d / 2;
+  const cz = backZ + plateD + ro;                  // jaw centre, clear of the plate
+
+  // Annulus with a mouth facing +z, as one closed profile extruded along the chord.
+  const MOUTH = Math.PI / 3;
+  const a0 = MOUTH / 2, a1 = Math.PI * 2 - MOUTH / 2, N = 28;
+  const prof: [number, number][] = [];
+  for (let i = 0; i <= N; i++) { const a = a0 + (a1 - a0) * (i / N); prof.push([Math.cos(a) * ro, Math.sin(a) * ro]); }
+  for (let i = N; i >= 0; i--) { const a = a0 + (a1 - a0) * (i / N); prof.push([Math.cos(a) * ri, Math.sin(a) * ri]); }
+  const jaw = p.prismX(prof, w, p.pal.metal);
+  jaw.position.set(0, h / 2, cz);
+
+  p.box(w, h, plateD, p.pal.metal, 0, h / 2, backZ + plateD / 2, true);
+  // The bolt: head proud of the plate, shank running forward into the jaw.
+  const shank = p.cyl(ro * 0.17, ro * 0.17, plateD + ro, p.pal.dark, 0, 0, 0, 12);
+  shank.rotation.x = Math.PI / 2;
+  shank.position.set(0, h / 2, backZ + (plateD + ro) / 2);
+  const head = p.cyl(ro * 0.3, ro * 0.3, plateD * 0.5, p.pal.dark, 0, 0, 0, 6);
+  head.rotation.x = Math.PI / 2;
+  head.position.set(0, h / 2, backZ + plateD * 0.25);
+};
+
 const buildTrussUpright: Builder = (p, w, h, d) => {
   const plateH = 0.5;
   const plate = Math.max(w, d) * 2;
@@ -501,6 +535,7 @@ const BUILDERS: Record<EquipmentGeometry, Builder> = {
   'truss-corner': buildTrussCorner,
   'truss-tee': buildTrussTee,
   'truss-block': buildTrussBlock,
+  clamp: buildClamp,
   'figure': buildFigure,
   'table-round': buildTableRound,
   'table-rect': buildTableRect,

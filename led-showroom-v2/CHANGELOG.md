@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### The clamps, and what they bolt to
+
+Thirty-eight TAF 8002 slim half couplers, from Invoice INV-1131 (Truss Concepts, 13 October 2026,
+paid). These are the part that connects the two halves of the inventory, so the entry says so: the
+jaw takes 48-51 mm and the DT-GP chord is 50 mm, which no document states but both specs imply.
+The bolt is M10 and so are the holes in our cabinets, which is the other half of the same fit.
+
+Ours are the 8002, not the 8002-B, so they are natural aluminium rather than black - the one piece
+of our truss hardware that is not. The invoice gives no geometry, so the size is nominal and says
+so, as the junction blocks and base plates already do.
+
+The cabinet side is recorded on the panel spec rather than in prose: `MountSpec` carries the thread
+and the hole inset, with the inset defined as the distance to the NEAR SIDE of the hole, because
+"the hole starts 1 inch in" is where it starts, not where its centre is. Which edges carry holes,
+and how many, is deliberately left out - nothing measured says so yet, and guessing it would read
+as measured.
+
+A `clamp` geometry builds the part as a jaw on a bolt plate. The plate carries the declared height
+and the jaw is sized from the depth left behind it, not the other way round: a jaw as tall as its
+box is as deep as it is tall, so driving height from the jaw would make a part declared tall and
+thin bulge far outside its own footprint.
+
 ### Dimensions of a folded shape land on the folded shape
 
 A custom-shape wall could always be folded — it takes the same `corners` list a rectangular one

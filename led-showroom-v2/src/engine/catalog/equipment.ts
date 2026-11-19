@@ -226,6 +226,23 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
   },
 
   {
+    id: 'clamp-8002', name: 'Half coupler M10 slim (8002)', category: 'structure', geometry: 'clamp',
+    dims: [1.26, 2.76, 3.15], color: '#9aa0a6',
+    description: 'TAF 8002 slim aluminium half coupler. What bolts a cabinet to a truss chord.',
+    specs: [
+      { label: 'Part no.', value: '8002' },
+      { label: 'Owned', value: '38 (Invoice INV-1131, Truss Concepts, 10/13/2026)' },
+      { label: 'Fits tube', value: '48 - 51 mm (1.9 - 2.0 in)' },
+      { label: 'Fits our truss', value: 'DT-GP chord is 50 mm, inside the jaw range - read off the two specs, not stated by either document' },
+      { label: 'Load', value: '200 kg (440 lb)' },
+      { label: 'Bolt', value: 'M10, matching the M10 holes in our cabinets' },
+      { label: 'Weight', value: '0.36 kg (0.79 lb) each' },
+      { label: 'Finish', value: 'Natural aluminium - the black one is sold as 8002-B, and the invoice says 8002' },
+      { label: 'Certification', value: 'CE, TUV Nord' },
+      NOMINAL,
+    ],
+  },
+  {
     id: 'f34-straight-1500', name: 'F34 square truss 1.5 m', category: 'structure', geometry: 'truss',
     dims: [59.06, 11.42, 11.42], color: '#17181b',
     description: 'Global Truss F34 straight segment, 1.5 m, black.',
