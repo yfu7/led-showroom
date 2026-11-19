@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Left drag moves, middle drag orbits
+
+The default navigation scheme is now pan-first: holding the left button drags the view, holding the
+scroll wheel orbits it. Both schemes already existed and the View menu still offers either, but the
+default was orbit-first, and a stored preference wins over a default — so the switch would have
+changed nothing for anyone who had already opened the app. The settings record therefore carries a
+version now, and a record written before it drops only the keys whose default moved, keeping the
+rest. A scheme chosen from the View menu from here on carries the version and is left alone.
+
+Nothing else had to move: the pan scheme was already wired through `CameraRig.applyScheme`, and
+`SelectTool` already suppresses camera pan for a claimed left press, which is what keeps drag-to-move
+and box-select working when the left button is the pan button.
+
 ## 2.1.0 — 2026-11-18
 
 A CAD drawing sheet, folds on hand-painted wall shapes, the two docks swapped, and an audit of what

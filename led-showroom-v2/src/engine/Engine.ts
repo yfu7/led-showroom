@@ -47,11 +47,15 @@ export interface EngineSettings {
   liveWebsiteInRecordings: boolean;
   theme: 'dark' | 'light';
   navigation: 'orbit' | 'pan';
+  /** Bumped when a default changes in a way that has to overrule a stored value; see the constructor. */
+  settingsVersion?: number;
 }
 
 /** Trailing-throttle interval of the autosave (ms). */
 const AUTOSAVE_MS = 500;
 const SETTINGS_KEY = 'showroom-v2:settings';
+/** 2: the navigation default became pan-first, overruling an `orbit` nobody chose. */
+const SETTINGS_VERSION = 2;
 const DOC_KEY = 'showroom-v2:doc';
 /** An autosaved document that could not be read is parked here instead of being left in `DOC_KEY`. */
 const DOC_BAD_KEY = 'showroom-v2:doc.bad';
@@ -109,12 +113,17 @@ export class Engine extends Emitter<EngineEvents> implements DocHost {
     // any of them is adopted the settings record is written, so this never runs twice.
     const legacy: V1Preferences = stored ? {} : readV1Preferences(safeStorage());
     const { pixelGridDistIn, ...legacySettings } = legacy;
-    this.settings = { gpu: 'default', qualityScale: 1, liveWebsiteInRecordings: false, theme: 'dark', navigation: 'orbit', ...legacySettings, ...stored };
+    // A settings record written before SETTINGS_VERSION holds whatever the default was then, with no
+    // way to tell it from a deliberate choice. Only the keys whose default changed are dropped, so
+    // the rest of the record survives; from here on a stored scheme carries the version and is kept.
+    const migrating = !!stored && stored.settingsVersion !== SETTINGS_VERSION;
+    if (migrating) delete stored.navigation;
+    this.settings = { gpu: 'default', qualityScale: 1, liveWebsiteInRecordings: false, theme: 'dark', navigation: 'pan', ...legacySettings, ...stored, settingsVersion: SETTINGS_VERSION };
     const restored = initial ?? this.restoreDoc();
     this.doc = restored ?? createDocument();
     // the v1 pixel-grid distance lives in the document, so it only seeds a brand-new one
     if (!restored && pixelGridDistIn !== undefined) this.doc = { ...this.doc, settings: { ...this.doc.settings, pixelGridDistIn } };
-    if (Object.keys(legacy).length) this.saveSettings();
+    if (migrating || Object.keys(legacy).length) this.saveSettings();
 
     this.renderer = new Renderer(host, { gpu: this.settings.gpu, qualityScale: this.settings.qualityScale, shadows: this.doc.environment.lighting.shadows });
     this.camera = new CameraRig(this.renderer.inputEl, this.renderer.aspect);
