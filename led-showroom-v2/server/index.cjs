@@ -6,6 +6,9 @@
  *   2. /api/splat/*        — local Gaussian-splat generation pipeline (ffmpeg → COLMAP → Brush). Only
  *                            available when the tools exist next to the repo (see TOOLS_DIR).
  *   3. /splats/*           — serves generated .ply files.
+ *   3b. /api/scenes/*      — saved scenes as real files on disk (see scenes.cjs). The browser's own
+ *                            storage is per profile per origin and goes with the site data; this is
+ *                            the copy that can be backed up. Local only: absent from the deploy.
  *   4. Static /dist        — production build (when present). In development Vite serves the app and
  *                            proxies the routes above to this server (see vite.config.ts).
  *
@@ -16,7 +19,9 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
+const os = require('os');
 const { spawn } = require('child_process');
+const { createSceneStore, MAX_BODY_BYTES } = require('./scenes.cjs');
 const urlGuard = require('./urlGuard.cjs');   // shared with api/proxy.js (see that file's header)
 
 const PORT = Number(process.env.PORT || 3001);
@@ -35,6 +40,16 @@ const firstExisting = (name) => candidatesFor(name).find(p => fs.existsSync(p)) 
 const TOOLS_DIR = process.env.SPLAT_TOOLS_DIR || firstExisting('led-showroom-tools');
 const SPACES_DIR = process.env.SPLAT_SPACES_DIR || firstExisting('led-showroom-spaces');
 const SPLATS_DIR = process.env.SPLAT_OUT_DIR || firstExisting('led-showroom-splats');
+/*
+ * Where saved scenes live. An existing `led-showroom-scenes` beside the repo wins, so the folder can
+ * be put where the rest of the project is; otherwise Documents, which survives worktrees being
+ * thrown away and is somewhere a person can actually find. SHOWROOM_SCENES_DIR overrides both.
+ */
+const existingOnly = (name) => candidatesFor(name).find(p => fs.existsSync(p)) || null;
+const SCENES_DIR = process.env.SHOWROOM_SCENES_DIR || existingOnly('led-showroom-scenes')
+  || path.join(os.homedir(), 'Documents', 'LED Showroom');
+const scenes = createSceneStore(SCENES_DIR);
+
 const COLMAP_EXE = path.join(TOOLS_DIR, 'bin', 'colmap.exe');
 const BRUSH_EXE = path.join(TOOLS_DIR, 'brush_app.exe');
 const splatToolsAvailable = () => fs.existsSync(COLMAP_EXE) && fs.existsSync(BRUSH_EXE);
@@ -228,7 +243,46 @@ const server = http.createServer((req, res) => {
 
   if (p === '/proxy') return handleProxy(req, res, parsed);
 
-  if (p === '/api/health') return json(res, 200, { ok: true, splatTools: splatToolsAvailable(), toolsDir: TOOLS_DIR, spacesDir: SPACES_DIR });
+  if (p === '/api/health') return json(res, 200, { ok: true, splatTools: splatToolsAvailable(), toolsDir: TOOLS_DIR, spacesDir: SPACES_DIR, scenesDir: SCENES_DIR });
+
+  /* ── Saved scenes on disk ── */
+  if (p === '/api/scenes' && req.method === 'GET') {
+    try { return json(res, 200, scenes.list()); }
+    catch (e) { return json(res, 500, { error: e.message }); }
+  }
+
+  if (p === '/api/scenes' && req.method === 'POST') {
+    const body = [];
+    let size = 0;
+    let over = false;
+    req.on('data', c => {
+      if (over) return;
+      size += c.length;
+      // Stop accumulating past the cap rather than filling memory and then rejecting.
+      if (size > MAX_BODY_BYTES) { over = true; body.length = 0; return; }
+      body.push(c);
+    });
+    req.on('end', () => {
+      if (over) return json(res, 413, { error: 'That scene is larger than this server will store.' });
+      try {
+        const { name, scene } = JSON.parse(Buffer.concat(body).toString());
+        if (!scene || typeof scene !== 'object') return json(res, 400, { error: 'No scene in the request.' });
+        return json(res, 200, { dir: SCENES_DIR, saved: scenes.write(name, scene) });
+      } catch (e) { return json(res, 400, { error: e.message }); }
+    });
+    return;
+  }
+
+  if (p.startsWith('/api/scenes/file/')) {
+    const rel = decodeURIComponent(p.slice('/api/scenes/file/'.length));
+    try {
+      if (req.method === 'DELETE') {
+        return scenes.remove(rel) ? json(res, 200, { ok: true }) : json(res, 404, { error: 'No such scene: ' + rel });
+      }
+      const scene = scenes.read(rel);
+      return scene ? json(res, 200, scene) : json(res, 404, { error: 'No such scene: ' + rel });
+    } catch (e) { return json(res, 500, { error: e.message }); }
+  }
 
   if (p === '/api/splat/videos') {
     const vids = [];
@@ -318,6 +372,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
+  console.log('Scenes saved to ' + SCENES_DIR);
   console.log('LED Showroom v2 server on http://localhost:' + PORT + (fs.existsSync(DIST_DIR) ? ' (serving dist/)' : ' (API only — run `npm run dev` for the app)'));
   console.log('Splat tools: ' + (splatToolsAvailable() ? 'available' : 'not found') + ' (' + TOOLS_DIR + ')');
 });

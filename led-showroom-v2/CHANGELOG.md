@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### Builds saved on this computer, not just in the browser
+
+Until now the app's whole memory was browser storage: one autosaved document and up to fifty
+presets. That is held per browser profile AND per origin, so a build made on localhost was
+invisible on the deployed site and vice versa, and clearing site data took the lot. There was no
+history of a build either - the autosave is one slot, overwritten every half second.
+
+File > Builds on this computer now saves real `.showroom.json` files into a folder on disk, lists
+what is there with the date and size of each, and opens or deletes any of them. The folder's path
+is on show in the dialog, because that is the literal answer to "where did my build go" - and
+`Documents` is not always the Documents that Explorer shows, since OneDrive folder redirection
+moves it and only the resolved path says where.
+
+Saving over a build keeps the old one. The file already there is moved into `versions/` under its
+own name and the time it was written, and those copies are listed under the build they came from,
+so "previous builds" means previous builds and not just the last one. The stamp carries
+milliseconds and takes a counter when even those collide: two saves inside one clock tick - a
+double-click is enough - must not rename the first straight over the second.
+
+Deleting is the opposite and says so before it fires. The button arms first, names how many
+versions go with the build, and states that the files are deleted rather than sent to the Recycle
+Bin. The versions go with the scene: once the build is gone nothing in the app can reach them
+again, and disk nobody can see, still holding a build someone asked to be rid of, is not a backup.
+
+This is the local server's half of the app, so the menu entry appears only where that server is
+running. On the deploy the routes are not there and the entry hides itself - and "no store" has to
+mean exactly that, so the listing is accepted only when it parses as JSON and has the shape the
+server promises. A static host answering an unknown path with its own index.html would otherwise
+read as an empty store, and the app would offer to save builds into nowhere.
+
 ### The measure tool snaps to elements, not just to triangles
 
 Snapping only ever saw mesh topology: a vertex of the mesh under the pointer, or the midpoint of

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  Box, ChevronDown, Eraser, FolderOpen, Image, Import, Maximize, Moon, PanelLeft, PanelRight,
+  Box, ChevronDown, Eraser, FolderOpen, HardDrive, Image, Import, Maximize, Moon, PanelLeft, PanelRight,
   CircleQuestionMark, Redo2, Ruler, Save, Settings2, ShieldCheck, Sun, Undo2, Video,
 } from 'lucide-react';
 import { useStore } from '@/app/store';
@@ -8,10 +8,12 @@ import { Button, IconButton } from '@/app/components/Button';
 import { Menu, type MenuItem } from '@/app/components/Menu';
 import { Select } from '@/app/components/Select';
 import { ExportGltfDialog, GenerateDrawingDialog, RecordVideoDialog, SaveImageDialog } from '@/app/panels/exportDialogs';
+import { SavedBuildsDialog } from '@/app/panels/SavedBuildsDialog';
 import { UNITS, type Unit } from '@/engine/units';
 import type { Engine } from '@/engine/Engine';
 import { importV1Presets } from '@/engine/persistence/presets';
 import { exportSceneFile, importSceneFile, downloadBlob, sceneFileName } from '@/engine/persistence/sceneFile';
+import { listStoredScenes } from '@/engine/persistence/sceneStore';
 import { ClearSceneDialog, requestClearScene } from './ClearSceneDialog';
 import { GodPinDialog } from './GodMode';
 
@@ -40,6 +42,19 @@ export function TopBar() {
   const [, bump] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
   const closeDialog = () => setDialog(null);
+  /*
+   * The folder the local server saves builds into, or null where there is no such server - on the
+   * deploy there is not, and the menu entry hides itself rather than offering a save with nowhere
+   * to go. Only a SUCCESS is remembered: the dev server is a separate process, so a page opened
+   * before it is up must be able to find it later, which the File menu's onOpen re-probe does.
+   */
+  const [storeDir, setStoreDir] = useState<string | null>(null);
+  useEffect(() => {
+    const ac = new AbortController();
+    void listStoredScenes(ac.signal).then(l => { if (l) setStoreDir(l.dir); });
+    return () => ac.abort();
+  }, []);
+  const probeStore = () => { if (!storeDir) void listStoredScenes().then(l => { if (l) setStoreDir(l.dir); }); };
 
   if (!engine || !doc) return <header className="topbar"><Brand /></header>;
 
@@ -72,6 +87,9 @@ export function TopBar() {
   const fileItems: MenuItem[] = [
     { label: 'Open .showroom.json…', icon: <FolderOpen />, onSelect: openScene },
     { label: 'Save .showroom.json', icon: <Save />, onSelect: saveScene },
+    // Only where the local server is running. On the deploy these files have nowhere to live, and
+    // an entry that cannot work is worse than no entry at all.
+    ...(storeDir ? [{ label: 'Builds on this computer…', icon: <HardDrive />, onSelect: () => setDialog('builds') } as MenuItem] : []),
     'sep',
     { label: 'Import v1 presets', icon: <Import />, onSelect: importPresets },
     'sep',
@@ -123,6 +141,7 @@ export function TopBar() {
         align="left"
         trigger={<Button variant="ghost" size="sm" icon={<ChevronDown style={{ width: 12, height: 12, order: 2 }} />}>File</Button>}
         items={fileItems}
+        onOpen={probeStore}
       />
       <input ref={fileInput} type="file" accept=".json,application/json" style={{ display: 'none' }}
         onChange={e => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ''; }} />
@@ -160,6 +179,7 @@ export function TopBar() {
       {dialog === 'video' && <RecordVideoDialog onClose={closeDialog} />}
       {dialog === 'gltf' && <ExportGltfDialog onClose={closeDialog} />}
       {dialog === 'drawing' && <GenerateDrawingDialog onClose={closeDialog} />}
+      {dialog === 'builds' && <SavedBuildsDialog onClose={closeDialog} />}
     </header>
   );
 }
