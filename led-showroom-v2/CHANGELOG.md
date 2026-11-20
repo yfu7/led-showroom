@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.4.0 — 2026-11-20
 
 ### Truss inventory: every order, and two systems that never mix
 
