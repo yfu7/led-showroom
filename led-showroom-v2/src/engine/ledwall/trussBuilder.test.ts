@@ -432,6 +432,36 @@ describe('Auto truss through the builder', () => {
     }
   });
 
+  it('closes a flat wall’s gaps from the sticks on hand, on the plan’s couplers', () => {
+    const wall = createLedWall({ cols: 30, rows: 7 });
+    const doc = docWith(wall);
+    const plan = planTrussRig(doc, wall);
+    const got = autoTrussRig(doc, wall);
+    if ('fail' in got) throw new Error(got.fail);
+    const c = got.summary.coupling;
+    expect(got.auto.refused).toEqual([]);
+    expect(got.legs).toBe(plan.legs.length);
+    expect(c.clamps.map(x => keyOf(x.piece)).sort()).toEqual(plan.clamps.map(keyOf).sort());
+    expect(c.shim).toBeCloseTo(plan.shimIn, 9);
+    expect([c.held.size, c.supported.size]).toEqual([plan.held, plan.supported]);
+    // More, shorter sticks from stock where the plan reaches past it: fewer ghosts, never more.
+    expect([plan.spans.length, got.spans]).toEqual([7, 9]);
+    expect([plan.ghosts, got.summary.ghosts]).toEqual([14, 12]);
+  });
+
+  it('says why a mitre or a fold leaves holes and columns out, as the plan does', () => {
+    for (const [cols, rows, afterCol, angle, n] of [[16, 6, 7, 120, 2], [20, 8, 9, 60, 1]] as const) {
+      const wall = createLedWall({ cols, rows });
+      wall.corners = [{ afterCol, angle }];
+      const doc = docWith(wall);
+      const why = planTrussRig(doc, wall).warnings.filter(w => /mitre|fold/.test(w));
+      expect(why).toHaveLength(n);
+      const got = autoTrussRig(doc, wall);
+      if ('fail' in got) throw new Error(got.fail);
+      for (const w of why) expect(got.notes).toContain(w);
+    }
+  });
+
   it('says why where no leg fits, and puts nothing up', () => {
     const wall = createLedWall({ cols: 1, rows: 1 });
     const doc = docWith(wall);

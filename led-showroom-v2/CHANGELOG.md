@@ -9,8 +9,13 @@ on the wall's right-click menu. It plans the legs as before, then puts every pie
 would: each piece is checked as a click would be, the gaps between frame tops are closed with F,
 and the couplers come with the pieces. The rig then opens in Build truss to go on with by hand.
 
-- On the 30 x 7 arch, flat and folded walls, and walls turned and moved, it comes to the same legs,
-  sticks, couplers, shim and ghosts as the plan, with no piece refused.
+- On the 30 x 7 arch, flat and folded walls, and walls turned and moved, it stands the planned
+  legs and puts the couplers into the planned holes on the planned shim, with no piece refused.
+- F closes each gap from the sticks on hand where they reach, so a rig can take more, shorter
+  sticks than the plan and draw fewer ghosts: a flat 30 x 7 takes 9 sticks and 12 ghosts, against
+  the plan's 7 and 14.
+- The message says, as before, where a mitre cuts holes away and where a fold leaves a column
+  unheld.
 - A planned piece that would not go up is left out and named in the message.
 - Run again, it replaces its own rig without asking. A rig built by hand is asked about first.
 - God Mode shows the last run on the wall: planned against put up, the gaps F filled, anything

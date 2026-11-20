@@ -876,8 +876,12 @@ function liesBetween(b: Builder, s: BuildPiece, a: THREE.Vector3, z: THREE.Vecto
  * spans is closed as F closes it (`fillGap`: columns held, then the stock on hand), with every leg
  * already counted out of the stock, as the planner counts it. A planned span stick in a gap F
  * cannot close goes up as planned where it bolts on and passes; whatever does not go up is
- * `refused`, with why. The pieces come back in the planner's order, frames, spans, towers, so the
- * same ones come out ghosts.
+ * `refused`, with why. The pieces come back in the planner's order, frames, spans, towers.
+ *
+ * F's sticks need not be the planner's: where the plan would close a gap with a stick past the
+ * stock, F closes it from the sticks on hand where they reach, so the rig can take more, shorter
+ * sticks and draw fewer ghosts (a flat 30 x 7: 9 sticks, 12 ghosts, against the plan's 7 and 14).
+ * The legs, the couplers and the shim come out the planner's.
  */
 export function autoBuild(b: Builder, plan: TrussRigPlan): AutoBuild {
   const pieces: BuildPiece[] = [];
@@ -957,6 +961,9 @@ export interface AutoTruss {
  * has. Null `next` with why where nothing can go up. The rig is written as Auto truss's, not as
  * one built by hand, so Auto truss replaces it again without asking.
  */
+const MITRE = /cut away by a mitre/;
+const FOLD = /beside a fold/;
+
 export function autoTrussRig(doc: Document, wall: LedWallEntity): AutoTruss | { fail: string } {
   const plan = planTrussRig(doc, wall);
   if (!plan.legs.length) return { fail: plan.warnings[0] ?? 'There is nothing on this wall to bolt a coupler into.' };
@@ -983,6 +990,9 @@ export function autoTrussRig(doc: Document, wall: LedWallEntity): AutoTruss | { 
   }
   const loose = summary.columns - c.supported.size;
   if (loose > 0) notes.push(`${loose} ${loose === 1 ? 'column is' : 'columns are'} out of reach of every coupler, and nothing holds ${loose === 1 ? 'it' : 'them'}.`);
+  // Why, which only the planner can say: the holes a mitre cuts away, and the columns a fold keeps
+  // every piece from. The builder couples the same columns, so its loose ones are the plan's.
+  notes.push(...plan.warnings.filter(w => MITRE.test(w) || (loose > 0 && FOLD.test(w))));
   if (auto.refused.length) {
     const n = auto.refused.length;
     const [first] = auto.refused;
