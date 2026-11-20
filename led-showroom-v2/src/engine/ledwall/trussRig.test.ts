@@ -584,9 +584,10 @@ describe('planTrussRig', () => {
     // Open at the floor under a lintel: column 1 of the first wall, just past its 120 degree fold, and
     // column 0 of the second, two columns before its fold of -120 degrees. A plate behind the run on
     // the other side of the fold can reach round onto the floor of the opening, or the floor just in
-    // front of or behind it; on 61555a4 the first wall's only plate stood in its doorway, and with the
-    // check taken out one of the second wall's plates stands in its doorway, where now the nearest
-    // keeps half an inch clear. Both walls still get a tower, so the check below has plates to look at.
+    // front of or behind it; on 61555a4 the first wall's only plate stood in its doorway. Two checks
+    // keep it out, the doorway's floor and what shows round the fold, each enough here alone: with
+    // both taken out, one of the second wall's plates stands in its doorway. Both walls still get a
+    // tower, so the check below has plates to look at.
     const tight = createLedWall({ cols: 3, rows: 3 });
     tight.corners = [{ afterCol: 0, angle: 120 }];
     tight.shape = { mode: 'custom', cells: ['0,0', '0,1', '0,2', '1,0', '2,0', '2,1', '2,2'] };
@@ -1035,6 +1036,20 @@ describe('every rig it draws, across folds', () => {
 });
 
 describe('applyTrussRig', () => {
+  it('plans round a stick the catalog no longer carries, and leaves it be', () => {
+    // A scene saved when the catalog held a DT-GP 3 ft stick, which is on none of our orders: one
+    // stands apart from the wall. The plan is the one the wall gets alone, and the stick is untouched.
+    const wall = createLedWall({ cols: 11, rows: 4 });
+    const stale = createEquipment({
+      id: 'gp-truss-3ft', name: 'DT-GP3 box truss 3 ft', geometry: 'truss', dims: [36, SECTION, SECTION], color: '#17181b',
+    }, [0, 0, 200]);
+    expect(equipmentDef(stale.catalogId)).toBeUndefined();
+    const doc = docWith(wall, stale);
+    const plan = planTrussRig(doc, wall);
+    expect(plan).toEqual(planTrussRig(docWith(wall), wall));
+    expect(applyTrussRig(doc, wall, plan).entities.find(e => e.id === stale.id)).toEqual(stale);
+  });
+
   it('adds one group holding every piece, and moves the wall onto the plates', () => {
     const wall = createLedWall({ cols: 2, rows: 3, position: [0, 10, 0] });
     const doc = docWith(wall);
