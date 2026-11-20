@@ -18,7 +18,7 @@ frame: legs of base, sticks and a 6-way corner block, with 4, 5 and 8 ft spans b
 the top. The header's chords take couplers too, wherever a row of holes lands on one clear of a weld.
 The 11 x 8 Financial Times wall comes out as four legs of base, 4 ft stick and block, spans of
 5 + 8 + 5 ft, the header on the fifth row's top holes, every column held, 18 couplers and nothing
-short. That rests on the base standing 36.5 in overall, which is still to be measured: at 36.0 in
+short. The base is modelled at a nominal 36.5 in overall; at 36.0 in
 no header lands within the shim and the same wall gets towers. Columns a frame cannot reach get
 towers, and a tower's plate never overlaps another plate, across a fold included.
 
