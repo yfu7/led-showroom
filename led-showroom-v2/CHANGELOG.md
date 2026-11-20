@@ -20,6 +20,10 @@ block face behind both doorways, and the header's bottom chord lands on the lint
 0.15 in shim. 28 of the 30 columns have couplers and all 30 are supported, where three towers gave 3
 and 6. It takes three 3 ft sticks to buy, and 52 couplers where we have 38.
 
+Those low holes stand 1.20 in above the lintel's bottom edge, and a coupler's body reaches 1.38 in
+each way from its bolt, so 39 of the couplers over the doorways hang 0.18 in below the lintel, where
+they show from the front. That is not checked, any more than the coupler past a column's side below.
+
 In a sweep of 30-column arches of 3 to 12 rows, with bezels on, every arch of six rows or more with
 doorways three to five rows high now frames on one 3 ft stick per leg (21 arches). With bezels off,
 walls of five to nine rows with doorways two to four rows high frame on two per leg (15). Doorways of
