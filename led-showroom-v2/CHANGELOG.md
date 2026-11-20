@@ -11,7 +11,9 @@ block face to block face. Every stick is end-plated, so each splice is a weld; t
 mix and order of sticks that puts the most couplers on the header clear of them. A leg stands only
 behind columns filled down to the floor. A base plate may still reach out past the wall's end, but
 never sideways into a doorway. Where a pier is one column wide, too narrow for a plate, the span runs
-on past it to the next pier that can take a leg.
+on past it to the next pier that can take a leg. Near a fold, a plate also keeps off the floor of
+the doorways on the other side of it: between the jambs, from a plate's width in front of the wall to
+a plate's width behind it. A wall with a doorway beside a fold gets fewer legs for it, sometimes none.
 
 **A coupled column holds the columns bolted beside it.** Columns are bolted to each other, so the
 couplers in one column carry its neighbours too. While a column's top stands no higher than 8 ft above
@@ -51,11 +53,12 @@ and one row on the plates stands 19.9 in. On three rows no leg lands a header wi
 those walls stand on towers or a braced frame, most columns held by a neighbour rather than couplers
 of their own. Bridging a one-column pier makes long spans: a 29 x 7 arch with a one-column middle
 pier gets one 57 ft span (six 8 ft sticks, a 5 and a 4), three 8 ft sticks past our three. An arch
-whose lintel is one row deep, or whose end piers are one column wide, still stands on towers alone,
-its lintel columns mostly out of reach: no leg lands a header on a single lintel row within the shim,
-and a 36 in plate cannot stand behind a lone end column without reaching into the doorway. Where a
-wall folds at 120 or 135 degrees, the wedge behind the fold has room for one plate, not two, so some
-columns on the far side of it are out of reach. With bezels off, an 11 x 8 now frames on legs of
+whose lintel is one row deep stands on towers alone, its lintel columns mostly out of reach: no leg
+lands a header on a single lintel row within the shim. A one-column end pier leaves a leg a window
+of 1.6 in (its section behind the column, its plate reaching out past the wall's end but clear of
+the doorway), so a frame reaches it only where a whole number of feet of span lands a leg there;
+otherwise that end stands on a tower. Where a wall folds at 120 or 135 degrees, the wedge behind the
+fold has room for one plate, not two, so some columns on the far side of it are out of reach. With bezels off, an 11 x 8 now frames on legs of
 plate, two 3 ft sticks and two blocks over a 0.03 in shim, every column held, which takes 8 blocks
 and 8 3 ft sticks of our 6 each. Spans past 20 ft are drawn but not rated.
 

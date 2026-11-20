@@ -144,6 +144,7 @@ export interface TrussRigPlan {
   held: number;
   /** Columns held, out of `columns`: by couplers of their own, or by a coupled column beside them. */
   supported: number;
+  /** Columns with any cabinets in them. */
   columns: number;
   /** Pieces drawn as ghosts. */
   ghosts: number;
@@ -221,6 +222,20 @@ function spanOrders(spans: readonly number[]): number[][] {
 
 /** A square footprint on the floor, for the collision check. */
 interface Footprint { x: number; z: number; size: number; rotY: number }
+
+/** Separating-axis test for two convex outlines on the floor, each by its corners in order. */
+function outlinesOverlap(a: readonly THREE.Vector3[], b: readonly THREE.Vector3[]): boolean {
+  for (const poly of [a, b]) {
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i], q = poly[(i + 1) % poly.length];
+      const len = Math.hypot(q.x - p.x, q.z - p.z);
+      const ax = (p.z - q.z) / len, az = (q.x - p.x) / len;
+      const pa = a.map(v => v.x * ax + v.z * az), pb = b.map(v => v.x * ax + v.z * az);
+      if (Math.max(...pa) <= Math.min(...pb) + 1e-6 || Math.max(...pb) <= Math.min(...pa) + 1e-6) return false;
+    }
+  }
+  return true;
+}
 
 /** Separating-axis test for two rotated squares. */
 function overlaps(a: Footprint, b: Footprint): boolean {
@@ -417,15 +432,38 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   /**
    * Whether a plate centred at `u` keeps out of the doorways. It may reach forward under the
    * cabinets and out past the wall's ends, but not sideways into a column that is open at the
-   * floor, where it would show from the front and be walked into.
+   * floor, where it would show from the front and be walked into. Near a fold it can reach round
+   * into another run's doorway too: there it keeps off the floor between that column's jambs, from
+   * a plate's width in front of the wall to a plate's width behind it.
    */
-  const plateClear = (run: Run, u: number): boolean => {
-    for (let c = run.start; c <= run.end; c++) {
+  const doorways = runs.flatMap(r => {
+    const out: { run: Run; jambs: [number, number]; floor: THREE.Vector3[] }[] = [];
+    for (let c = r.start; c <= r.end; c++) {
       if (solidRows[c]) continue;
-      const [l, r] = extentOf(run, c, c);
-      if (u + plateSize / 2 > l + EPS && u - plateSize / 2 < r - EPS) return false;
+      const jambs = extentOf(r, c, c);
+      const [front, back] = [-s * dims.panelD - plateSize, plateSize];
+      out.push({ run: r, jambs, floor: [[jambs[0], front], [jambs[1], front], [jambs[1], back], [jambs[0], back]].map(([a, n]) => at(r, a, 0, n)) });
     }
-    return true;
+    return out;
+  });
+  const clearMemo = new Map<string, boolean>();
+  const plateClear = (run: Run, u: number): boolean => {
+    const k = `${runs.indexOf(run)}|${u.toFixed(6)}`;
+    const memo = clearMemo.get(k);
+    if (memo !== undefined) return memo;
+    const h = plateSize / 2;
+    let plate: THREE.Vector3[] | null = null;
+    let clear = true;
+    for (const d of doorways) {
+      if (d.run === run) {
+        if (u + h > d.jambs[0] + EPS && u - h < d.jambs[1] - EPS) { clear = false; break; }
+        continue;
+      }
+      if (!plate) plate = [[-h, -h], [h, -h], [h, h], [-h, h]].map(([a, n]) => at(run, u + a, 0, depth + n));
+      if (outlinesOverlap(plate, d.floor)) { clear = false; break; }
+    }
+    clearMemo.set(k, clear);
+    return clear;
   };
 
   /**
@@ -1116,7 +1154,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     dropAccessories,
     held: best.held.size,
     supported: best.supported.size,
-    columns: layout.length,
+    columns: bands.filter(b => b.length).length,
     ghosts: best.ghosts,
     shortfall,
     skipped: { offFace, weld: best.weld },

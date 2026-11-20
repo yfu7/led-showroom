@@ -9,7 +9,7 @@ import { createDocument, createEquipment, createLedWall, createStage } from '../
 import type {
   Document, Entity, EquipmentEntity, GroupEntity, LedWallEntity, StageEntity,
 } from '../document/types';
-import { computeColumnLayout, filledCells, wallDims, wallMountPoints } from './layout';
+import { columnLocalToWall, computeColumnLayout, filledCells, wallDims, wallMountPoints } from './layout';
 import { IPOSTER } from './specs';
 import { applyTrussRig, planTrussRig, rigEntityIds, RIG_GROUP_NAME, SHIM_MAX_IN } from './trussRig';
 
@@ -555,6 +555,60 @@ describe('planTrussRig', () => {
     expect(plan.shortfall.find(f => f.catalogId === 'gp-truss-8ft')).toMatchObject({ need: 6, have: 3 });
     expect(plan.spans.filter(s => s.ghost).map(s => s.dims[0])).toEqual([96, 96, 96]);
     expect([plan.supported, plan.columns]).toEqual([29, 29]);
+  });
+
+  it('keeps a plate out of a doorway round a fold, and off the floor a plate either side of it', () => {
+    // Open at the floor: column 2 of the first wall, beside its 120 degree fold, and column 3 of the
+    // second, just past its 90 degree fold. A plate behind the run on the other side of the fold can
+    // reach round onto the floor of the opening, or the floor just in front of or behind it.
+    const tight = createLedWall({ cols: 5, rows: 3 });
+    tight.corners = [{ afterCol: 2, angle: 120 }];
+    tight.shape = { mode: 'custom', cells: ['0,0', '1,1', '1,2', '3,0', '3,1', '3,2', '4,0', '4,1', '4,2'] };
+    const square = createLedWall({ cols: 4, rows: 3 });
+    square.corners = [{ afterCol: 2, angle: 90 }];
+    square.shape = { mode: 'custom', cells: ['0,0', '0,1', '0,2', '1,0', '1,1', '1,2', '2,0', '2,1', '2,2', '3,0'] };
+
+    /** Whether two convex outlines on the floor are apart, touching allowed. */
+    const apart = (a: THREE.Vector3[], b: THREE.Vector3[]): boolean => [a, b].some(poly => poly.some((p, i) => {
+      const q = poly[(i + 1) % poly.length];
+      const [ax, az] = [p.z - q.z, q.x - p.x];
+      const pa = a.map(v => v.x * ax + v.z * az), pb = b.map(v => v.x * ax + v.z * az);
+      return Math.max(...pa) <= Math.min(...pb) + 1e-6 || Math.max(...pb) <= Math.min(...pa) + 1e-6;
+    }));
+
+    for (const wall of [tight, square]) {
+      const doc = docWith(wall);
+      const after = applyTrussRig(doc, wall, planTrussRig(doc, wall));
+      const world = worldMatrix(wallOf(after, wall.id), byIdOf(after));
+      const layout = computeColumnLayout(wallDims(wall), wall.corners);
+      const cells = new Set(filledCells(wall));
+      const plates = rigOf(after, wall.id).filter(e => e.geometry === 'truss-base');
+      for (let c = 0; c < wall.cols; c++) {
+        if (cells.has(`${c},${wall.rows - 1}`)) continue;
+        // Between the jambs, from a plate's width in front of the face to a plate's width behind the back.
+        const door = [[-PW / 2, PD / 2 + 36], [PW / 2, PD / 2 + 36], [PW / 2, -PD / 2 - 36], [-PW / 2, -PD / 2 - 36]]
+          .map(([x, z]) => new THREE.Vector3(...columnLocalToWall(layout[c], x, 0, z)).applyMatrix4(world));
+        for (const p of plates) {
+          const [w, , d] = p.dims;
+          const plate = [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]].map(([x, z]) => at(after, p, x, 0, z));
+          expect(apart(plate, door), `${p.name} reaches into the doorway of column ${c}`).toBe(true);
+        }
+      }
+    }
+    expect(planTrussRig(docWith(square), square).legs.length).toBeGreaterThan(0);
+  });
+
+  it('counts only the columns with cabinets in them', () => {
+    // Two 2 x 3 piers with an empty column between them. Three rows stand under 8 ft, so a tower on
+    // either column of a pier holds both: four columns, all held, none out of reach.
+    const wall = createLedWall({ cols: 5, rows: 3 });
+    const cells: string[] = [];
+    for (const c of [0, 1, 3, 4]) for (let r = 0; r < 3; r++) cells.push(`${c},${r}`);
+    wall.shape = { mode: 'custom', cells };
+    const plan = planTrussRig(docWith(wall), wall);
+
+    expect([plan.supported, plan.columns]).toEqual([4, 4]);
+    expect(plan.warnings.some(w => w.includes('out of reach'))).toBe(false);
   });
 
   it('keeps tower plates clear of each other across a fold', () => {
