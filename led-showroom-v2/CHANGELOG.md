@@ -38,10 +38,13 @@ over its doorways, gets three legs and spans of 8 + 8 + 8 + 3 + 3 ft (30 ft) and
 Known limits: a one-row wall still gets no rig. The shortest leg, a plate and a 3 ft stick, is 37 in,
 and one row on the plates stands 19.9 in. On three rows no leg lands a header within the shim, and a
 braced frame holds fewer columns than towers, so three-row walls stay on towers with some columns
-hanging. On that arch, no placement of legs on the foot grid takes a coupler on the last column. With
-bezels off, an 11 x 8 now frames on legs of plate, two 3 ft sticks and two blocks over a 0.03 in shim,
-which takes 8 blocks of our 6. Spans past 20 ft are drawn but not rated. The number of 3 ft sticks we
-own is not recorded.
+hanging. On that arch, no placement of legs on the foot grid takes a coupler on the last column. An
+arch still gets towers alone, its doorway columns hanging, where a pier is one column wide or the
+lintel one row deep: a 36 in plate cannot stand behind a single 25.2 in column without reaching into
+the doorway beside it, and no leg lands a header on a single lintel row within the shim. With bezels
+off, an 11 x 8 now frames on legs of plate, two 3 ft sticks and two blocks over a 0.03 in shim, every
+column held, which takes 8 blocks of our 6. Spans past 20 ft are drawn but not rated. The number of
+3 ft sticks we own is not recorded.
 
 ## 2.3.0 — 2026-11-19
 
