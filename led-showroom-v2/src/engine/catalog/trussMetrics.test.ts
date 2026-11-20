@@ -97,12 +97,13 @@ describe('clearOfBraceNodes', () => {
   const SPAN = 35.5;                                      // a chord three bays long
 
   it('rejects a jaw that would land on the end-frame weld', () => {
-    // 0.69685 in up the chord is the lowest mount hole of a wall standing on the floor, and the
-    // weld is at 0.49213: 0.20 in apart against a 1.12 in keep-out.
-    expect(clearOfBraceNodes(0.69685, SPAN, GP, JAW_HALF)).toBe(false);
+    // A wall on the base plates starts level with a leg's first stick, so its lowest mount hole is
+    // 1.19685 in up the chord, and the weld is at 0.49213: 0.70 in apart against a 1.12 in keep-out.
+    expect(clearOfBraceNodes(1.19685, SPAN, GP, JAW_HALF)).toBe(false);
   });
 
-  it('takes it an inch higher, which is why the wall rises', () => {
+  it('clears it half an inch higher, just past the keep-out', () => {
+    // 1.20 in from the weld.
     expect(clearOfBraceNodes(1.69685, SPAN, GP, JAW_HALF)).toBe(true);
   });
 
