@@ -18,6 +18,7 @@ import { walls as docWalls } from '@/engine/document/Document';
 import { cmdUpdateEntities } from '@/engine/commands/entity';
 import { TransformSection } from '@/app/panels/TransformSection';
 import { CornersSection } from '@/app/panels/CornersSection';
+import { TrussSection } from '@/app/panels/TrussSection';
 import { ShapeEditor } from '@/app/panels/ShapeEditor';
 import { ContentPanel } from '@/app/panels/ContentPanel';
 import { SpecsSection } from '@/app/panels/SpecsSection';
@@ -137,6 +138,8 @@ export function LedWallInspector({ wall }: Props) {
       </Section>
 
       <CornersSection wall={wall} />
+
+      <TrussSection wall={wall} />
 
       <Section title="Display" id="wall-display">
         <ToggleRow label="Bezels" checked={wall.bezels} onChange={v => patch({ bezels: v }, v ? 'Show bezels' : 'Hide bezels')} hint="Show the seam between panels" />

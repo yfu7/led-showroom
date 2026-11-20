@@ -30,6 +30,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   { group: 'Tools', label: 'Measure', keys: ['M'] },
   { group: 'Tools', label: 'Drag content', keys: ['C'] },
   { group: 'Tools', label: 'Edit wall shape', keys: ['Shift+S'] },
+  { group: 'Tools', label: 'Build truss', keys: ['Shift+T'] },
   { group: 'Tools', label: 'Walk mode', keys: ['Shift+W'] },
 
   { group: 'Objects', label: 'Deselect', keys: ['Esc'] },
@@ -143,6 +144,11 @@ export function useGlobalShortcuts(engine: Engine | null): void {
         if (key === 's') {
           const sel = engine.primarySelection;
           if (isLedWall(sel)) { engine.tools.activate(engine.tools.activeId === 'shape' ? 'select' : 'shape'); return handled(); }
+          return;
+        }
+        if (key === 't') {
+          // A wall, or a piece of a wall's rig: the tool finds the wall either way.
+          if (engine.primarySelection) { engine.tools.activate(engine.tools.activeId === 'truss' ? 'select' : 'truss'); return handled(); }
           return;
         }
         if (key === 'w') { engine.camera.setFlyMode(!engine.camera.flyMode); return handled(); }

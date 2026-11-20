@@ -339,6 +339,7 @@ function migrateTyped(raw: Record<string, unknown>, e: Record<string, unknown>):
     case 'group': {
       const rigFor = optStr(raw.rigFor);
       if (rigFor !== undefined) e.rigFor = rigFor; else delete e.rigFor;
+      if (raw.rigHand === true) e.rigHand = true; else delete e.rigHand;
       return e;
     }
     default:

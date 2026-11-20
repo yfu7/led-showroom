@@ -1,7 +1,7 @@
 /** Tool contract + pointer dispatch. Tools own the left mouse button; the camera rig gets the rest. */
 import * as THREE from 'three';
 
-export type ToolId = 'select' | 'move' | 'rotate' | 'scale' | 'measure' | 'calibrate' | 'content' | 'shape' | 'add' | 'walk';
+export type ToolId = 'select' | 'move' | 'rotate' | 'scale' | 'measure' | 'calibrate' | 'content' | 'shape' | 'truss' | 'add' | 'walk';
 
 export interface PointerInfo {
   event: PointerEvent;

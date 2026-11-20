@@ -226,6 +226,11 @@ export interface GroupEntity extends EntityBase {
    * strand the rig the moment anyone renamed the group, and leave a second one behind.
    */
   rigFor?: string;
+  /**
+   * The rig was put up by hand in the truss builder, not planned by Auto truss. Auto truss asks
+   * before it replaces one, since it would throw the hand work away.
+   */
+  rigHand?: boolean;
 }
 
 export type Entity = LedWallEntity | StageEntity | EquipmentEntity | ModelEntity | SplatEntity | RoomEntity | DimensionEntity | GroupEntity;

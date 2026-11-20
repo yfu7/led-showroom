@@ -6,6 +6,7 @@ import { MeasureTool } from './MeasureTool';
 import { CalibrateTool } from './CalibrateTool';
 import { ContentDragTool } from './ContentDragTool';
 import { ShapeTool } from './ShapeTool';
+import { TrussBuildTool } from './TrussBuildTool';
 
 export function registerDefaultTools(engine: Engine): void {
   const t = engine.tools;
@@ -17,7 +18,8 @@ export function registerDefaultTools(engine: Engine): void {
   t.register(new CalibrateTool(engine));
   t.register(new ContentDragTool(engine));
   t.register(new ShapeTool(engine));
+  t.register(new TrussBuildTool(engine));
 }
 
 export type { ToolId, Tool } from './Tool';
-export { SelectTool, TransformTool, MeasureTool, CalibrateTool, ContentDragTool, ShapeTool };
+export { SelectTool, TransformTool, MeasureTool, CalibrateTool, ContentDragTool, ShapeTool, TrussBuildTool };

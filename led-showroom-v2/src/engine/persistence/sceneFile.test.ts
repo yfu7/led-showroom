@@ -362,6 +362,17 @@ describe('migrateDocument', () => {
       expect('rigFor' in junk).toBe(false);
       expect('rigFor' in plain).toBe(false);
     });
+    it('group: a rig built by hand stays marked as built by hand', () => {
+      // Auto truss asks before replacing a hand-built rig; lose the mark and it replaces it unasked.
+      const [hand, junk, auto] = ents([
+        { type: 'group', name: 'Truss rig', rigFor: 'wall-7', rigHand: true },
+        { type: 'group', name: 'Truss rig', rigFor: 'wall-7', rigHand: 'yes' },
+        { type: 'group', name: 'Truss rig', rigFor: 'wall-7' },
+      ]) as GroupEntity[];
+      expect(hand.rigHand).toBe(true);
+      expect('rigHand' in junk).toBe(false);
+      expect('rigHand' in auto).toBe(false);
+    });
   });
 });
 

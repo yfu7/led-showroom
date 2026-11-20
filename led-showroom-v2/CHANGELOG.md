@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Build truss: put a wall's rig up by hand, a piece at a time
+
+**Build truss** (Shift+T, the wall's right-click menu, or the Truss section of its inspector) puts
+the rig up from the DT-GP stock one piece at a time.
+
+- **The palette** is the 3 ft stick (to buy), the 4, 5 and 8 ft sticks, the six-way block and the
+  base plate, each with how many are left; keys 1 to 6 pick one. A piece past the stock goes up as
+  a ghost. F34 is not offered: it does not connect to DT-GP.
+- **Point** at an open face of a piece already up (a block has six) and the piece in hand shows
+  there, green where it can go and red where it cannot, with the reason in the panel. A base plate
+  goes on the floor behind the cabinets, snapped a whole number of sticks from a leg already behind
+  the run, else to a line of bolt holes.
+- **Click** (or Enter) puts it up. Its couplers come with it, and the wall is raised onto the plates
+  and shimmed onto the holes as Auto truss does it.
+- **F** fills the gap from a block's side to the block across from it with sticks that close it
+  exactly, picked as Auto truss picks a span's sticks: columns held, then sticks on hand, then
+  couplers, then the fewest sticks.
+- **Right-click** a piece to take it down, with anything that stood only on it. A stick is found by
+  its solid box, so a click between its lattice tubes still takes it.
+- Every step is one undo.
+
+Built by hand on the 30 x 7 arch (the three legs Auto truss stands, then F across both doorways),
+the rig closes on Auto truss's shim and holds as many columns, from the sticks on hand.
+
+A rig put up or changed by hand is marked so in the scene file. **Rebuild truss rig** asks before
+it plans over one; undo puts the hand-built rig back.
+
 ### Auto truss: a walk-through arch gets its header, on a 3 ft stick to buy
 
 **The base plate is 1.5 in thick**, as measured, where the catalog had it about an inch. Every rig

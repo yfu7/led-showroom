@@ -17,6 +17,7 @@ import { importV1Presets } from '@/engine/persistence/presets';
 import { exportSceneFile, importSceneFile, downloadBlob, sceneFileName } from '@/engine/persistence/sceneFile';
 import { listStoredScenes } from '@/engine/persistence/sceneStore';
 import { ClearSceneDialog, requestClearScene } from './ClearSceneDialog';
+import { ConfirmDialog } from './ConfirmDialog';
 import { GodPinDialog } from './GodMode';
 
 
@@ -177,6 +178,7 @@ export function TopBar() {
       />
 
       <ClearSceneDialog />
+      <ConfirmDialog />
       <GodPinDialog />
       {dialog === 'image' && <SaveImageDialog onClose={closeDialog} />}
       {dialog === 'video' && <RecordVideoDialog onClose={closeDialog} />}

@@ -6,12 +6,12 @@
  * whose effect is off screen (isolate, select-all-of-type, paste) raises a toast.
  */
 import {
-  ArrowDown, ArrowDownToLine, ArrowUp, Box, Construction, Copy, CopyPlus, Eraser, Eye, EyeOff, Focus, Grid2x2, Layers,
+  ArrowDown, ArrowDownToLine, ArrowUp, Box, Construction, Copy, CopyPlus, Eraser, Eye, EyeOff, Focus, Grid2x2, Hammer, Layers,
   Lock, LockOpen,
   Maximize2, Monitor, MousePointer2, Pencil, Plus, RotateCcw, Ruler, Scissors, Shapes, Trash2, X,
 } from 'lucide-react';
 import type { Engine } from '@/engine/Engine';
-import type { Entity, EntityType, LedWallEntity, StageEntity } from '@/engine/document/types';
+import type { Entity, EntityType, GroupEntity, LedWallEntity, StageEntity } from '@/engine/document/types';
 import { isLedWall, isStage } from '@/engine/document/types';
 import { cmdAddEntities, cmdPatchDocument, cmdUpdateEntities } from '@/engine/commands/entity';
 import { descendants, uniqueName } from '@/engine/document/Document';
@@ -29,6 +29,7 @@ import { instantiateCatalogItem } from '@/app/panels/Catalog';
 import { buildCatalog, catalogGroups, GROUP_LED, GROUP_STAGING, GROUP_VENUE } from '@/app/panels/catalogItems';
 import { addWindow, clearWindowSource, duplicateWindow, moveWindow, removeWindow } from '@/app/panels/contentActions';
 import { requestClearScene } from '@/app/shell/ClearSceneDialog';
+import { requestConfirm } from '@/app/shell/ConfirmDialog';
 
 const DEG = Math.PI / 180;
 
@@ -265,6 +266,12 @@ function wallSection(engine: Engine, wall: LedWallEntity): MenuItem[] {
       icon: <Construction />,
       onSelect: () => autoTruss(engine, wall),
     },
+    {
+      label: 'Build truss',
+      icon: <Hammer />,
+      kbd: 'Shift+T',
+      onSelect: () => { if (!engine.isSelected(wall.id)) engine.select([wall.id]); engine.tools.activate('truss'); },
+    },
     ...rigItems,
   ];
 }
@@ -284,6 +291,21 @@ function wallSection(engine: Engine, wall: LedWallEntity): MenuItem[] {
  * old ones.
  */
 function autoTruss(engine: Engine, wall: LedWallEntity): void {
+  const rig = engine.doc.entities.find((e): e is GroupEntity => e.type === 'group' && e.rigFor === wall.id);
+  if (!rig?.rigHand) { planAndApply(engine, wall); return; }
+  // A rig put up by hand is work Auto truss would throw away: ask first.
+  requestConfirm({
+    title: 'Replace the rig built by hand?',
+    body: 'Auto truss plans the rig over from scratch, so every piece put up by hand comes down. Undo puts them back.',
+    confirm: 'Replace with Auto truss',
+    onConfirm: () => {
+      const live = engine.entity<LedWallEntity>(wall.id);
+      if (live) planAndApply(engine, live);
+    },
+  });
+}
+
+function planAndApply(engine: Engine, wall: LedWallEntity): void {
   const plan = planTrussRig(engine.doc, wall);
   if (!plan.legs.length) {
     engine.toast('error', plan.warnings[0] ?? 'There is nothing on this wall to bolt a coupler into.');

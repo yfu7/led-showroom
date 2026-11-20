@@ -70,6 +70,7 @@ const HINTS: Partial<Record<ToolId, string>> = {
   scale: '[W]/[E]/[R] switch · [X] local/world · [Ctrl] inverts snapping',
   content: 'Drag the selected content window across the wall surface · [Esc] to exit',
   shape: 'Click cells to add or remove panels · Drag to paint · [Shift+S] to exit',
+  truss: '[1]-[6] pick a piece · Click to put it up · Right-click a piece to take it down · [F] fill a gap · [Esc] done',
   add: 'Click the floor to place · [Esc] to cancel',
 };
 const WALK_HINT = '[W][A][S][D] move · [Q][E] up/down · Drag to look · [Shift] faster · [Shift+W] exit';

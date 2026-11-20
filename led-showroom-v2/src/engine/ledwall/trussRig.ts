@@ -58,18 +58,18 @@ import { mountHoles, panelSpec } from './specs';
 
 const DEG = 180 / Math.PI;
 
-const BASE_ID = 'gp-base-36';
-const BLOCK_ID = 'gp-corner-6way';
+export const BASE_ID = 'gp-base-36';
+export const BLOCK_ID = 'gp-corner-6way';
 /** DT-GP stock. The catalog dims are for a stick lying down; a leg stands them on end. */
-const STICK_IDS = ['gp-truss-8ft', 'gp-truss-5ft', 'gp-truss-4ft'] as const;
+export const STICK_IDS = ['gp-truss-8ft', 'gp-truss-5ft', 'gp-truss-4ft'] as const;
 /**
  * DT-GP sticks we hold none of. Only a frame's leg takes one, and only where it lands the header on
  * a row of holes: a rig that takes one is drawn with it as a ghost, a stick to buy, and is chosen
  * only when it holds more columns than any rig of our own sticks. Over a walk-through arch's
  * five-row doorways, a 4 ft and a 3 ft under a spare block put the header on the lintel's low holes.
  */
-const BUY_STICK_IDS = ['gp-truss-3ft'] as const;
-const CLAMP_ID = 'clamp-8002';
+export const BUY_STICK_IDS = ['gp-truss-3ft'] as const;
+export const CLAMP_ID = 'clamp-8002';
 
 export const RIG_GROUP_NAME = 'Truss rig';
 
@@ -89,7 +89,7 @@ const MAX_LEG_STICKS = 4;
 /** Most sticks spliced into one span across an opening: eight 8 ft sticks is 64 ft. */
 const MAX_SPAN_STICKS = 8;
 /** Where the DT-GP span table stops, in inches: a longer span wants its own check. */
-const SPAN_TABLE_IN = 240;
+export const SPAN_TABLE_IN = 240;
 /**
  * How high a coupled column's top may stand above the plates and still hold a column each side of
  * it, in inches; one taller holds only the column beside its couplers. An 8 ft stick: a wall of
@@ -266,14 +266,14 @@ function overlaps(a: Footprint, b: Footprint): boolean {
 }
 
 /** A vertical line of mount holes: one column, one side. */
-interface HoleLine { col: number; u: number; side: number; mounts: MountPoint[] }
+export interface HoleLine { col: number; u: number; side: number; mounts: MountPoint[] }
 
 /**
  * A flat stretch of the wall between folds, with its own frame: `u` runs along it from the centre
  * of its first column's back face, `U` is that direction in the world and `N` points straight back
  * out of the cabinets.
  */
-interface Run {
+export interface Run {
   start: number; end: number;
   yaw: number;
   U: THREE.Vector3; N: THREE.Vector3; origin: THREE.Vector3;
@@ -290,31 +290,22 @@ interface FrameLayout { run: number; legsU: number[]; spans: number[][] }
 interface LegStack { sticks: number[]; spacers: number; rise: number }
 
 /** A chord a jaw can close on, in world y. */
-interface ChordSpan { footY: number; len: number }
+export interface ChordSpan { footY: number; len: number }
 
 /* ───────────────────────────── planning ───────────────────────────── */
 
 /**
- * Plan a rig for `wall`. Always returns a plan; an empty one carries the reason in `warnings` and
- * leaves the wall where it is.
- *
- * Everything resolves to WORLD space, through the wall's composed `parentId` chain, because the rig
- * is hardware standing on the floor rather than part of the wall: it keeps its own real size
- * whatever the wall is nested in or scaled to.
+ * Everything about a wall a rig is planned or built against, in WORLD space: its runs and hole lines,
+ * the stock's measures, where the legs stand on, and the checks every rig keeps -- what shows from the
+ * front, round a fold too, where a plate may stand, which holes a stick's chords meet, and which
+ * columns a coupler holds. Auto truss plans with it, and the truss builder places pieces by it, so the
+ * two never disagree on a coupler. A wall nothing can be bolted to gets `fail`, with why.
  */
-export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
-  const warnings: string[] = [];
-  const empty = (bottomY = 0): TrussRigPlan => ({
-    wallId: wall.id, legs: [], spans: [], clamps: [], frames: 0, headerY: null,
-    liftIn: 0, liftLocalIn: 0, bottomY, shimIn: 0, dropAccessories: false,
-    held: 0, supported: 0, columns: 0, ghosts: 0, shortfall: [], skipped: { offFace: 0, weld: 0 }, warnings,
-  });
-
+export function rigContext(doc: Document, wall: LedWallEntity) {
   const spec = panelSpec(wall.product);
   const holes = mountHoles(spec);
   if (!holes.length || spec.mount?.face !== 'back') {
-    warnings.push('This panel has no mount holes in its back face, so there is nothing to bolt a coupler into.');
-    return empty();
+    return { fail: 'This panel has no mount holes in its back face, so there is nothing to bolt a coupler into.', bottomY: 0 };
   }
 
   const baseDef = equipmentDef(BASE_ID);
@@ -322,8 +313,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   const clampDef = equipmentDef(CLAMP_ID);
   const stickDefs = STICK_IDS.map(id => equipmentDef(id)).filter((d): d is EquipmentDef => !!d);
   if (!baseDef || !blockDef || !clampDef || !stickDefs.length) {
-    warnings.push('The DT-GP truss, its base and block, or the 8002 coupler is missing from the catalog.');
-    return empty();
+    return { fail: 'The DT-GP truss, its base and block, or the 8002 coupler is missing from the catalog.', bottomY: 0 };
   }
 
   const section = stickDefs[0].dims[1];
@@ -341,12 +331,6 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   const buyIds = new Set(buyDefs.map(d => d.id));
   const stickOf = (len: number): EquipmentDef =>
     stickDefs.find(d => d.dims[0] === len) ?? buyDefs.find(d => d.dims[0] === len) ?? stickDefs[0];
-  /**
-   * The shortest leg with a chord a coupler can close on: a base that stands a riser of its own,
-   * otherwise the base plate and the shortest stick. A column whose top is lower hides no leg.
-   */
-  const shortestStick = Math.min(...stickLens);
-  const shortestLeg = baseH + (base.riserLen > EPS ? 0 : shortestStick);
 
   // The wall's world placement. A tilted or unevenly scaled wall has no vertical line of holes for a
   // vertical chord to follow, so there is nothing honest to generate.
@@ -355,12 +339,10 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   const wPos = new THREE.Vector3(), wQuat = new THREE.Quaternion(), wScale = new THREE.Vector3();
   world.decompose(wPos, wQuat, wScale);
   if (Math.abs(wScale.x - wScale.y) > 1e-4 || Math.abs(wScale.y - wScale.z) > 1e-4 || wScale.x <= 0) {
-    warnings.push('The wall is scaled unevenly, which turns its hole normals out of true. Reset its scale first.');
-    return empty();
+    return { fail: 'The wall is scaled unevenly, which turns its hole normals out of true. Reset its scale first.', bottomY: 0 };
   }
   if (Math.abs(wQuat.x) > 1e-4 || Math.abs(wQuat.z) > 1e-4) {
-    warnings.push('The wall is tilted. A vertical chord cannot follow a tilted line of holes, so level it first.');
-    return empty();
+    return { fail: 'The wall is tilted. A vertical chord cannot follow a tilted line of holes, so level it first.', bottomY: 0 };
   }
   const s = wScale.y;
   const wallYaw = yawOf(wQuat);
@@ -390,10 +372,10 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   const onFace = mounts.filter(m => m.onFace);
   const offFace = mounts.length - onFace.length;
   if (!onFace.length) {
-    warnings.push(mounts.length
-      ? 'Every mount hole on this wall is cut away by a mitre.'
-      : 'This wall has no cabinets with mount holes.');
-    return empty(currentBottom);
+    return {
+      fail: mounts.length ? 'Every mount hole on this wall is cut away by a mitre.' : 'This wall has no cabinets with mount holes.',
+      bottomY: currentBottom,
+    };
   }
 
   const step = dims.panelW + dims.gap;
@@ -711,6 +693,115 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   };
 
   /**
+   * The columns couplers in column `c`'s hole line on `side` hold: `c`, and the columns bolted to
+   * it -- beside it in the same run, sharing a row of cabinets with it. Both of those while `c`'s
+   * top stands no higher than {@link TALL_IN} above the plates, only the one on `side` above that.
+   */
+  const joined = (a: number, b: number): boolean => b >= 0 && b < layout.length && runOfCol[a] === runOfCol[b]
+    && [...Array(dims.rows).keys()].some(r => cells.has(cellKey(layout[a].col, r)) && cells.has(cellKey(layout[b].col, r)));
+  const holdsBy = layout.map((_, c) => {
+    const beside = (d: number): number[] => (joined(c, c + d) ? [c + d] : []);
+    const top = bands[c].length ? bands[c][bands[c].length - 1][1] : 0;
+    const both = [...beside(-1), c, ...beside(1)];
+    return top > TALL_IN + EPS ? { left: [...beside(-1), c], right: [c, ...beside(1)] } : { left: both, right: both };
+  });
+  const holdsOf = (c: number, side: number): readonly number[] => (side < 0 ? holdsBy[c].left : holdsBy[c].right);
+
+  /**
+   * Every hole on a line one of the front chords of a vertical stick at `u` runs down, with the wall's
+   * bottom at `bottomY`, and the ones a weld blocks. `chords` are the stick's (or a base riser's)
+   * lengths a jaw can close on: never a block's.
+   */
+  const legHitsAt = (bottomY: number, run: Run, u: number, chords: readonly ChordSpan[]) => {
+    const hits: { l: HoleLine; m: MountPoint; y: number; col: number; side: number }[] = [];
+    let welds = 0;
+    for (const l of run.lines) {
+      if (!onLegChord(l.u, u)) continue;
+      for (const m of l.mounts) {
+        const y = bottomY + s * m.pos[1];
+        const span = chords.find(q => y >= q.footY - 1e-6 && y <= q.footY + q.len + 1e-6);
+        if (!span) continue;
+        if (!clearOfBraceNodes(y - span.footY, span.len, section, jawHalf)) welds++;
+        else if (clampClear(l, m, false)) hits.push({ l, m, y, col: l.col, side: l.side });
+      }
+    }
+    return { hits, welds };
+  };
+
+  /**
+   * Holes a run of horizontal sticks, laid end to end along `run` from `from`, put on one of its front
+   * chords at `chordYs`, with the wall's bottom at `bottomY`, and those a weld blocks.
+   */
+  const spanHitsAt = (bottomY: number, run: Run, from: number, sticks: readonly number[], chordYs: readonly number[]) => {
+    const hits: { l: HoleLine; m: MountPoint; y: number; col: number; side: number; chordY: number }[] = [];
+    let welds = 0;
+    for (let i = 0, p = from; i < sticks.length; p += sticks[i], i++) {
+      const len = sticks[i];
+      for (const l of run.lines) {
+        const along = l.u - p;
+        if (along <= 0 || along >= len) continue;
+        for (const m of l.mounts) {
+          const y = bottomY + s * m.pos[1];
+          const chordY = chordYs.find(cy => Math.abs(cy - y) < EPS);
+          if (chordY === undefined) continue;
+          if (!clearOfBraceNodes(along, len, section, jawHalf)) welds++;
+          else if (clampClear(l, m, true)) hits.push({ l, m, y, col: l.col, side: l.side, chordY });
+        }
+      }
+    }
+    return { hits, welds };
+  };
+
+  return {
+    spec, holes, baseDef, blockDef, clampDef, stickDefs, section, co, chordR, jawHalf, depth, base, baseH,
+    plateSize, blockH, stickLens, buyDefs, buyIds, stickOf, byId, world, s, wallYaw, toWorld, currentBottom,
+    supportY, plateTop, dropAccessories, dims, layout, cells, mounts, onFace, offFace, step, solidRows, hiddenRise,
+    fullRise, runs, at, onLegChord, extentOf, bands, runOfCol, folded, colFrames, inCol, cuts, ivCount, coverIv,
+    ivRange, anyIn, exposed, foldBlocked, blame, bandShows, legShows, spanShows, clampClear, lineClear, doorways,
+    plateClear, joined, holdsOf, legHitsAt, spanHitsAt,
+  };
+}
+
+/** A wall a rig can stand behind, measured. */
+export type RigContext = Extract<ReturnType<typeof rigContext>, { fail?: undefined }>;
+
+/**
+ * Plan a rig for `wall`. Always returns a plan; an empty one carries the reason in `warnings` and
+ * leaves the wall where it is.
+ *
+ * Everything resolves to WORLD space, through the wall's composed `parentId` chain, because the rig
+ * is hardware standing on the floor rather than part of the wall: it keeps its own real size
+ * whatever the wall is nested in or scaled to.
+ */
+export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
+  const warnings: string[] = [];
+  const empty = (bottomY = 0): TrussRigPlan => ({
+    wallId: wall.id, legs: [], spans: [], clamps: [], frames: 0, headerY: null,
+    liftIn: 0, liftLocalIn: 0, bottomY, shimIn: 0, dropAccessories: false,
+    held: 0, supported: 0, columns: 0, ghosts: 0, shortfall: [], skipped: { offFace: 0, weld: 0 }, warnings,
+  });
+
+  const ctx = rigContext(doc, wall);
+  if (ctx.fail !== undefined) {
+    warnings.push(ctx.fail);
+    return empty(ctx.bottomY);
+  }
+  const {
+    spec, holes, baseDef, blockDef, clampDef, stickDefs, section, co, chordR, jawHalf, depth, base, baseH,
+    plateSize, blockH, stickLens, buyDefs, buyIds, stickOf, byId, world, s, wallYaw, toWorld, currentBottom,
+    supportY, plateTop, dropAccessories, dims, layout, cells, mounts, onFace, offFace, step, solidRows, hiddenRise,
+    fullRise, runs, at, onLegChord, extentOf, bands, runOfCol, folded, colFrames, inCol, cuts, ivCount, coverIv,
+    ivRange, anyIn, exposed, foldBlocked, blame, bandShows, legShows, spanShows, clampClear, lineClear, doorways,
+    plateClear, joined, holdsOf, legHitsAt, spanHitsAt,
+  } = ctx;
+  /**
+   * The shortest leg with a chord a coupler can close on: a base that stands a riser of its own,
+   * otherwise the base plate and the shortest stick. A column whose top is lower hides no leg.
+   */
+  const shortestStick = Math.min(...stickLens);
+  const shortestLeg = baseH + (base.riserLen > EPS ? 0 : shortestStick);
+
+  /**
    * Where a tower could stand behind each column, per run: a front chord on one of the column's
    * hole lines, the whole section behind the column, the plate out of the doorways.
    */
@@ -746,21 +837,6 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     }
     return could.size;
   };
-
-  /**
-   * The columns couplers in column `c`'s hole line on `side` hold: `c`, and the columns bolted to
-   * it -- beside it in the same run, sharing a row of cabinets with it. Both of those while `c`'s
-   * top stands no higher than {@link TALL_IN} above the plates, only the one on `side` above that.
-   */
-  const joined = (a: number, b: number): boolean => b >= 0 && b < layout.length && runOfCol[a] === runOfCol[b]
-    && [...Array(dims.rows).keys()].some(r => cells.has(cellKey(layout[a].col, r)) && cells.has(cellKey(layout[b].col, r)));
-  const holdsBy = layout.map((_, c) => {
-    const beside = (d: number): number[] => (joined(c, c + d) ? [c + d] : []);
-    const top = bands[c].length ? bands[c][bands[c].length - 1][1] : 0;
-    const both = [...beside(-1), c, ...beside(1)];
-    return top > TALL_IN + EPS ? { left: [...beside(-1), c], right: [c, ...beside(1)] } : { left: both, right: both };
-  });
-  const holdsOf = (c: number, side: number): readonly number[] => (side < 0 ? holdsBy[c].left : holdsBy[c].right);
 
   /** How far a mix of sticks runs past what we own, so a layout can prefer what we hold. */
   const owned = (len: number): number => ownedCount(stickOf(len)) ?? Infinity;
@@ -1183,43 +1259,9 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
       return { axis, pieces, chords, topY: y };
     };
 
-    /** Every hole on a line one of the leg's front chords runs down, and the ones a weld blocks. */
-    const legHits = (run: Run, u: number, chords: readonly ChordSpan[]) => {
-      const hits: { m: MountPoint; y: number; col: number; side: number }[] = [];
-      let welds = 0;
-      for (const l of run.lines) {
-        if (!onLegChord(l.u, u)) continue;
-        for (const m of l.mounts) {
-          const y = bottomY + s * m.pos[1];
-          const span = chords.find(q => y >= q.footY - 1e-6 && y <= q.footY + q.len + 1e-6);
-          if (!span) continue;
-          if (!clearOfBraceNodes(y - span.footY, span.len, section, jawHalf)) welds++;
-          else if (clampClear(l, m, false)) hits.push({ m, y, col: l.col, side: l.side });
-        }
-      }
-      return { hits, welds };
-    };
-
-    /** Holes a span's sticks, laid end to end from `from`, put on a header chord, and those a weld blocks. */
-    const spanHits = (run: Run, from: number, sticks: readonly number[], chordYs: readonly number[]) => {
-      const hits: { m: MountPoint; y: number; col: number; side: number; chordY: number }[] = [];
-      let welds = 0;
-      for (let i = 0, p = from; i < sticks.length; p += sticks[i], i++) {
-        const len = sticks[i];
-        for (const l of run.lines) {
-          const along = l.u - p;
-          if (along <= 0 || along >= len) continue;
-          for (const m of l.mounts) {
-            const y = bottomY + s * m.pos[1];
-            const chordY = chordYs.find(cy => Math.abs(cy - y) < EPS);
-            if (chordY === undefined) continue;
-            if (!clearOfBraceNodes(along, len, section, jawHalf)) welds++;
-            else if (clampClear(l, m, true)) hits.push({ m, y, col: l.col, side: l.side, chordY });
-          }
-        }
-      }
-      return { hits, welds };
-    };
+    const legHits = (run: Run, u: number, chords: readonly ChordSpan[]) => legHitsAt(bottomY, run, u, chords);
+    const spanHits = (run: Run, from: number, sticks: readonly number[], chordYs: readonly number[]) =>
+      spanHitsAt(bottomY, run, from, sticks, chordYs);
 
     const UP = new THREE.Vector3(0, 1, 0);
     const blockY = stack ? supportY + baseH + stack.rise : null;
@@ -1479,7 +1521,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
  * has to land IN the hole, and a sign slipped in an Euler is invisible until a coupler is floating
  * in mid air.
  */
-function clampPiece(def: EquipmentDef, hole: THREE.Vector3, chord: THREE.Vector3, normal: THREE.Vector3): RigPiece {
+export function clampPiece(def: EquipmentDef, hole: THREE.Vector3, chord: THREE.Vector3, normal: THREE.Vector3): RigPiece {
   const [, h, d] = def.dims;
   const xAxis = chord.clone().normalize();
   const zAxis = normal.clone().normalize();
