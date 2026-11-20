@@ -19,6 +19,11 @@
  *
  * A take always contains at least one frame: the first composite is encoded synchronously at the end
  * of setup, so a Record→Stop double-click or a hidden tab (no rAF) still produces a valid file.
+ *
+ * A codec the browser says it supports can still put nothing in the file: a hardware encoder that
+ * returns no chunks, or chunks the muxer will not take. So each candidate first encodes the first
+ * frame into a throwaway muxer and is only used if that comes out as a file; otherwise the next one
+ * is tried, then MediaRecorder, and the person is told which it fell back to and why.
  */
 import { ArrayBufferTarget, Muxer } from 'mp4-muxer';
 import type { Engine } from '../Engine';
@@ -86,6 +91,65 @@ async function pickCodec(width: number, height: number, bitrate: number, framera
   return null;
 }
 
+/** A codec the browser says it cannot encode at the size: the usual fall-through, not worth a word. */
+export const NOT_SUPPORTED = 'not supported at this size';
+
+/** Why a candidate would not do, or null where it puts a frame in a file. */
+export type EncoderProbe = (cc: CodecCandidate) => Promise<string | null>;
+
+/**
+ * The first of `candidates` that `probe` finds puts a frame in a file, with why each one before it
+ * would not; null where none does.
+ */
+export async function pickWorkingCodec(candidates: readonly CodecCandidate[], probe: EncoderProbe): Promise<{ cc: CodecCandidate | null; failed: string[] }> {
+  const failed: string[] = [];
+  for (const cc of candidates) {
+    let why: string | null;
+    try { why = await probe(cc); } catch (e) { why = e instanceof Error ? e.message || e.name : String(e); }
+    if (why === null) return { cc, failed };
+    failed.push(`${cc.label}: ${why}`);
+  }
+  return { cc: null, failed };
+}
+
+/**
+ * Encode `frame` with `cc` into a throwaway MP4 and finalise it: null where that works, else why.
+ * Nothing of it is kept; the take opens its own encoder and muxer once a codec is known to work.
+ */
+export async function probeEncoder(cc: CodecCandidate, frame: CanvasImageSource, width: number, height: number, bitrate: number, framerate: number): Promise<string | null> {
+  const support = await VideoEncoder.isConfigSupported({ codec: cc.codec, width, height, bitrate, framerate });
+  if (!support.supported) return NOT_SUPPORTED;
+  const muxer = new Muxer({
+    target: new ArrayBufferTarget(),
+    video: { codec: cc.mux, width, height },
+    fastStart: 'in-memory',
+    firstTimestampBehavior: 'offset',
+  });
+  let chunks = 0;
+  let fault: string | null = null;
+  const encoder = new VideoEncoder({
+    output: (chunk, meta) => {
+      try { muxer.addVideoChunk(chunk, withColorSpace(meta)); chunks++; }
+      catch (e) { fault ??= `the MP4 writer refused a frame (${e instanceof Error ? e.message : String(e)})`; }
+    },
+    error: e => { fault ??= `encoder error (${e.message})`; },
+  });
+  try {
+    encoder.configure({ codec: cc.codec, width, height, bitrate, framerate });
+    const vf = new VideoFrame(frame, { timestamp: 0, alpha: 'discard' });
+    try { encoder.encode(vf, { keyFrame: true }); } finally { vf.close(); }
+    await encoder.flush();
+  } catch (e) {
+    fault ??= e instanceof Error ? e.message || e.name : String(e);
+  } finally {
+    try { encoder.close(); } catch { /* already closed */ }
+  }
+  if (fault) return fault;
+  if (chunks === 0) return 'the encoder returned no frames';
+  try { muxer.finalize(); } catch (e) { return `the MP4 file would not close (${e instanceof Error ? e.message : String(e)})`; }
+  return muxer.target.buffer.byteLength ? null : 'the MP4 file came out empty';
+}
+
 /** True when a WebCodecs encoder + MP4 mux path is available in this browser. */
 export async function isMp4Supported(): Promise<boolean> {
   return (await pickCodec(1280, 720, 8_000_000, 30)) !== null;
@@ -142,6 +206,8 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
   /** Encoded chunks handed to the muxer (mp4-muxer throws on finalize() with none). */
   let chunks = 0;
   let encoderError: Error | null = null;
+  /** The first chunk the muxer refused, so a take with none says why rather than "no frames". */
+  let muxError: Error | null = null;
   let liveInFlight = false;
   let resizeWarned = false;
   const controls = engine.camera.controls;
@@ -242,7 +308,14 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
     rctx = recordCanvas.getContext('2d');
     if (!rctx) throw new Error('Could not create the record canvas');
 
-    const cc = await pickCodec(crop.w, crop.h, bitrate, fps);
+    const probeFrame = composite();
+    const { cc, failed } = hasWebCodecs() && probeFrame
+      ? await pickWorkingCodec(CODEC_CANDIDATES, c => probeEncoder(c, probeFrame, crop.w, crop.h, bitrate, fps))
+      : { cc: null, failed: [] as string[] };
+    // Only a codec the browser offered and then could not record with is worth telling about.
+    const broke = failed.filter(f => !f.endsWith(`: ${NOT_SUPPORTED}`));
+    if (failed.length) console.info('[record] codecs passed over:', failed);
+    if (broke.length) engine.toast('info', `Recording as ${cc ? `${cc.label} (MP4)` : 'WebM'}: ${broke.join('; ')}`);
     if (cc) {
       muxer = new Muxer({
         target: new ArrayBufferTarget(),
@@ -255,7 +328,7 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
       encoder = new VideoEncoder({
         output: (chunk, meta) => {
           try { m.addVideoChunk(chunk, withColorSpace(meta)); chunks++; }
-          catch (e) { console.error('[record] mux error', e); }
+          catch (e) { console.error('[record] mux error', e); muxError ??= e instanceof Error ? e : new Error(String(e)); }
         },
         error: e => {
           console.error('[record] encoder error', e);
@@ -336,7 +409,10 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
       }
       // mp4-muxer 5.x dereferences the first chunk's decoder config in finalize(): with no chunk it
       // throws an opaque TypeError, so check first and turn any mux failure into a readable error.
-      if (chunks === 0) throw encoderError ?? new Error('No frames were recorded');
+      if (chunks === 0) {
+        throw encoderError
+          ?? (muxError ? new Error(`The MP4 writer refused every frame: ${muxError.message}`) : new Error('No frames were recorded: the encoder returned none'));
+      }
       try { m.finalize(); } catch (e) {
         throw new Error('Could not finalise the MP4 file' + (e instanceof Error && e.message ? `: ${e.message}` : ''));
       }

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Record video: falls back when the browser's encoder records nothing
+
+Recording could fail with "No frames were recorded" where the browser said it could encode H.264
+but its encoder then returned nothing, or returned frames the MP4 writer would not take. Now each
+codec first encodes the opening frame into a throwaway file, and only one that comes out as a file
+is used: H.264, then VP9, then VP8, then WebM. Where one the browser offered fails, the message says
+which it fell back to and why, and a take that still ends empty says what the encoder or the MP4
+writer reported.
+
 ### Auto truss puts the rig up through the builder
 
 **Auto truss** is back, in the Truss section of the wall's inspector, in the Build truss panel and
