@@ -303,7 +303,7 @@ function autoTruss(engine: Engine, wall: LedWallEntity): void {
     plan.spans.length ? n(plan.spans.length, 'span stick', 'span sticks') : '',
     n(plan.clamps.length, 'half coupler', 'half couplers'),
   ].filter(Boolean);
-  const head = `${parts.join(', ')} - ${plan.held} of ${n(plan.columns, 'column', 'columns')} held`;
+  const head = `${parts.join(', ')} - ${plan.supported} of ${n(plan.columns, 'column', 'columns')} held, ${plan.held} by couplers of their own`;
   engine.toast(plan.ghosts ? 'info' : 'success', [head, ...plan.warnings].join(' - '));
 }
 

@@ -138,6 +138,25 @@ function arch(): LedWallEntity {
   return wall;
 }
 
+/** A 29 x 7 arch whose middle pier is a single column, between two-column piers at the ends. */
+function narrowPier(): LedWallEntity {
+  const wall = createLedWall({ cols: 29, rows: 7 });
+  const pier = (c: number): boolean => c <= 1 || c === 14 || c >= 27;
+  const cells: string[] = [];
+  for (let c = 0; c < 29; c++) for (let r = 0; r < 7; r++) if (pier(c) || r < 2) cells.push(`${c},${r}`);
+  wall.shape = { mode: 'custom', cells };
+  return wall;
+}
+
+/** A 12-column arch `rows` high: two-column piers at the ends, a one-row lintel between them. */
+function lintelArch(rows: number): LedWallEntity {
+  const wall = createLedWall({ cols: 12, rows });
+  const cells: string[] = [];
+  for (let c = 0; c < 12; c++) for (let r = 0; r < rows; r++) if (c <= 1 || c >= 10 || r === 0) cells.push(`${c},${r}`);
+  wall.shape = { mode: 'custom', cells };
+  return wall;
+}
+
 function folded(angle: number): LedWallEntity {
   const wall = createLedWall({ cols: 4, rows: 3 });
   wall.corners = [{ afterCol: 1, angle }];
@@ -185,7 +204,7 @@ describe('the numbers a rig is laid out from', () => {
     expect(owned('gp-truss-8ft')).toBe(3);
     expect(owned('gp-truss-5ft')).toBe(6);
     expect(owned('gp-truss-4ft')).toBe(8);
-    expect(owned('gp-truss-3ft')).toBeUndefined();   // on hand, count unknown: never drawn as a ghost
+    expect(owned('gp-truss-3ft')).toBe(6);           // on hand: our count, not on the order
     expect(owned('gp-corner-6way')).toBe(6);
     expect(owned(BASE_ID)).toBe(6);
     expect(owned('clamp-8002')).toBe(38);
@@ -193,19 +212,19 @@ describe('the numbers a rig is laid out from', () => {
 });
 
 describe('planTrussRig', () => {
-  it('stands a 2 x 3 on two towers of a plate and a 4 ft stick, a plate apart, and sets it down on the plates', () => {
+  it('stands a 2 x 3 on one tower of a plate and a 4 ft stick, which holds both columns, and sets it down on the plates', () => {
     const wall = createLedWall({ cols: 2, rows: 3 });
     const plan = planTrussRig(docWith(wall), wall);
 
     expect(plan.frames).toBe(0);
     expect(plan.spans).toEqual([]);
     expect(plan.headerY).toBeNull();
-    expect(plan.legs.map(l => l.kind)).toEqual(['tower', 'tower']);
-    // Each inboard of the outer hole line it grips; the second skips its column's inner line, which
-    // would put the two plates on top of each other.
-    const xs = [-(STEP / 2 + HX - CO), STEP / 2 + HX - CO];
-    plan.legs.forEach((leg, i) => {
-      expect(leg.axis[0]).toBeCloseTo(xs[i], 5);
+    // Three rows top out under 8 ft, so the column the couplers are in holds the one bolted beside
+    // it: one tower does for both. It grips an inner hole line, as near the middle as a tower can
+    // stand -- the first column's, the second's being no nearer.
+    expect(plan.legs.map(l => l.kind)).toEqual(['tower']);
+    plan.legs.forEach(leg => {
+      expect(leg.axis[0]).toBeCloseTo(-STEP / 2 + HX - CO, 5);
       expect(leg.axis[1]).toBeCloseTo(LEG_Z, 5);
       expect(leg.axis[1] + SECTION / 2).toBeLessThan(-PD / 2);   // the whole section behind the cabinet
       expect(leg.rotY).toBeCloseTo(0, 9);
@@ -227,21 +246,22 @@ describe('planTrussRig', () => {
     expect(plan.shimIn).toBe(0);
     expect(plan.warnings).toContain('The wall rises 1.00 in to sit on the 1.00 in base plates.');
 
-    // Per leg, the holes on its line between the stick's ends. The stick stands where the wall does,
-    // so each hole is its own height up the stick: 1.20 in sits on the foot weld and 36.66 in on the
-    // panel weld at 36, which leaves the bottom row's top hole and the bottom holes of the two rows
-    // above it. The top row's top hole, 55.62 in up, is past the stick's 48.
-    expect(plan.clamps).toHaveLength(6);
-    expect(plan.skipped).toEqual({ offFace: 0, weld: 4 });
-    expect([plan.held, plan.columns, plan.ghosts]).toEqual([2, 2, 0]);
+    // The holes on its line between the stick's ends. The stick stands where the wall does, so each
+    // hole is its own height up the stick: 1.20 in sits on the foot weld and 36.66 in on the panel
+    // weld at 36, which leaves the bottom row's top hole and the bottom holes of the two rows above
+    // it. The top row's top hole, 55.62 in up, is past the stick's 48.
+    expect(plan.clamps).toHaveLength(3);
+    expect(plan.skipped).toEqual({ offFace: 0, weld: 2 });
+    expect([plan.held, plan.supported, plan.columns, plan.ghosts]).toEqual([1, 2, 2, 0]);
+    expect(plan.warnings).toContain('1 column has no coupler of its own: it is held by a coupled column beside it.');
 
     const after = applyTrussRig(docWith(wall), wall, plan);
-    const left = equipmentOf(after).filter(e => e.catalogId === 'clamp-8002')
-      .map(c => boltOf(after, c)).filter(b => b.x < 0).sort((a, b) => a.y - b.y);
-    expect(left).toHaveLength(3);
-    near(left[0], -STEP / 2 - HX, PLATE + HIGH, -PD / 2);
-    near(left[1], -STEP / 2 - HX, PLATE + PITCH + LOW, -PD / 2);
-    near(left[2], -STEP / 2 - HX, PLATE + 2 * PITCH + LOW, -PD / 2);
+    const bolts = equipmentOf(after).filter(e => e.catalogId === 'clamp-8002')
+      .map(c => boltOf(after, c)).sort((a, b) => a.y - b.y);
+    expect(bolts).toHaveLength(3);
+    near(bolts[0], -STEP / 2 + HX, PLATE + HIGH, -PD / 2);
+    near(bolts[1], -STEP / 2 + HX, PLATE + PITCH + LOW, -PD / 2);
+    near(bolts[2], -STEP / 2 + HX, PLATE + 2 * PITCH + LOW, -PD / 2);
   });
 
   it('frames the Financial Times wall: four legs, a header across them, every column held', () => {
@@ -271,46 +291,118 @@ describe('planTrussRig', () => {
     expect(shim).toBeCloseTo(0.0989, 4);
     expect(plan.bottomY).toBeCloseTo(PLATE + shim, 9);
 
-    expect([plan.held, plan.columns]).toEqual([11, 11]);
+    expect([plan.held, plan.supported, plan.columns]).toEqual([11, 11, 11]);
     expect(plan.ghosts).toBe(0);
     expect(plan.shortfall).toEqual([]);
     expect(plan.clamps.length).toBeLessThanOrEqual(38);
   });
 
-  it('puts towers a plate apart where no header meets a row of holes, and leaves the columns between them hanging', () => {
+  it('stands a three-row wall on towers a plate apart, each holding a column either side of its own', () => {
     // A block on a 3 ft stick fits under three rows, but no header that low meets a row of holes
-    // within the shim, and a frame with no couplers on its header holds fewer columns than towers do.
+    // within the shim. Three rows top out under 8 ft, so a tower's column holds both its neighbours:
+    // eight columns take three towers. Each, for the first column nothing holds yet, holds the most
+    // columns and the furthest on, then stands nearest their middle: on the left hole line of
+    // columns 1, 4 and 7 -- the last of those holding the two columns left, 6 and 7.
     const wall = createLedWall({ cols: 8, rows: 3 });
     const plan = planTrussRig(docWith(wall), wall);
+    const W = 8 * PW + 7 * GAP;
+    const centre = (c: number): number => -W / 2 + PW / 2 + c * STEP;
 
     expect(plan.frames).toBe(0);
     expect(plan.legs.every(l => l.kind === 'tower')).toBe(true);
     const xs = plan.legs.map(l => l.axis[0]);
+    expect(xs).toHaveLength(3);
+    [1, 4, 7].forEach((c, i) => expect(xs[i]).toBeCloseTo(centre(c) - HX + CO, 5));
     for (let i = 1; i < xs.length; i++) expect(xs[i] - xs[i - 1]).toBeGreaterThanOrEqual(36 - 1e-9);
-    expect([plan.held, plan.columns]).toEqual([6, 8]);
-    expect(plan.warnings).toContain('2 columns have no coupler and hang off their neighbours.');
+    expect([plan.held, plan.supported, plan.columns]).toEqual([3, 8, 8]);
+    expect(plan.warnings).toContain('5 columns have no coupler of their own: each is held by a coupled column beside it.');
+  });
+
+  it('holds three columns from a tower while the wall stands under 8 ft, and two past it', () => {
+    // A one-row lintel takes no header, so this arch stands on towers: one behind each pier's inner
+    // column, on its hole line toward the outer one (on the other its plate would reach into the
+    // doorway). Five rows top out at 94.74 in, under 8 ft, so those couplers hold the outer column
+    // and the lintel column beside too; seven top out at 132.66 in, and hold the outer column alone.
+    expect(5 * PITCH - GAP).toBeLessThan(96);
+    expect(7 * PITCH - GAP).toBeGreaterThan(96);
+
+    const low = lintelArch(5);
+    const lp = planTrussRig(docWith(low), low);
+    const W = 12 * PW + 11 * GAP;
+    const x = -W / 2 + PW / 2 + STEP - HX + CO;
+    expect(lp.frames).toBe(0);
+    expect(lp.legs.map(l => l.kind)).toEqual(['tower', 'tower']);
+    expect(lp.legs[0].axis[0]).toBeCloseTo(x, 5);
+    expect(lp.legs[1].axis[0]).toBeCloseTo(-x, 5);
+    expect([lp.held, lp.supported, lp.columns]).toEqual([2, 6, 12]);
+    expect(lp.warnings).toContain('6 columns are out of reach of every coupler, and nothing holds them.');
+
+    const high = lintelArch(7);
+    const hp = planTrussRig(docWith(high), high);
+    expect(hp.frames).toBe(0);
+    expect(hp.legs.map(l => l.kind)).toEqual(['tower', 'tower']);
+    expect([hp.held, hp.supported, hp.columns]).toEqual([2, 4, 12]);
+    expect(hp.warnings).toContain('8 columns are out of reach of every coupler, and nothing holds them.');
+  });
+
+  it('braces a 3 x 3 on two legs and a 3 ft span, one leg on the middle column holding all three', () => {
+    // A plate, a 3 ft stick and a block stand 48.16 in, under the wall's 57.82 (a 4 ft stick would
+    // show). No header that low meets a row of holes, so the span only braces. The legs stand a
+    // span and a section apart, 47.16 in, and no two hole lines do, give or take a chord: one leg
+    // takes couplers, on a hole line of the middle column, which holds all three columns.
+    const wall = createLedWall({ cols: 3, rows: 3 });
+    const plan = planTrussRig(docWith(wall), wall);
+
+    expect(plan.frames).toBe(1);
+    expect(plan.headerY).toBeNull();
+    expect(plan.spans.map(s => s.dims[0])).toEqual([36]);
+    expect(plan.legs.map(l => l.kind)).toEqual(['frame', 'frame']);
+    for (const leg of plan.legs) {
+      expect(leg.pieces.map(p => p.catalogId)).toEqual([BASE_ID, 'gp-truss-3ft', 'gp-corner-6way']);
+      expect(leg.topY).toBeCloseTo(PLATE + 36 + SECTION, 9);
+    }
+    const xs = plan.legs.map(l => l.axis[0]);
+    expect(xs[1] - xs[0]).toBeCloseTo(SECTION + 36, 9);
+    expect(xs.filter(x => Math.abs(Math.abs(x) - (HX + CO)) < 1e-6)).toHaveLength(1);
+    // On that line, the 3 ft stick's chord reaches the bottom row's top hole and the next row's
+    // bottom one; the bottom row's bottom hole sits on the foot weld.
+    expect(plan.clamps).toHaveLength(2);
+    expect(plan.skipped).toEqual({ offFace: 0, weld: 1 });
+    expect([plan.held, plan.supported, plan.columns]).toEqual([1, 3, 3]);
   });
 
   it('draws what it needs past our stock as ghosts, and says what is short', () => {
-    // Towers a plate apart hold eight of eleven columns: eight bases, two past our six. Eight 4 ft
-    // sticks are all we own and 24 couplers are well inside our 38, so the bases are all that is short.
-    const wall = createLedWall({ cols: 11, rows: 3 });
+    // With its bezels off, an 11 x 8's header meets a row of holes on legs of two 3 ft sticks and a
+    // spare block under the header's: its top chord on the fifth row's top holes, 0.03 in up. Four
+    // legs take eight 3 ft sticks and eight blocks, two of each past our six; the last leg is drawn
+    // with the ghosts. Its spans, a 5, an 8 and a 5 ft stick, are ours.
+    const wall = createLedWall({ cols: 11, rows: 8, bezels: false });
     const doc = docWith(wall);
     const plan = planTrussRig(doc, wall);
-    const name = equipmentDef(BASE_ID)!.name;
+    const S3 = 'gp-truss-3ft', BLOCK = 'gp-corner-6way';
+    const name = (id: string): string => equipmentDef(id)!.name;
 
-    expect(plan.legs).toHaveLength(8);
-    const bases = plan.legs.map(l => l.pieces[0]);
-    expect(bases.map(b => b.ghost)).toEqual([false, false, false, false, false, false, true, true]);
-    expect(plan.ghosts).toBe(2);
-    expect(plan.shortfall).toEqual([{ catalogId: BASE_ID, name, need: 8, have: 6 }]);
-    expect(plan.warnings).toContain(`${name}: 8 needed, 6 available - 2 drawn as ghosts.`);
+    const headerY = PLATE + 72 + 2 * SECTION - R;
+    expect(plan.headerY).toBeCloseTo(headerY, 9);
+    expect(plan.shimIn).toBeCloseTo(headerY - PLATE - (4 * PH + PH / 2 + HY), 9);
+    expect(plan.shimIn).toBeCloseTo(0.0326, 4);
+    expect(plan.spans.map(s => s.dims[0])).toEqual([60, 96, 60]);
+    expect(plan.legs.map(l => l.pieces.map(p => p.catalogId))).toEqual(Array(4).fill([BASE_ID, S3, S3, BLOCK, BLOCK]));
+    expect(plan.legs.map(l => l.pieces.map(p => p.ghost)))
+      .toEqual([...Array(3).fill([false, false, false, false, false]), [false, true, true, true, true]]);
+    expect(plan.ghosts).toBe(4);
+    expect([plan.supported, plan.columns]).toEqual([11, 11]);
+    expect([...plan.shortfall].sort((a, b) => a.catalogId.localeCompare(b.catalogId))).toEqual([
+      { catalogId: BLOCK, name: name(BLOCK), need: 8, have: 6 },
+      { catalogId: S3, name: name(S3), need: 8, have: 6 },
+    ]);
+    for (const id of [S3, BLOCK]) expect(plan.warnings).toContain(`${name(id)}: 8 needed, 6 available - 2 drawn as ghosts.`);
 
     const ghosts = equipmentOf(applyTrussRig(doc, wall, plan)).filter(e => e.ghost);
-    expect(ghosts).toHaveLength(2);
+    expect(ghosts).toHaveLength(4);
     for (const g of ghosts) {
-      expect(g.catalogId).toBe(BASE_ID);
-      expect(g.name).toBe(`${name} (not owned)`);
+      expect([S3, BLOCK]).toContain(g.catalogId);
+      expect(g.name).toBe(`${name(g.catalogId)} (not owned)`);
     }
   });
 
@@ -322,12 +414,13 @@ describe('planTrussRig', () => {
       return e;
     });
 
+    // A 2 x 3 stands on one base; all six of ours stand elsewhere.
     const wall = createLedWall({ cols: 2, rows: 3 });
-    const short = planTrussRig(docWith(wall, ...placed(5, 0)), wall);
-    expect(short.legs.map(l => l.pieces[0].ghost)).toEqual([false, true]);
-    expect(short.shortfall).toEqual([{ catalogId: BASE_ID, name: def.name, need: 2, have: 1 }]);
+    const short = planTrussRig(docWith(wall, ...placed(6, 0)), wall);
+    expect(short.legs.map(l => l.pieces[0].ghost)).toEqual([true]);
+    expect(short.shortfall).toEqual([{ catalogId: BASE_ID, name: def.name, need: 1, have: 0 }]);
 
-    const enough = planTrussRig(docWith(wall, ...placed(5, 1)), wall);
+    const enough = planTrussRig(docWith(wall, ...placed(6, 1)), wall);
     expect(enough.ghosts).toBe(0);
   });
 
@@ -346,29 +439,31 @@ describe('planTrussRig', () => {
     const { doc, wall } = onDeck();
     const plan = planTrussRig(doc, wall);
 
-    expect(plan.legs).toHaveLength(2);
+    expect(plan.legs).toHaveLength(1);
     for (const leg of plan.legs) expect(leg.pieces[0].position[1]).toBeCloseTo(24, 9);
     expect(plan.bottomY).toBeCloseTo(24 + PLATE, 9);
     expect(plan.liftIn).toBeCloseTo(PLATE, 9);
   });
 
-  it('frames the full-height columns of a notched wall and gives the short one a tower under its top', () => {
+  it('frames the full-height columns of a notched wall, and holds the short one from the column it is bolted to', () => {
     const wall = notched();
     const plan = planTrussRig(docWith(wall), wall);
     const W = 8 * PW + 7 * GAP;
     const col7 = -W / 2 + 7 * STEP;                    // left edge of the short column's face
-    const top7 = plan.bottomY + 3 * PITCH - GAP;      // its top
 
     expect(plan.frames).toBe(1);
+    expect(plan.legs.every(l => l.kind === 'frame')).toBe(true);
     for (const s of plan.spans) expect(s.position[0] + s.dims[0] / 2).toBeLessThan(col7);
-    for (const l of plan.legs.filter(g => g.kind === 'frame')) expect(l.axis[0] + SECTION / 2).toBeLessThan(col7);
+    for (const l of plan.legs) expect(l.axis[0] + SECTION / 2).toBeLessThan(col7);
 
-    const towers = plan.legs.filter(g => g.kind === 'tower');
-    expect(towers).toHaveLength(1);
-    expect(towers[0].axis[0] - SECTION / 2).toBeGreaterThanOrEqual(col7);
-    expect(towers[0].axis[0] + SECTION / 2).toBeLessThanOrEqual(W / 2);
-    expect(towers[0].topY).toBeLessThanOrEqual(top7);
-    expect(plan.clamps.some(c => c.position[0] > col7)).toBe(true);
+    // Column 6 stands six rows, past 8 ft, so its couplers hold the short column only from its hole
+    // line on that side: the last leg's chord runs down it, and no tower is needed.
+    const after = applyTrussRig(docWith(wall), wall, plan);
+    const bolts = equipmentOf(after).filter(e => e.catalogId === 'clamp-8002').map(c => boltOf(after, c));
+    expect(bolts.every(b => b.x < col7)).toBe(true);
+    expect(bolts.some(b => Math.abs(b.x - (col7 - GAP - PW / 2 + HX)) < 1e-6)).toBe(true);
+    expect([plan.held, plan.supported, plan.columns]).toEqual([7, 8, 8]);
+    expect(plan.warnings).toContain('1 column has no coupler of its own: it is held by a coupled column beside it.');
   });
 
   it('frames an arch: a leg behind each pier, and sticks spliced across each doorway behind the lintel', () => {
@@ -414,14 +509,52 @@ describe('planTrussRig', () => {
     expect(plan.shimIn).toBeCloseTo(headerY - PLATE - (5 * PITCH + LOW), 9);
     expect(plan.shimIn).toBeCloseTo(0.1474, 4);
 
-    // No placement of legs on the foot grid takes a coupler on the last column too.
-    expect([plan.held, plan.columns]).toEqual([29, 30]);
-    expect(plan.warnings).toContain('1 column has no coupler and hangs off its neighbours.');
+    // Every column is held, two of them by a coupled column bolted beside them.
+    expect([plan.held, plan.supported, plan.columns]).toEqual([28, 30, 30]);
+    expect(plan.warnings).toContain('2 columns have no coupler of their own: each is held by a coupled column beside it.');
     expect(plan.warnings).toContain('2 spans run past 20 ft, where the DT-GP span table stops (the longest is 30 ft): '
       + 'have them checked before they carry the wall.');
     // The couplers run past our 38; every stick, block and plate is one we own.
     expect(plan.shortfall.map(f => f.catalogId)).toEqual(['clamp-8002']);
     expect(plan.ghosts).toBe(plan.shortfall[0].need - plan.shortfall[0].have);
+  });
+
+  it('bridges a pier one column wide, where no plate can stand, with one span from pier to pier', () => {
+    const wall = narrowPier();
+    const plan = planTrussRig(docWith(wall), wall);
+    const W = 29 * PW + 28 * GAP;
+    const edge = (c: number): number => -W / 2 + c * STEP;   // a column's left edge
+
+    // A 36 in plate behind the middle pier's 25.2 in column would reach into a doorway either side
+    // of it, so the frame stands on the end piers alone, each plate clear of its doorway.
+    expect(plan.frames).toBe(1);
+    expect(plan.legs.map(l => l.kind)).toEqual(['frame', 'frame']);
+    const [a, b] = plan.legs.map(l => l.axis[0]);
+    expect(a - SECTION / 2).toBeGreaterThanOrEqual(edge(0) - 1e-9);
+    expect(a + 18).toBeLessThanOrEqual(edge(2) - GAP + 1e-9);
+    expect(b - 18).toBeGreaterThanOrEqual(edge(27) - 1e-9);
+    expect(b + SECTION / 2).toBeLessThanOrEqual(W / 2 + 1e-9);
+
+    // One span, block face to block face, behind both doorways and the pier between them: longer
+    // than the 25 columns between the piers, and a whole number of feet.
+    const len = b - a - SECTION;
+    expect(len).toBeGreaterThan(edge(27) - GAP - edge(2));
+    expect(len / 12).toBeCloseTo(Math.round(len / 12), 9);
+    let x = a + SECTION / 2;
+    for (const s of [...plan.spans].sort((p, q) => p.position[0] - q.position[0])) {
+      expect(s.position[0] - s.dims[0] / 2).toBeCloseTo(x, 9);
+      x += s.dims[0];
+    }
+    expect(x).toBeCloseTo(b - SECTION / 2, 9);
+    expect(plan.warnings).toContain(`1 span runs past 20 ft, where the DT-GP span table stops (the longest is ${Math.round(len / 12)} ft): `
+      + 'have it checked before it carries the wall.');
+
+    // At 57 ft, the fewest sticks that make it are six 8 ft, a 5 and a 4: three 8 ft past our three.
+    expect(len).toBeCloseTo(684, 9);
+    expect(plan.spans.map(s => s.dims[0]).sort((p, q) => p - q)).toEqual([48, 60, 96, 96, 96, 96, 96, 96]);
+    expect(plan.shortfall.find(f => f.catalogId === 'gp-truss-8ft')).toMatchObject({ need: 6, have: 3 });
+    expect(plan.spans.filter(s => s.ghost).map(s => s.dims[0])).toEqual([96, 96, 96]);
+    expect([plan.supported, plan.columns]).toEqual([29, 29]);
   });
 
   it('keeps tower plates clear of each other across a fold', () => {
@@ -457,9 +590,10 @@ describe('planTrussRig', () => {
     expect(plan.clamps).toEqual([]);
     expect(plan.warnings).toContain('The shortest leg, a base plate and a 3 ft stick, stands '
       + '37.0 in: taller than the wall in front of it, which stands 19.9 in, so it would show above it.');
+    // Two rows on the plates stand 38.86 in: one tower of a plate and a 3 ft stick holds both columns.
     const two = createLedWall({ cols: 2, rows: 2 });
     expect(planTrussRig(docWith(two), two).legs.map(l => l.pieces.map(p => p.catalogId)))
-      .toEqual([[BASE_ID, 'gp-truss-3ft'], [BASE_ID, 'gp-truss-3ft']]);
+      .toEqual([[BASE_ID, 'gp-truss-3ft']]);
 
     const tilted = createLedWall({ cols: 2, rows: 2 });
     tilted.transform.rotation = [10, 0, 0];
@@ -473,13 +607,17 @@ describe('planTrussRig', () => {
 const SCENES: [string, () => { doc: Document; wall: LedWallEntity }][] = [
   ['2 x 2, on 3 ft legs', () => solo(createLedWall({ cols: 2, rows: 2 }))],
   ['2 x 3', () => solo(createLedWall({ cols: 2, rows: 3 }))],
+  ['3 x 3, braced', () => solo(createLedWall({ cols: 3, rows: 3 }))],
   ['8 x 3', () => solo(createLedWall({ cols: 8, rows: 3 }))],
   ['8 x 4', () => solo(createLedWall({ cols: 8, rows: 4 }))],
   ['11 x 8', () => solo(createLedWall({ cols: 11, rows: 8 }))],
   ['11 x 8 without bezels', () => solo(createLedWall({ cols: 11, rows: 8, bezels: false }))],
-  ['11 x 3, past our bases', () => solo(createLedWall({ cols: 11, rows: 3 }))],
+  ['11 x 3', () => solo(createLedWall({ cols: 11, rows: 3 }))],
   ['8 x 6 with a notch', () => solo(notched())],
   ['30 x 7 arch', () => solo(arch())],
+  ['29 x 7 arch on a one-column middle pier', () => solo(narrowPier())],
+  ['12 x 5 arch under a one-row lintel', () => solo(lintelArch(5))],
+  ['12 x 7 arch under a one-row lintel', () => solo(lintelArch(7))],
   ['4 x 3 folded 90 degrees', () => solo(folded(90))],
   ['4 x 3 folded 120 degrees', () => solo(folded(120))],
   ['2 x 3 turned to face +x', () => solo(turned())],
@@ -607,7 +745,7 @@ describe('applyTrussRig', () => {
     doc = applyTrussRig(doc, a, planTrussRig(doc, a));
     doc = applyTrussRig(doc, b, planTrussRig(doc, b));
     const bRig = rigEntityIds(doc, b.id);
-    expect(bRig.size).toBe(1 + 2 + 2 + 6);   // the group, two bases, two 4 ft sticks, six couplers
+    expect(bRig.size).toBe(1 + 1 + 1 + 3);   // the group, a base, a 4 ft stick, three couplers
 
     const a2 = wallOf(doc, a.id);
     doc = applyTrussRig(doc, a2, planTrussRig(doc, a2));

@@ -11,8 +11,13 @@
  *    a stack lands the header's front chord on a row of holes, a half coupler goes into every hole
  *    on that row that is clear of a weld; where none does, the spans only brace the legs. Where a
  *    leg's front chord happens to run down a line of holes, those take couplers too.
- *  - A TOWER behind a column the frame does not reach: a base plate and sticks, one front chord on one of
- *    the column's two hole lines, every hole on that line clamped.
+ *  - TOWERS for the columns no frame holds, as few as will hold them: a base plate and sticks, one
+ *    front chord on one of a column's two hole lines, every hole on that line clamped.
+ *
+ * A column with couplers in it holds the columns bolted beside it too: both of them while its top
+ * stands no higher than {@link TALL_IN} above the plates, and above that the one on the side of the
+ * hole line its couplers are in. So one tower holds two or three columns, and a wall needs fewer
+ * towers than it has columns.
  *
  * Three rules every rig keeps:
  *
@@ -78,6 +83,12 @@ const MAX_LEG_STICKS = 4;
 const MAX_SPAN_STICKS = 8;
 /** Where the DT-GP span table stops, in inches: a longer span wants its own check. */
 const SPAN_TABLE_IN = 240;
+/**
+ * How high a coupled column's top may stand above the plates and still hold a column each side of
+ * it, in inches; one taller holds only the column beside its couplers. An 8 ft stick: a wall of
+ * five iPoster rows holds three columns to a tower, one of six holds two.
+ */
+const TALL_IN = 96;
 
 /** One piece of hardware, placed in WORLD space. */
 export interface RigPiece {
@@ -131,6 +142,8 @@ export interface TrussRigPlan {
   dropAccessories: boolean;
   /** Columns with at least one coupler, out of `columns`. */
   held: number;
+  /** Columns held, out of `columns`: by couplers of their own, or by a coupled column beside them. */
+  supported: number;
   columns: number;
   /** Pieces drawn as ghosts. */
   ghosts: number;
@@ -270,7 +283,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   const empty = (bottomY = 0): TrussRigPlan => ({
     wallId: wall.id, legs: [], spans: [], clamps: [], frames: 0, headerY: null,
     liftIn: 0, liftLocalIn: 0, bottomY, shimIn: 0, dropAccessories: false,
-    held: 0, columns: 0, ghosts: 0, shortfall: [], skipped: { offFace: 0, weld: 0 }, warnings,
+    held: 0, supported: 0, columns: 0, ghosts: 0, shortfall: [], skipped: { offFace: 0, weld: 0 }, warnings,
   });
 
   const spec = panelSpec(wall.product);
@@ -420,26 +433,36 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
    * hole lines, the whole section behind the column, the plate out of the doorways.
    */
   const towerSpots = runs.map(run => {
-    const spots = new Map<number, number[]>();
+    const spots = new Map<number, { u: number; side: number }[]>();
     for (const l of run.lines) {
       const u = l.u - l.side * co;
       const centre = s * (l.col - run.start) * step;
       if (Math.abs(u - centre) + section / 2 > s * dims.panelW / 2 + EPS || !plateClear(run, u)) continue;
-      spots.set(l.col, [...(spots.get(l.col) ?? []), u]);
+      spots.set(l.col, [...(spots.get(l.col) ?? []), { u, side: l.side }]);
     }
     return spots;
   });
+  /** The tower spots behind run `ri`'s `towerable` columns, along the run, with the columns each holds. */
+  const spotsOf = (ri: number, towerable: readonly number[]): { u: number; holds: readonly number[] }[] =>
+    towerable.flatMap(c => (towerSpots[ri].get(c) ?? []).map(sp => ({ u: sp.u, holds: holdsOf(c, sp.side) })))
+      .sort((p, q) => p.u - q.u);
   /**
-   * Of `towerable` columns a frame with legs at `legsU` leaves unheld, how many still have a tower
-   * spot whose plate clears every leg's: a frame that crowds out the towers beside it holds less.
+   * Of the columns a frame with legs at `legsU` (in order along the run) leaves unheld, how many a
+   * tower could still hold from one of `spots`, its plate clear of every leg's: a frame that crowds
+   * out the towers beside it holds less. Both lists run the same way, so each spot is checked
+   * against the two legs either side of it alone.
    */
-  const towerRoom = (ri: number, legsU: readonly number[], held: ReadonlySet<number>, towerable: readonly number[]): number => {
-    let n = 0;
-    for (const c of towerable) {
-      if (held.has(c)) continue;
-      if ((towerSpots[ri].get(c) ?? []).some(u => legsU.every(g => Math.abs(u - g) >= plateSize - 1e-6))) n++;
+  const towerRoom = (spots: readonly { u: number; holds: readonly number[] }[], legsU: readonly number[], holds: ReadonlySet<number>): number => {
+    const could = new Set<number>();
+    let i = 0;
+    for (const sp of spots) {
+      if (sp.holds.every(h => holds.has(h) || could.has(h))) continue;
+      while (i < legsU.length && legsU[i] <= sp.u) i++;
+      if (i > 0 && sp.u - legsU[i - 1] < plateSize - 1e-6) continue;
+      if (i < legsU.length && legsU[i] - sp.u < plateSize - 1e-6) continue;
+      for (const h of sp.holds) if (!holds.has(h)) could.add(h);
     }
-    return n;
+    return could.size;
   };
 
   /** Each column's unbroken bands of cabinets, bottom up, in world inches above the wall's bottom. */
@@ -454,6 +477,22 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     }
     return out;
   });
+
+  /**
+   * The columns couplers in column `c`'s hole line on `side` hold: `c`, and the columns bolted to
+   * it -- beside it in the same run, sharing a row of cabinets with it. Both of those while `c`'s
+   * top stands no higher than {@link TALL_IN} above the plates, only the one on `side` above that.
+   */
+  const runOfCol = layout.map((_, c) => runs.findIndex(r => c >= r.start && c <= r.end));
+  const joined = (a: number, b: number): boolean => b >= 0 && b < layout.length && runOfCol[a] === runOfCol[b]
+    && [...Array(dims.rows).keys()].some(r => cells.has(cellKey(layout[a].col, r)) && cells.has(cellKey(layout[b].col, r)));
+  const holdsBy = layout.map((_, c) => {
+    const beside = (d: number): number[] => (joined(c, c + d) ? [c + d] : []);
+    const top = bands[c].length ? bands[c][bands[c].length - 1][1] : 0;
+    const both = [...beside(-1), c, ...beside(1)];
+    return top > TALL_IN + EPS ? { left: [...beside(-1), c], right: [c, ...beside(1)] } : { left: both, right: both };
+  });
+  const holdsOf = (c: number, side: number): readonly number[] => (side < 0 ? holdsBy[c].left : holdsBy[c].right);
 
   /** How far a mix of sticks runs past what we own, so a layout can prefer what we hold. */
   const owned = (len: number): number => ownedCount(stickOf(len)) ?? Infinity;
@@ -512,34 +551,36 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     }));
   };
 
-  interface Take { held: Set<number>; header: number; aligned: number }
+  interface Take { holds: Set<number>; header: number; aligned: number }
   /**
    * What a frame laid out along `lines` would take: a coupler on each line that runs down a leg's
    * front chord, and -- when its `header` chord meets a row of holes -- on each that crosses a span
-   * clear of a weld. Every stick in a span is end-plated, so a splice is a weld like any other.
+   * clear of a weld. Every stick in a span is end-plated, so a splice is a weld like any other. It
+   * holds the columns those couplers are in, and the columns they hold.
    */
   const frameTake = (lines: readonly HoleLine[], legsU: readonly number[], spans: readonly (readonly number[])[], header: boolean): Take => {
-    const held = new Set<number>(), aligned = new Set<number>();
+    const holds = new Set<number>(), aligned = new Set<number>();
+    const grip = (l: HoleLine): void => { for (const c of holdsOf(l.col, l.side)) holds.add(c); };
     let couplers = 0;
     for (let n = 0, i = 0; n < lines.length; n++) {
       const l = lines[n];
       while (i + 1 < legsU.length && legsU[i + 1] - section / 2 <= l.u) i++;
       const legU = legsU[i];
       if (Math.abs(l.u - legU) <= section / 2 + EPS) {
-        if (onLegChord(l.u, legU)) { held.add(l.col); aligned.add(i); }
+        if (onLegChord(l.u, legU)) { grip(l); aligned.add(i); }
         continue;
       }
       if (!header || l.u < legU || i >= spans.length) continue;
       let along = l.u - (legU + section / 2);
       for (const len of spans[i]) {
         if (along < len) {
-          if (along > 0 && clearOfBraceNodes(along, len, section, jawHalf)) { couplers++; held.add(l.col); }
+          if (along > 0 && clearOfBraceNodes(along, len, section, jawHalf)) { couplers++; grip(l); }
           break;
         }
         along -= len;
       }
     }
-    return { held, header: couplers, aligned: aligned.size };
+    return { holds, header: couplers, aligned: aligned.size };
   };
 
   /**
@@ -553,6 +594,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     const run = runs[ri];
     const [zl, zr] = extentOf(run, a, b);
     const lines = run.lines.filter(l => l.col >= a && l.col <= b);
+    const spots = spotsOf(ri, towerable);
     let best: { score: number[]; legsU: number[]; spans: number[][] } | null = null;
     for (const sh of shapesFor(zr - zl, 2)) {
       const slack = Math.max(0, zr - zl - sh.L);
@@ -570,8 +612,8 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
         const legsU = sh.rel.map(r => first + off + r);
         if (!legsU.every(u => plateClear(run, u))) continue;
         const t = frameTake(lines, legsU, spans, header);
-        const room = towerRoom(ri, legsU, t.held, towerable);
-        const score = [t.held.size + room, -sh.k, -sh.overuse, t.header, t.aligned, -Math.abs(off - slack / 2)];
+        const room = towerRoom(spots, legsU, t.holds);
+        const score = [t.holds.size + room, -sh.k, -sh.overuse, t.header, t.aligned, -Math.abs(off - slack / 2)];
         if (!best || rank(score, best.score) < 0) best = { score, legsU, spans };
       }
     }
@@ -579,12 +621,15 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   };
 
   /** A span across an opening, from one zone's last leg to the next zone's first. */
-  interface Bridge { mix: number[]; len: number; held: Set<number>; header: number; overuse: number }
+  interface Bridge { mix: number[]; len: number; holds: Set<number>; header: number; overuse: number }
 
   /**
    * A frame across several zones -- piers, say, with doorways between them under a lintel. Each
    * zone stands one leg or more on single sticks, as `planZone` would, and the last leg of one zone
-   * joins the first of the next with a span of sticks spliced end to end, behind the lintel.
+   * joins the first of the next with a span of sticks spliced end to end, behind the lintel. A zone
+   * no leg can stand in -- a pier one column wide, whose plate would reach into the doorways either
+   * side of it -- is crossed: the span runs on behind it to the next. The frame may start and end
+   * at any zone, but stands on two legs at least.
    *
    * Spans splice to whole feet, so the frame keeps to a one-foot grid from its first leg: tried at
    * every quarter inch of it, and at every offset that puts a single-leg zone's chord on a hole
@@ -598,7 +643,6 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
       const [zl, zr] = extentOf(run, a, b);
       return { first: zl + section / 2, W: zr - zl, shapes: shapesFor(zr - zl, 1), lines: run.lines.filter(l => l.col >= a && l.col <= b) };
     });
-    if (Z.some(z => !z.shapes.length)) return null;
     const lines = run.lines.filter(l => l.col >= zones[0][0] && l.col <= zones[zones.length - 1][1]);
 
     const zoneMemo = new Map<string, Take>();
@@ -633,8 +677,8 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
         const overuse = overuseOf(mix);
         for (const order of header ? spanOrders(mix) : [mix]) {
           const t = frameTake(under, [e, f], [order], header);
-          const score = [t.held.size, -overuse, t.header];
-          if (!top || rank(score, top) < 0) { top = score; out = { mix: order, len, held: t.held, header: t.header, overuse }; }
+          const score = [t.holds.size, -overuse, t.header];
+          if (!top || rank(score, top) < 0) { top = score; out = { mix: order, len, holds: t.holds, header: t.header, overuse }; }
         }
       }
       bridgeMemo.set(k, out);
@@ -642,23 +686,23 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     };
 
     // The grid's phase: every quarter inch, and every exact chord-on-line offset of a zone one leg
-    // fills, at each count of legs that can stand ahead of it.
+    // fills, at each count of legs that can stand ahead of it -- none, where the frame starts there.
     const phases = new Map<string, number>();
     const addPhase = (p: number): void => { const m = mod(p); phases.set(key6(m), m); };
     for (let p = 0; p < lattice - EPS; p += SLIDE_STEP_IN) addPhase(p);
-    let iMin = 0, iMax = 0;
+    let iMax = 0;
     for (const z of Z) {
       const ks = z.shapes.map(h => h.k);
+      if (!ks.length) continue;
       if (Math.max(...ks) === 1) {
-        for (const l of z.lines) for (const sg of [-1, 1]) for (let i = iMin; i <= iMax; i++) addPhase(l.u + sg * co - i * section);
+        for (const l of z.lines) for (const sg of [-1, 1]) for (let i = 0; i <= iMax; i++) addPhase(l.u + sg * co - i * section);
       }
-      iMin += Math.min(...ks);
       iMax += Math.max(...ks);
     }
 
     /** The best frame so far ending at one last leg, with the tallies its score is built from. */
     interface St {
-      e: number; score: number[]; held: Set<number>; legsU: number[]; spans: number[][];
+      e: number; score: number[]; holds: Set<number>; legsU: number[]; spans: number[][];
       legs: number; overuse: number; across: number; header: number; aligned: number; off: number;
     }
     let best: St | null = null;
@@ -667,8 +711,10 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
       for (let j = 0; j < Z.length; j++) {
         const z = Z[j];
         const next = new Map<string, St>();
-        const from: (St | null)[] = j ? [...states.values()] : [null];
+        // A frame may start here; one that can stand no leg here crosses this zone on its next span.
+        const from: (St | null)[] = [null, ...states.values()];
         for (const st of from) {
+          let stood = false;
           z.shapes.forEach((sh, h) => {
             const slack = z.W - sh.L;
             const start = z.first + mod((st ? st.e + section : phase) - z.first);
@@ -677,33 +723,37 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
               if (st && !br) continue;
               const legsU = sh.rel.map(r => f + r);
               if (!legsU.every(u => plateClear(run, u))) continue;
+              stood = true;
               const t = zoneTake(j, h, f);
               const extra: number[] = [];
-              for (const c of br?.held ?? []) if (!st?.held.has(c)) extra.push(c);
-              for (const c of t.held) if (!(st?.held.has(c) || br?.held.has(c))) extra.push(c);
+              for (const c of br?.holds ?? []) if (!st?.holds.has(c)) extra.push(c);
+              for (const c of t.holds) if (!(st?.holds.has(c) || br?.holds.has(c))) extra.push(c);
               const legs = (st?.legs ?? 0) + sh.k;
               const overuse = (st?.overuse ?? 0) + (br?.overuse ?? 0) + sh.overuse;
               const across = (st?.across ?? 0) + (br?.len ?? 0);
               const header = (st?.header ?? 0) + (br?.header ?? 0) + t.header;
               const aligned = (st?.aligned ?? 0) + t.aligned;
               const off = (st?.off ?? 0) + Math.abs(f - z.first - slack / 2);
-              const score = [(st?.held.size ?? 0) + extra.length, -legs, -overuse, -across, header, aligned, -off];
+              const score = [(st?.holds.size ?? 0) + extra.length, -legs, -overuse, -across, header, aligned, -off];
               const e = legsU[legsU.length - 1];
               const cur = next.get(key6(e));
               if (cur && rank(score, cur.score) >= 0) continue;
               next.set(key6(e), {
                 e, score, legs, overuse, across, header, aligned, off,
-                held: new Set([...(st?.held ?? []), ...extra]),
+                holds: new Set([...(st?.holds ?? []), ...extra]),
                 legsU: [...(st?.legsU ?? []), ...legsU],
                 spans: [...(st?.spans ?? []), ...(br ? [br.mix] : []), ...sh.spans.map(len => [len])],
               });
             }
           });
+          if (st && !stood) {
+            const cur = next.get(key6(st.e));
+            if (!cur || rank(st.score, cur.score) < 0) next.set(key6(st.e), st);
+          }
         }
         states = next;
-        if (!states.size) break;
       }
-      for (const st of states.values()) if (!best || rank(st.score, best.score) < 0) best = st;
+      for (const st of states.values()) if (st.legs >= 2 && (!best || rank(st.score, best.score) < 0)) best = st;
     }
     return best && { run: ri, legsU: best.legsU, spans: best.spans };
   };
@@ -799,7 +849,8 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     const footAt = (run: Run, axis: THREE.Vector3): Footprint => ({ x: axis.x, z: axis.z, size: plateSize, rotY: run.yaw });
     const spans: RigPiece[] = [];
     const clamps: { piece: RigPiece; col: number; header: boolean }[] = [];
-    const held = new Set<number>();
+    /** Columns with couplers of their own, and every column held: those and the columns they hold. */
+    const held = new Set<number>(), supported = new Set<number>();
     /** Span lengths past the span table. */
     const long: number[] = [];
     let weld = 0;
@@ -820,9 +871,10 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
       catalogId: def.id, name: def.name, geometry, dims: [d[0], d[1], d[2]], color: def.color,
       position: [p.x, p.y, p.z], rotation: [0, yaw * DEG, 0], ghost: false,
     });
-    const addClamp = (run: Run, m: MountPoint, y: number, col: number, chord: THREE.Vector3, header: boolean): void => {
+    const addClamp = (run: Run, m: MountPoint, y: number, col: number, side: number, chord: THREE.Vector3, header: boolean): void => {
       clamps.push({ piece: clampPiece(clampDef, toWorld(m.pos).setY(y), chord, run.N), col, header });
       held.add(col);
+      for (const c of holdsOf(col, side)) supported.add(c);
     };
 
     /** A leg's pieces bottom up, and the chords on it a jaw can close on (not the blocks'). */
@@ -845,7 +897,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
 
     /** Every hole on a line one of the leg's front chords runs down, and the ones a weld blocks. */
     const legHits = (run: Run, u: number, chords: readonly ChordSpan[]) => {
-      const hits: { m: MountPoint; y: number; col: number }[] = [];
+      const hits: { m: MountPoint; y: number; col: number; side: number }[] = [];
       let welds = 0;
       for (const l of run.lines) {
         if (!onLegChord(l.u, u)) continue;
@@ -853,7 +905,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
           const y = bottomY + s * m.pos[1];
           const span = chords.find(q => y >= q.footY - 1e-6 && y <= q.footY + q.len + 1e-6);
           if (!span) continue;
-          if (clearOfBraceNodes(y - span.footY, span.len, section, jawHalf)) hits.push({ m, y, col: l.col });
+          if (clearOfBraceNodes(y - span.footY, span.len, section, jawHalf)) hits.push({ m, y, col: l.col, side: l.side });
           else welds++;
         }
       }
@@ -862,7 +914,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
 
     /** Holes a span's sticks, laid end to end from `from`, put on a header chord, and those a weld blocks. */
     const spanHits = (run: Run, from: number, sticks: readonly number[], chordYs: readonly number[]) => {
-      const hits: { m: MountPoint; y: number; col: number; chordY: number }[] = [];
+      const hits: { m: MountPoint; y: number; col: number; side: number; chordY: number }[] = [];
       let welds = 0;
       for (let i = 0, p = from; i < sticks.length; p += sticks[i], i++) {
         const len = sticks[i];
@@ -873,7 +925,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
             const y = bottomY + s * m.pos[1];
             const chordY = chordYs.find(cy => Math.abs(cy - y) < EPS);
             if (chordY === undefined) continue;
-            if (clearOfBraceNodes(along, len, section, jawHalf)) hits.push({ m, y, col: l.col, chordY });
+            if (clearOfBraceNodes(along, len, section, jawHalf)) hits.push({ m, y, col: l.col, side: l.side, chordY });
             else welds++;
           }
         }
@@ -894,7 +946,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
           take(leg.pieces);
           const { hits, welds } = legHits(run, u, leg.chords);
           weld += welds;
-          for (const h of hits) addClamp(run, h.m, h.y, h.col, UP, false);
+          for (const h of hits) addClamp(run, h.m, h.y, h.col, h.side, UP, false);
         }
       }
       for (const f of layouts) {
@@ -905,7 +957,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
           if (len > SPAN_TABLE_IN + EPS) long.push(len);
           // A single stick stands as laid out. A spliced span is any mix of no more than two sticks
           // past the fewest that make it, in any order worth trying, best by: columns it holds that
-          // nothing else does, sticks we have left, couplers on the header, then fewest sticks.
+          // nothing else does yet, sticks we have left, couplers on the header, then fewest sticks.
           let sticks = laid;
           if (laid.length > 1) {
             const mixes = mixesOf(len);
@@ -916,7 +968,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
               const lack = short(mix);
               for (const order of spanOrders(mix)) {
                 const { hits } = spanHits(run, from, order, chordYs);
-                const fresh = new Set(hits.filter(h => !held.has(h.col)).map(h => h.col)).size;
+                const fresh = new Set(hits.flatMap(h => holdsOf(h.col, h.side)).filter(c => !supported.has(c))).size;
                 const score = [fresh, -lack, hits.length, -order.length];
                 if (!pick || rank(score, pick.score) < 0) pick = { score, order };
               }
@@ -932,50 +984,57 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
           const { hits, welds } = spanHits(run, from, sticks, chordYs);
           weld += welds;
           for (const h of hits) {
-            addClamp(run, h.m, h.y, h.col, run.U, true);
+            addClamp(run, h.m, h.y, h.col, h.side, run.U, true);
             headerY = Math.max(headerY ?? -Infinity, h.chordY);
           }
         });
       }
     }
 
-    // Towers behind whatever the frames left hanging: first column first, on its first hole line
-    // that keeps the section behind the column, the plate out of the doorways and clear of every
-    // other leg's -- across a fold too, where two runs' legs crowd the same corner -- and the stack
-    // under the top of the column. The stack is whichever leaves us least short, then takes the
-    // most couplers, then is fewest and shortest.
+    // Towers for whatever the frames leave unheld, as few as will hold it: for the first column
+    // nothing holds yet, the tower that holds it and the most columns with it, then the furthest
+    // on. It stands on a hole line of that column or one beside it, the section behind the column,
+    // the plate out of the doorways and clear of every other leg's -- across a fold too, where two
+    // runs' legs crowd the same corner -- and the stack under the column's top. Then the stack that
+    // leaves us least short, takes the most couplers, and is fewest and shortest sticks; then the
+    // spot nearest the middle of the columns it holds.
     for (let ri = 0; ri < runs.length; ri++) {
       const run = runs[ri];
       for (let c = run.start; c <= run.end; c++) {
-        if (held.has(c)) continue;
-        const top = bottomY + hiddenRise(c);
-        if (supportY + shortestLeg > top + EPS) continue;
-        for (const u of towerSpots[ri].get(c) ?? []) {
-          const foot = footAt(run, at(run, u, supportY, depth));
-          if (legs.some(g => overlaps(g.foot, foot))) continue;
-          const key = `${ri}|${key6(u)}|${key6(bottomY)}|${key6(top)}`;
-          let cands = towerMemo.get(key);
-          if (!cands) {
-            cands = stickStacks(stickLens, MAX_LEG_STICKS)
-              .filter(sticks => supportY + baseH + sum(sticks) <= top + EPS)
-              .map(sticks => ({ sticks, hits: legHits(run, u, legAt(run, u, sticks, 0).chords).hits.length }))
-              .filter(t => t.hits > 0);
-            towerMemo.set(key, cands);
+        if (supported.has(c)) continue;
+        let pick: { score: number[]; u: number; foot: Footprint; sticks: number[] } | null = null;
+        for (let k = Math.max(run.start, c - 1); k <= Math.min(run.end, c + 1); k++) {
+          const top = bottomY + hiddenRise(k);
+          if (supportY + shortestLeg > top + EPS) continue;
+          for (const { u, side } of towerSpots[ri].get(k) ?? []) {
+            const holds = holdsOf(k, side);
+            if (!holds.includes(c)) continue;
+            const foot = footAt(run, at(run, u, supportY, depth));
+            if (legs.some(g => overlaps(g.foot, foot))) continue;
+            const key = `${ri}|${key6(u)}|${key6(bottomY)}|${key6(top)}`;
+            let cands = towerMemo.get(key);
+            if (!cands) {
+              cands = stickStacks(stickLens, MAX_LEG_STICKS)
+                .filter(sticks => supportY + baseH + sum(sticks) <= top + EPS)
+                .map(sticks => ({ sticks, hits: legHits(run, u, legAt(run, u, sticks, 0).chords).hits.length }))
+                .filter(t => t.hits > 0);
+              towerMemo.set(key, cands);
+            }
+            const fresh = holds.filter(h => !supported.has(h)).length;
+            const middle = s * ((Math.min(...holds) + Math.max(...holds)) / 2 - run.start) * step;
+            for (const t of cands) {
+              const score = [fresh, Math.max(...holds), -short(t.sticks), t.hits, -t.sticks.length, -sum(t.sticks), -Math.abs(u - middle)];
+              if (!pick || rank(score, pick.score) < 0) pick = { score, u, foot, sticks: t.sticks };
+            }
           }
-          let pick: { score: number[]; sticks: number[] } | null = null;
-          for (const t of cands) {
-            const score = [-short(t.sticks), t.hits, -t.sticks.length, -sum(t.sticks)];
-            if (!pick || rank(score, pick.score) < 0) pick = { score, sticks: t.sticks };
-          }
-          if (!pick) continue;
-          const leg = legAt(run, u, pick.sticks, 0);
-          const got = legHits(run, u, leg.chords);
-          legs.push({ kind: 'tower', axis: [leg.axis.x, leg.axis.z], rotY: run.yaw * DEG, topY: leg.topY, pieces: leg.pieces, foot });
-          take(leg.pieces);
-          weld += got.welds;
-          for (const h of got.hits) addClamp(run, h.m, h.y, h.col, UP, false);
-          break;
         }
+        if (!pick) continue;
+        const leg = legAt(run, pick.u, pick.sticks, 0);
+        const got = legHits(run, pick.u, leg.chords);
+        legs.push({ kind: 'tower', axis: [leg.axis.x, leg.axis.z], rotY: run.yaw * DEG, topY: leg.topY, pieces: leg.pieces, foot: pick.foot });
+        take(leg.pieces);
+        weld += got.welds;
+        for (const h of got.hits) addClamp(run, h.m, h.y, h.col, h.side, UP, false);
       }
     }
 
@@ -1001,10 +1060,12 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     const frames = stack ? layouts.length : 0;
     const pieceCount = legs.reduce((a, g) => a + g.pieces.length, 0) + spans.length + clamps.length;
     return {
-      shim, bottomY, legs, spans, clamps: clamps.map(c => c.piece), held, weld, headerY, long, frames, ghosts,
+      shim, bottomY, legs, spans, clamps: clamps.map(c => c.piece), held, supported, weld, headerY, long, frames, ghosts,
       // A rig that holds nothing is no rig. Of the rest, the most columns held; then legs tied
-      // together by spans over loose towers -- but never at the cost of a column left hanging.
-      score: [held.size ? 1 : 0, held.size, frames ? 1 : 0, -ghosts, headerY ?? -1e9, clamps.length, -pieceCount, -shim],
+      // together by spans over loose towers -- but never at the cost of a column left hanging; then
+      // the fewest ghosts and the fewest legs; then the most columns with couplers of their own.
+      score: [supported.size ? 1 : 0, supported.size, frames ? 1 : 0, -ghosts, -legs.length, held.size,
+        headerY ?? -1e9, clamps.length, -pieceCount, -shim],
     };
   };
 
@@ -1054,6 +1115,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     shimIn: best.shim,
     dropAccessories,
     held: best.held.size,
+    supported: best.supported.size,
     columns: layout.length,
     ghosts: best.ghosts,
     shortfall,
@@ -1091,9 +1153,14 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   if (dropAccessories) {
     warnings.push('The floor-stand base plates and back supports come off: they stand where the legs do.');
   }
-  const loose = plan.columns - plan.held;
+  const carried = plan.supported - plan.held;
+  if (carried > 0) {
+    warnings.push(`${carried} ${carried === 1 ? 'column has' : 'columns have'} no coupler of ${carried === 1 ? 'its' : 'their'} own: `
+      + `${carried === 1 ? 'it is' : 'each is'} held by a coupled column beside it.`);
+  }
+  const loose = plan.columns - plan.supported;
   if (loose > 0) {
-    warnings.push(`${loose} ${loose === 1 ? 'column has' : 'columns have'} no coupler and ${loose === 1 ? 'hangs' : 'hang'} off ${loose === 1 ? 'its' : 'their'} neighbours.`);
+    warnings.push(`${loose} ${loose === 1 ? 'column is' : 'columns are'} out of reach of every coupler, and nothing holds ${loose === 1 ? 'it' : 'them'}.`);
   }
   for (const f of shortfall) {
     const k = f.need - f.have;
