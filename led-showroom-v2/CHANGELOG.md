@@ -73,8 +73,8 @@ tries the frames in the other order too. It says when columns go unheld because 
 This costs rigs. A wall that folds can get fewer legs than it would straight, sometimes none: of 59
 folded walls drawn at random, 28 get a rig where 35 did, and 154 columns are held where 179 were,
 though 14 of the 35 old rigs had something showing. A 50 x 20 wall folded twice stands on 18 legs
-where 15 stood, holds 48 of its 50 columns where it held 49, and takes about half a second to plan
-where it took a third. A test samples every rig on 11 folded walls and those 59, reading what shows
+where 15 stood, holds 48 of its 50 columns where it held 49, and is slower to plan, about 0.9 s
+where it took 0.8 s. A test samples every rig on 11 folded walls and those 59, reading what shows
 off the scene rather than the planner's own sums: it finds nothing, where the planner as it was
 showed something on 4 of the 11 and 14 of the 59.
 
