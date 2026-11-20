@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createDocument, createEquipment, createLedWall } from '../document/defaults';
-import type { Document, EquipmentEntity, LedWallEntity } from '../document/types';
+import { createDocument, createEquipment, createLedWall, createStage } from '../document/defaults';
+import type { Document, EquipmentEntity, LedWallEntity, StageEntity } from '../document/types';
 import type { Vec3 } from '../math';
 import {
-  CABINETS_PER_CRATE, buildList, buildListText, wallBuild,
+  CABINETS_PER_CRATE, STAGE_DECK_ID, buildList, buildListText, wallBuild,
 } from './buildList';
 
 /**
@@ -15,7 +15,7 @@ import {
  * `buildList.ts` back would only agree with the code about the wrong answer.
  */
 
-const docWith = (...entities: (LedWallEntity | EquipmentEntity)[]): Document => ({
+const docWith = (...entities: (LedWallEntity | EquipmentEntity | StageEntity)[]): Document => ({
   ...createDocument(),
   entities: [...entities],
 });
@@ -284,6 +284,29 @@ describe('buildList', () => {
     expect(list.equipment[0]?.owned).toBeNull();
     expect(list.equipment[0]?.short).toBe(0);
   });
+
+  it('lists stage decks as hardware, one line per size', () => {
+    // Two 4 x 4 ft decks, a 4 x 8 ft deck placed both ways round, and a 4 x 4 ft deck on shorter
+    // legs: three sizes. Turning a deck does not make it a different deck; lowering it does.
+    const deck = (w: number, h: number, d: number): StageEntity => ({ ...createStage(h), widthIn: w, depthIn: d });
+    const list = buildList(docWith(
+      deck(48, 24, 48), deck(48, 24, 48), deck(96, 24, 48), deck(48, 24, 96), deck(48, 12, 48),
+    ));
+
+    expect(list.equipment).toHaveLength(3);
+    const line = (dims: [number, number, number]) => list.equipment.find(l => l.dims.join() === dims.join());
+    expect(line([48, 24, 48])).toMatchObject({ catalogId: STAGE_DECK_ID, name: 'Stage deck', qty: 2 });
+    expect(line([96, 24, 48])).toMatchObject({ qty: 2 });
+    expect(line([48, 12, 48])).toMatchObject({ qty: 1 });
+    // No deck stock is recorded: no owned figure, so no false shortfall.
+    for (const l of list.equipment) expect([l.owned, l.short, l.ghosts]).toEqual([null, 0, 0]);
+    expect(list.cabinets).toBe(0);
+  });
+
+  it('sorts decks in with the rest of the hardware, most first', () => {
+    const list = buildList(docWith(createStage(24), stick([96, 11.16, 11.16]), stick([96, 11.16, 11.16])));
+    expect(list.equipment.map(l => [l.catalogId, l.qty])).toEqual([['gp-truss-8ft', 2], [STAGE_DECK_ID, 1]]);
+  });
 });
 
 describe('buildListText', () => {
@@ -315,6 +338,15 @@ describe('buildListText', () => {
     expect(text).toContain('Double cut      6  (1 powered + 5 regular)');
     expect(text).toContain('SHORT 1 (3 owned)');
     expect(text).toContain('NOTES');
+  });
+
+  it('writes a scene of nothing but a deck as one hardware line, with no owned figure', () => {
+    const text = buildListText(buildList(docWith(createStage(24))), 'in');
+    expect(text).not.toContain('Nothing in the scene to pull.');
+    expect(text).not.toContain('CABINETS');
+    const deckLine = text.split('\n').find(l => l.includes('Stage deck'));
+    expect(deckLine).toMatch(/^ {2,}1 {2}Stage deck/);
+    expect(deckLine).not.toContain('owned');
   });
 
   it('says so plainly when there is nothing to pull', () => {

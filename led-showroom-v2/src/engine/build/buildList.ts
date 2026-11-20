@@ -28,7 +28,7 @@
  */
 import type { EquipmentDef } from '../catalog/equipment';
 import { equipmentDef, ownedCount } from '../catalog/equipment';
-import type { Document, EquipmentEntity, LedWallEntity } from '../document/types';
+import type { Document, EquipmentEntity, LedWallEntity, StageEntity } from '../document/types';
 import type { Vec3 } from '../math';
 import { filledCells, miterCutsForColumn, parseCell, wallDims } from '../ledwall/layout';
 import { PANEL_SPECS } from '../ledwall/specs';
@@ -93,6 +93,7 @@ export interface WallBuild {
 
 /** One line of hardware, as the warehouse would pull it. */
 export interface EquipmentLine {
+  /** The catalog item, or {@link STAGE_DECK_ID} for a stage deck, which has no catalog row. */
   catalogId: string;
   name: string;
   qty: number;
@@ -260,13 +261,41 @@ function equipmentLines(items: EquipmentEntity[]): EquipmentLine[] {
   }
   const lines = [...groups.values()];
   for (const l of lines) l.short = l.owned === null ? 0 : Math.max(0, l.qty - l.owned);
-  return lines.sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
+  return lines;
+}
+
+/** The hardware line id for a stage deck. Decks are drawn as stage entities, not catalog equipment. */
+export const STAGE_DECK_ID = 'stage-deck';
+
+/**
+ * Stage decks, one line per size.
+ *
+ * Keyed on the height and the SORTED footprint: a 4 x 8 ft deck turned a quarter is the same deck,
+ * but a deck on 12 in legs is not the one on 24 in legs, so the height is kept apart rather than
+ * sorted in with the footprint. No deck stock is recorded, so `owned` is null and nothing is short.
+ */
+function stageLines(stages: StageEntity[]): EquipmentLine[] {
+  const groups = new Map<string, EquipmentLine>();
+  for (const s of stages) {
+    const r = (v: number): number => Math.round(v * 100) / 100;
+    const key = `${r(s.heightIn)}|${[r(s.widthIn), r(s.depthIn)].sort((a, b) => a - b).join('x')}`;
+    const hit = groups.get(key);
+    if (hit) { hit.qty++; continue; }
+    groups.set(key, {
+      catalogId: STAGE_DECK_ID, name: 'Stage deck', qty: 1,
+      dims: [s.widthIn, s.heightIn, s.depthIn], owned: null, short: 0, ghosts: 0,
+    });
+  }
+  return [...groups.values()];
 }
 
 /** What the whole scene needs pulled. */
 export function buildList(doc: Document): BuildList {
   const walls = doc.entities.filter((e): e is LedWallEntity => e.type === 'led-wall').map(wallBuild);
-  const equipment = equipmentLines(doc.entities.filter((e): e is EquipmentEntity => e.type === 'equipment'));
+  const equipment = [
+    ...equipmentLines(doc.entities.filter((e): e is EquipmentEntity => e.type === 'equipment')),
+    ...stageLines(doc.entities.filter((e): e is StageEntity => e.type === 'stage')),
+  ].sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
 
   const byCut = zeroCuts();
   let fleetCabinets = 0, accessorySets = 0;

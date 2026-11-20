@@ -40,6 +40,12 @@ Known limits: with bezels off no header lands within a quarter inch (it would ta
 those walls get towers. Two frames meeting at a fold can still put plates on top of each other,
 and the planner says so when they do.
 
+### Build list: stage decks
+
+Stage decks are on the build list now, as hardware lines: one line per size, the same deck turned
+a quarter counted together, a deck on shorter legs kept apart. No deck stock is recorded yet, so
+the lines carry no owned figure and never show a shortfall.
+
 ## 2.2.0 — 2026-11-19
 
 The truss, the clamps and the bolt holes we actually own, the rig that holds a wall up, and the
