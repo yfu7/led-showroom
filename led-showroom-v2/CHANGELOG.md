@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.3.0 — 2026-11-19
 
 ### Auto truss: hidden behind the wall, and built from what we own
 
