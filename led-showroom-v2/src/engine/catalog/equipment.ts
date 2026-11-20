@@ -150,6 +150,8 @@ export const VELOXITY_PRODUCTS: EquipmentDef[] = [
  *
  *   DT-GP  11.156" section, joints bolted with (4) 5/8" Gr.8 bolts. Bought - Sales Order #735958.
  *          Six legs (5 ft + 4 ft), three 8 ft spans, six 6-way corners, six base plates: three arches.
+ *          3 ft DT-GP3 sticks are on hand as well, though not on that order: their part number is
+ *          from retailer listings, and no paperwork gives the count.
  *   F34    11.42" section, conical couplers. QUOTED ONLY - Estimates #162181 rev. and #162195 are
  *          estimates, not sales orders, so these parts may never have been bought.
  *
@@ -200,6 +202,17 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
     specs: [
       { label: 'Part no.', value: 'GP0079 - DT-GP4-BLK' },
       { label: 'Owned', value: '8 (at least - 6 on Sales Order #735958, more on hand)' },
+      GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
+    ],
+  },
+  {
+    id: 'gp-truss-3ft', name: 'DT-GP3 box truss 3 ft', category: 'structure', geometry: 'truss',
+    dims: [36, 11.16, 11.16], color: '#17181b',
+    description: '3 ft end-plated DT-GP box truss, black. Tops a leg or a span up to the length the wall needs.',
+    specs: [
+      { label: 'Part no.', value: 'GP0118 - DT-GP3-BLK (from retailer listings; not on the order)' },
+      // A word, not a number, on purpose: `ownedCount` reads it as "count unknown", never as zero.
+      { label: 'Owned', value: 'On hand - the count is not on the paperwork' },
       GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
     ],
   },
