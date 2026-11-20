@@ -61,6 +61,23 @@ leave room for a tower's plate beside them.
 **Spans past 20 ft are flagged.** That is where the DT-GP span table stops, so the planner warns
 that a longer span wants checking before it carries the wall.
 
+**Nothing stands in or shows past the cabinets across a fold.** Behind one run, a leg, span or
+coupler could stand inside the cabinets of the run past a fold, in front of that run where the wall
+folds forward, or show above or through it where it is shorter or open: a 7 x 4 folded 90 degrees
+put a leg into its corner column. The planner now looks at each column of every other run
+square on, and places no leg, span or coupler where it would stand in that column's cabinets or show
+past them. A plate, which may reach under and in front of cabinets, is held to the doorways rule
+above. Where two frames' plates would overlap at a tight fold, one frame gives way, and the planner
+tries the frames in the other order too. It says when columns go unheld because of a fold.
+
+This costs rigs. A wall that folds can get fewer legs than it would straight, sometimes none: of 59
+folded walls drawn at random, 28 get a rig where 35 did, and 154 columns are held where 179 were,
+though 14 of the 35 old rigs had something showing. A 50 x 20 wall folded twice stands on 18 legs
+where 15 stood, holds 48 of its 50 columns where it held 49, and takes about half a second to plan
+where it took a third. A test samples every rig on 11 folded walls and those 59, reading what shows
+off the scene rather than the planner's own sums: it finds nothing, where the planner as it was
+showed something on 4 of the 11 and 14 of the 59.
+
 For example, a 30 x 6 arch with two-column piers at both ends and in the middle, and a four-row
 lintel over two-row openings, gets three legs of plate, 4 ft stick and block, and spans of 30 ft (4,
 5, 8, 8 and 5 ft sticks) and 28 ft (an 8 and five 4 ft sticks), block faces 49 in up, over the
@@ -83,12 +100,9 @@ long spans: a 29 x 6 arch over two-row openings, with a one-column middle pier, 
 of 1.6 in (its section behind the column, its plate reaching out past the wall's end but clear of
 the doorway), so a frame reaches it only where a whole number of feet of span lands a leg there;
 otherwise that end stands on a tower. Beside a fold, at any angle, some columns can be out of reach.
-Across a fold the planner keeps every plate out of the other run's doorways and a tower's plate off
-the other plates; two frames' plates can still overlap, with a warning. Nothing else is checked
-across a fold: a tower or span behind one run can stand inside the cabinets of the run past it (a
-7 x 4 folded 90 degrees puts a leg 0.67 in into the corner column; it happens most at 120 to 150
-degrees), stand in front of that run where the wall folds forward, or show above or through it
-where it is shorter or open. With bezels off, an 11 x 8 stands on six towers, every
+Within a run, a coupler on a column's outer hole line can reach about 0.2 in past the column's side,
+behind an open slot in the column beside it; that is not checked, folded or straight. With bezels
+off, an 11 x 8 stands on six towers, every
 column held, but they take 66 couplers, 28 past our 38. Spans past 20 ft are drawn but not rated.
 
 ## 2.3.0 — 2026-11-19

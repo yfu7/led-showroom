@@ -139,18 +139,24 @@ export function trussBaseProfile(dims: readonly [number, number, number]): {
  * The zig-zag turns at every panel boundary, and the two end frames add a ring of their own just
  * inside each end.
  */
-const nodeCache = new Map<string, readonly number[]>();
+// By length, then section: the planner asks this in its innermost loops, too often to build a string key.
+const nodeCache = new Map<number, Map<number, readonly number[]>>();
+let nodeCacheSize = 0;
 
 export function braceNodesAlong(lenIn: number, sectionIn: number): readonly number[] {
-  const key = `${lenIn}|${sectionIn}`;
-  const hit = nodeCache.get(key);
+  let bySection = nodeCache.get(lenIn);
+  const hit = bySection?.get(sectionIn);
   if (hit) return hit;
   // Frozen: the array is handed out by reference, so a caller that pushed to it would poison
   // the cache for every later clamp on a stick of this length.
   const out = Object.freeze(computeBraceNodes(lenIn, sectionIn));
   // Bounded: a rig asks for a handful of (length, section) pairs, and the planner asks repeatedly
   // while it searches for a wall height that puts no coupler on a weld.
-  if (nodeCache.size < 256) nodeCache.set(key, out);
+  if (nodeCacheSize < 256) {
+    if (!bySection) nodeCache.set(lenIn, bySection = new Map());
+    bySection.set(sectionIn, out);
+    nodeCacheSize++;
+  }
   return out;
 }
 
@@ -172,5 +178,6 @@ function computeBraceNodes(lenIn: number, sectionIn: number): number[] {
 export function clearOfBraceNodes(alongIn: number, lenIn: number, sectionIn: number, jawHalfIn: number): boolean {
   if (alongIn < 0 || alongIn > lenIn) return false;
   const keepOut = jawHalfIn + diagonalRadiusIn(sectionIn);
-  return braceNodesAlong(lenIn, sectionIn).every(x => Math.abs(alongIn - x) >= keepOut);
+  for (const x of braceNodesAlong(lenIn, sectionIn)) if (Math.abs(alongIn - x) < keepOut) return false;
+  return true;
 }

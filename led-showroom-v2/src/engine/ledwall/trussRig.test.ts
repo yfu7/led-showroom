@@ -9,7 +9,9 @@ import { createDocument, createEquipment, createLedWall, createStage } from '../
 import type {
   Document, Entity, EquipmentEntity, GroupEntity, LedWallEntity, StageEntity,
 } from '../document/types';
-import { columnLocalToWall, computeColumnLayout, filledCells, wallDims, wallMountPoints } from './layout';
+import {
+  columnLocalToWall, computeColumnLayout, computeSegments, filledCells, wallDims, wallMountPoints,
+} from './layout';
 import { IPOSTER } from './specs';
 import { applyTrussRig, planTrussRig, rigEntityIds, RIG_GROUP_NAME, SHIM_MAX_IN } from './trussRig';
 
@@ -580,16 +582,19 @@ describe('planTrussRig', () => {
 
   it('keeps a plate out of a doorway round a fold, and off the floor a plate either side of it', () => {
     // Open at the floor under a lintel: column 1 of the first wall, just past its 120 degree fold, and
-    // column 3 of the second, just past its 90 degree fold. A plate behind the run on the other side
-    // of the fold can reach round onto the floor of the opening, or the floor just in front of or
-    // behind it; on 61555a4 the first wall's only plate stood in its doorway. Both walls still get a
-    // tower, so the check below has plates to look at.
+    // column 0 of the second, two columns before its fold of -120 degrees. A plate behind the run on
+    // the other side of the fold can reach round onto the floor of the opening, or the floor just in
+    // front of or behind it; on 61555a4 the first wall's only plate stood in its doorway, and with the
+    // check taken out one of the second wall's plates stands in its doorway, where now the nearest
+    // keeps half an inch clear. Both walls still get a tower, so the check below has plates to look at.
     const tight = createLedWall({ cols: 3, rows: 3 });
     tight.corners = [{ afterCol: 0, angle: 120 }];
     tight.shape = { mode: 'custom', cells: ['0,0', '0,1', '0,2', '1,0', '2,0', '2,1', '2,2'] };
-    const square = createLedWall({ cols: 4, rows: 3 });
-    square.corners = [{ afterCol: 2, angle: 90 }];
-    square.shape = { mode: 'custom', cells: ['0,0', '0,1', '0,2', '1,0', '1,1', '1,2', '2,0', '2,1', '2,2', '3,0'] };
+    const inward = createLedWall({ cols: 7, rows: 4 });
+    inward.corners = [{ afterCol: 1, angle: -120 }];
+    const open: string[] = [];
+    for (let c = 0; c < 7; c++) for (let r = 0; r < 4; r++) if (c > 0 || r === 0) open.push(`${c},${r}`);
+    inward.shape = { mode: 'custom', cells: open };
 
     /** Whether two convex outlines on the floor are apart, touching allowed. */
     const apart = (a: THREE.Vector3[], b: THREE.Vector3[]): boolean => [a, b].some(poly => poly.some((p, i) => {
@@ -599,7 +604,7 @@ describe('planTrussRig', () => {
       return Math.max(...pa) <= Math.min(...pb) + 1e-6 || Math.max(...pb) <= Math.min(...pa) + 1e-6;
     }));
 
-    for (const wall of [tight, square]) {
+    for (const wall of [tight, inward]) {
       const doc = docWith(wall);
       const after = applyTrussRig(doc, wall, planTrussRig(doc, wall));
       const world = worldMatrix(wallOf(after, wall.id), byIdOf(after));
@@ -791,6 +796,242 @@ describe('every rig it draws', () => {
       expect(across(Math.min(...xs), Math.max(...xs)).filter(c => doorways.has(c)), `${p.name} reaches into a doorway`).toEqual([]);
     }
   });
+});
+
+/* ───────────────────────────── Across folds ───────────────────────────── */
+
+/**
+ * The box a rig piece fills in its own frame: a stick, a block or a coupler whole, a base's riser
+ * above its plate. The plate lies flat on the floor, where it may reach out, so it is left out.
+ */
+function solidOf(p: EquipmentEntity): THREE.Box3 | null {
+  const [w, h, d] = p.dims;
+  if (p.catalogId === 'clamp-8002') return new THREE.Box3(new THREE.Vector3(-w / 2, 0, -d / 2), new THREE.Vector3(w / 2, h, d / 2));
+  if (!isTruss(p)) return null;
+  const base = p.geometry === 'truss-base' ? trussBaseProfile(p.dims) : null;
+  if (base && base.riserLen <= 1e-9) return null;
+  const hw = base ? base.section / 2 : w / 2, hd = base ? base.section / 2 : d / 2, y0 = base ? base.plateThick : 0;
+  return new THREE.Box3(new THREE.Vector3(-hw, y0, -hd), new THREE.Vector3(hw, h, hd));
+}
+
+/** Points over a box's six faces, no more than `step` apart. */
+function facePoints(b: THREE.Box3, step: number): THREE.Vector3[] {
+  const lo = b.min.toArray(), hi = b.max.toArray();
+  const n = [0, 1, 2].map(i => Math.max(1, Math.ceil((hi[i] - lo[i]) / step)));
+  const out: THREE.Vector3[] = [];
+  for (let a = 0; a < 3; a++) {
+    const [u, v] = [(a + 1) % 3, (a + 2) % 3];
+    for (const side of [lo[a], hi[a]]) for (let j = 0; j <= n[u]; j++) for (let k = 0; k <= n[v]; k++) {
+      const p = [0, 0, 0];
+      p[a] = side; p[u] = lo[u] + (hi[u] - lo[u]) * j / n[u]; p[v] = lo[v] + (hi[v] - lo[v]) * k / n[v];
+      out.push(new THREE.Vector3(p[0], p[1], p[2]));
+    }
+  }
+  return out;
+}
+
+/**
+ * What of `wall`'s rig shows, read off the scene rather than the planner's own sums, and so good
+ * at any fold: each piece's faces are sampled, and a point shows where it stands inside a column's
+ * cabinets or open slot, in front of a column, or behind a column where it has no cabinet -- unless
+ * another column's cabinets stand between the point and that column's face. A coupler is checked
+ * against the columns of other runs only, as the planner checks it: one can reach a fifth of an inch
+ * past its column's strip, behind an open slot in the column beside it, on a straight wall too.
+ */
+function showing(doc: Document, wallId: string, step: number): string[] {
+  const byId = byIdOf(doc);
+  const wall = wallOf(doc, wallId);
+  const dims = wallDims(wall);
+  const cells = new Set(filledCells(wall));
+  const toWorld = worldMatrix(wall, byId);
+  const runOf: number[] = [];
+  computeSegments(dims.cols, wall.corners).forEach((s, i) => { for (let c = s.startCol; c <= s.endCol; c++) runOf[c] = i; });
+  const T = 2e-3, strip = (dims.panelW + dims.gap) / 2, slab = dims.panelD / 2;
+  const cols = computeColumnLayout(dims, wall.corners).map(col => {
+    const m = toWorld.clone()
+      .multiply(new THREE.Matrix4().makeTranslation(col.x, 0, col.z))
+      .multiply(new THREE.Matrix4().makeRotationY(col.rotY));
+    // Each unbroken band of cabinets, bottom up; one on the bottom row runs on down to the floor.
+    const solid: THREE.Box3[] = [], hides: THREE.Box3[] = [];
+    let lo: number | null = null;
+    for (let k = 0; k <= dims.rows; k++) {
+      const filled = k < dims.rows && cells.has(`${col.col},${dims.rows - 1 - k}`);
+      if (filled && lo === null) lo = k === 0 ? -1e6 : k * (dims.panelH + dims.gap);
+      else if (!filled && lo !== null) {
+        const hi = k * (dims.panelH + dims.gap) - dims.gap;
+        solid.push(new THREE.Box3(new THREE.Vector3(-dims.panelW / 2 + T, lo + T, -slab + T), new THREE.Vector3(dims.panelW / 2 - T, hi - T, slab - T)));
+        hides.push(new THREE.Box3(new THREE.Vector3(-strip + T, lo + T, -slab + T), new THREE.Vector3(strip - T, hi - T, slab - T)));
+        lo = null;
+      }
+    }
+    return { run: runOf[col.col], toWorld: m, toLocal: m.clone().invert(), solid, hides };
+  });
+  const local = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3(), end = new THREE.Vector3();
+  /** How far the segment from `p` to `q` runs inside `box`. */
+  const through = (box: THREE.Box3, p: THREE.Vector3, q: THREE.Vector3): number => {
+    let t0 = 0, t1 = 1;
+    for (const ax of ['x', 'y', 'z'] as const) {
+      const d = q[ax] - p[ax];
+      if (Math.abs(d) < 1e-12) { if (p[ax] <= box.min[ax] || p[ax] >= box.max[ax]) return 0; continue; }
+      const ta = (box.min[ax] - p[ax]) / d, tb = (box.max[ax] - p[ax]) / d;
+      t0 = Math.max(t0, Math.min(ta, tb)); t1 = Math.min(t1, Math.max(ta, tb));
+      if (t0 >= t1) return 0;
+    }
+    return (t1 - t0) * p.distanceTo(q);
+  };
+  /** Whether cabinets of a column other than `c` stand between world points `p` and `q`. */
+  const between = (c: number, p: THREE.Vector3, q: THREE.Vector3): boolean => cols.some((k, i) => {
+    if (i === c) return false;
+    a.copy(p).applyMatrix4(k.toLocal); b.copy(q).applyMatrix4(k.toLocal);
+    return k.hides.some(box => through(box, a, b) > T);
+  });
+  const fault = (p: THREE.Vector3, skipRun: number): string | null => {
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (c.run === skipRun) continue;
+      local.copy(p).applyMatrix4(c.toLocal);
+      if (Math.abs(local.x) >= strip - T) continue;
+      const z = local.z;
+      if (Math.abs(z) < slab - T) return c.solid.some(box => box.containsPoint(local)) ? `through column ${i}` : `in the open slot of column ${i}`;
+      if (z <= slab + T && z >= -slab - T) continue;   // on a face: touching
+      if (z < 0 && c.hides.some(box => local.y >= box.min.y - 2 * T && local.y <= box.max.y + 2 * T)) continue;
+      end.set(local.x, local.y, z > 0 ? slab : -slab).applyMatrix4(c.toWorld);
+      if (!between(i, p, end)) return z > 0 ? `in front of column ${i}` : `behind the open slot of column ${i}`;
+    }
+    return null;
+  };
+  /** The run of the column whose back face a coupler is bolted to. */
+  const hostRun = (cp: EquipmentEntity): number => {
+    const bolt = boltOf(doc, cp);
+    let best = -1, gap = Infinity;
+    cols.forEach(c => {
+      local.copy(bolt).applyMatrix4(c.toLocal);
+      const off = Math.abs(local.x) <= dims.panelW / 2 ? Math.abs(local.z + slab) : Infinity;
+      if (off < gap) { gap = off; best = c.run; }
+    });
+    return best;
+  };
+  const out: string[] = [];
+  for (const p of rigOf(doc, wallId)) {
+    const box = solidOf(p);
+    if (!box) continue;
+    const skipRun = p.catalogId === 'clamp-8002' ? hostRun(p) : -1;
+    const m = worldMatrix(p, byId);
+    for (const q of facePoints(box, step)) {
+      const w = q.applyMatrix4(m);
+      const f = fault(w, skipRun);
+      if (f) { out.push(`${p.name}${p.ghost ? ' (ghost)' : ''} at ${fmt(w)}: ${f}`); break; }
+    }
+  }
+  return out;
+}
+
+/** A wall `cols` wide whose column c has cabinets in its top `tops[c]` rows (row 0 is the top). */
+function hungWall(cols: number, rows: number, tops: readonly number[]): LedWallEntity {
+  const wall = createLedWall({ cols, rows });
+  const cells: string[] = [];
+  for (let c = 0; c < cols; c++) for (let r = 0; r < tops[c]; r++) cells.push(`${c},${r}`);
+  wall.shape = { mode: 'custom', cells };
+  return wall;
+}
+
+const foldWall = (
+  wall: LedWallEntity, afterCol: number, angle: number, scale = 1, yaw = 0, pos?: [number, number, number],
+): LedWallEntity => {
+  wall.corners = [{ afterCol, angle }];
+  wall.transform.scale = [scale, scale, scale];
+  wall.transform.rotation = [0, yaw, 0];
+  if (pos) wall.transform.position = pos;
+  return wall;
+};
+
+/** Folded walls that once had truss or couplers showing past the cabinets of the run across the fold. */
+const FOLDS: [string, () => LedWallEntity][] = [
+  ['4 x 3 folded 90 degrees after column 1', () => foldWall(createLedWall({ cols: 4, rows: 3 }), 1, 90)],
+  ['4 x 3 folded 120 degrees after column 1', () => foldWall(createLedWall({ cols: 4, rows: 3 }), 1, 120)],
+  ['7 x 4 folded 90 degrees after column 3', () => foldWall(createLedWall({ cols: 7, rows: 4 }), 3, 90)],
+  ['7 x 4 folded -90 degrees after column 3', () => foldWall(createLedWall({ cols: 7, rows: 4 }), 3, -90)],
+  ['8 x 3 folded 135 degrees after column 3', () => foldWall(createLedWall({ cols: 8, rows: 3 }), 3, 135)],
+  ['8 x 3 folded -135 degrees after column 3', () => foldWall(createLedWall({ cols: 8, rows: 3 }), 3, -135)],
+  ['a ragged 7 x 5 folded 90 degrees, at twice size and turned', () => foldWall(hungWall(7, 5, [2, 5, 5, 1, 1, 3, 4]), 3, 90, 2, -20, [-2, 0, 59])],
+  ['a 5 x 3 a row short at one end, folded -135 degrees at twice size', () => foldWall(hungWall(5, 3, [3, 3, 3, 3, 2]), 2, -135, 2)],
+  ['a ragged 6 x 4 folded -90 degrees', () => foldWall(hungWall(6, 4, [4, 3, 1, 4, 2, 4]), 2, -90)],
+  ['a ragged 6 x 4 folded 90 degrees', () => foldWall(hungWall(6, 4, [4, 3, 1, 4, 2, 4]), 2, 90)],
+  ['6 x 3 folded -90 degrees at 1.5 times size, turned 35 degrees', () => foldWall(createLedWall({ cols: 6, rows: 3 }), 2, -90, 1.5, 35)],
+];
+
+/** A seeded random number generator (mulberry32), so a sweep draws the same walls every run. */
+const seeded = (seed: number) => (): number => {
+  seed = (seed + 0x6D2B79F5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+
+/**
+ * A wall of up to 14 x 10 with one to three folds, drawn from `seed`: whole, notched, an arch, or
+ * holed at random; bezels on or off; moved, turned and scaled; one in ten on a stage deck.
+ */
+function foldedScene(seed: number): { doc: Document; wall: LedWallEntity } {
+  const r = seeded(seed), ri = (a: number, b: number): number => a + Math.floor(r() * (b - a + 1));
+  const cols = ri(1, 14), rows = ri(1, 10);
+  const wall = createLedWall({ cols, rows, bezels: r() < 0.8, position: [ri(-60, 60), r() < 0.2 ? ri(1, 20) : 0, ri(-60, 60)] });
+  wall.transform.rotation = [0, r() < 0.5 ? 0 : ri(-180, 180), 0];
+  if (r() < 0.3) { const sc = [1.5, 2, 0.5][ri(0, 2)]; wall.transform.scale = [sc, sc, sc]; }
+  const kind = ri(0, 3);
+  if (kind > 0) {
+    const cells: string[] = [];
+    const tops = Array.from({ length: cols }, () => ri(0, rows - 1));
+    const lintel = ri(1, Math.max(1, rows - 1));
+    const piers = new Set(Array.from({ length: cols }, (_, c) => c).filter(() => r() < 0.4));
+    for (let c = 0; c < cols; c++) for (let rr = 0; rr < rows; rr++) {
+      const keep = kind === 1 ? rr >= tops[c] : kind === 2 ? (piers.has(c) || rr < lintel) : r() < 0.8;
+      if (keep) cells.push(`${c},${rr}`);
+    }
+    if (cells.length) wall.shape = { mode: 'custom', cells };
+  }
+  if (cols > 1) {
+    const n = ri(1, Math.min(3, cols - 1));
+    const used = new Set<number>();
+    wall.corners = [];
+    for (let i = 0; i < n; i++) {
+      const at = ri(0, cols - 2);
+      if (used.has(at)) continue;
+      used.add(at);
+      wall.corners.push({ afterCol: at, angle: [90, -90, 120, -120, 135, -135, 150, -150, 45, -45, 30, -30][ri(0, 11)] });
+    }
+    wall.corners.sort((p, q) => p.afterCol - q.afterCol);
+  }
+  if (r() < 0.1) {
+    const deck = createStage(ri(12, 36));
+    wall.transform.position[1] = deck.heightIn;
+    wall.attachedTo = deck.id;
+    return { doc: docWith(deck, wall), wall };
+  }
+  return { doc: docWith(wall), wall };
+}
+
+describe('every rig it draws, across folds', () => {
+  it.each(FOLDS)('%s: shows nothing past the cabinets', (_, make) => {
+    const wall = make();
+    const doc = docWith(wall);
+    expect(showing(applyTrussRig(doc, wall, planTrussRig(doc, wall)), wall.id, 0.5)).toEqual([]);
+  });
+
+  it('shows nothing past the cabinets on folded walls drawn at random', () => {
+    let walls = 0, rigged = 0;
+    for (let seed = 20001; seed <= 20060; seed++) {
+      const { doc, wall } = foldedScene(seed);
+      if (!wall.corners.length) continue;
+      walls++;
+      const after = applyTrussRig(doc, wall, planTrussRig(doc, wall));
+      if (rigOf(after, wall.id).length) rigged++;
+      expect(showing(after, wall.id, 1), `seed ${seed}`).toEqual([]);
+    }
+    expect(walls).toBe(59);
+    // Strict across a fold, the planner leaves some walls bare: 28 of these 59 get a rig.
+    expect(rigged).toBeGreaterThanOrEqual(28);
+  }, 60000);
 });
 
 describe('applyTrussRig', () => {
