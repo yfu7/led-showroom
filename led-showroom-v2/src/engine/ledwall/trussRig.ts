@@ -62,6 +62,13 @@ const BASE_ID = 'gp-base-36';
 const BLOCK_ID = 'gp-corner-6way';
 /** DT-GP stock. The catalog dims are for a stick lying down; a leg stands them on end. */
 const STICK_IDS = ['gp-truss-8ft', 'gp-truss-5ft', 'gp-truss-4ft'] as const;
+/**
+ * DT-GP sticks we hold none of. Only a frame's leg takes one, and only where it lands the header on
+ * a row of holes: a rig that takes one is drawn with it as a ghost, a stick to buy, and is chosen
+ * only when it holds more columns than any rig of our own sticks. Over a walk-through arch's
+ * five-row doorways, a 4 ft and a 3 ft under a spare block put the header on the lintel's low holes.
+ */
+const BUY_STICK_IDS = ['gp-truss-3ft'] as const;
 const CLAMP_ID = 'clamp-8002';
 
 export const RIG_GROUP_NAME = 'Truss rig';
@@ -330,7 +337,10 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   const plateSize = Math.max(baseDef.dims[0], baseDef.dims[2]);
   const blockH = blockDef.dims[1];
   const stickLens = stickDefs.map(d => d.dims[0]);
-  const stickOf = (len: number): EquipmentDef => stickDefs.find(d => d.dims[0] === len) ?? stickDefs[0];
+  const buyDefs = BUY_STICK_IDS.map(id => equipmentDef(id)).filter((d): d is EquipmentDef => !!d && d.dims[1] === section);
+  const buyIds = new Set(buyDefs.map(d => d.id));
+  const stickOf = (len: number): EquipmentDef =>
+    stickDefs.find(d => d.dims[0] === len) ?? buyDefs.find(d => d.dims[0] === len) ?? stickDefs[0];
   /**
    * The shortest leg with a chord a coupler can close on: a base that stands a riser of its own,
    * otherwise the base plate and the shortest stick. A column whose top is lower hides no leg.
@@ -1077,7 +1087,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
    * shim that puts one of its header chords on a row of holes (within the quarter inch), and at no
    * shim at all: there the spans only brace the legs, which is still a frame.
    */
-  const stacks: LegStack[] = stickStacks(stickLens, MAX_LEG_STICKS).filter(sticks => sticks.length)
+  const stacks: LegStack[] = stickStacks([...stickLens, ...buyDefs.map(d => d.dims[0])], MAX_LEG_STICKS).filter(sticks => sticks.length)
     .flatMap(sticks => [0, 1].map(spacers => ({ sticks, spacers, rise: sum(sticks) + spacers * blockH })));
   const heights = new Set<number>(onFace.map(m => s * m.pos[1]));
   const options = new Map<string, { stack: LegStack; shim: number }>();
@@ -1086,7 +1096,8 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     if (!options.has(key)) options.set(key, { stack, shim });
   };
   for (const stack of stacks) {
-    addOption(stack, 0);
+    // A stick to buy earns its place by bolting a header; a brace stands on sticks we have.
+    if (stack.sticks.every(l => stickLens.includes(l))) addOption(stack, 0);
     for (const c of [chordR, section - chordR]) {
       for (const hh of heights) {
         const shim = baseH + stack.rise + c - base.plateThick - hh;
@@ -1342,13 +1353,15 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     }
 
     const frames = stack ? placed.length : 0;
+    const bought = legs.reduce((a, g) => a + g.pieces.filter(p => buyIds.has(p.catalogId)).length, 0);
     const pieceCount = legs.reduce((a, g) => a + g.pieces.length, 0) + spans.length + clamps.length;
     return {
       shim, bottomY, legs, spans, clamps: clamps.map(c => c.piece), held, supported, weld, headerY, long, frames, ghosts, dropped,
-      // A rig that holds nothing is no rig. Of the rest, the most columns held; then legs tied
-      // together by spans over loose towers -- but never at the cost of a column left hanging; then
-      // the fewest ghosts and the fewest legs; then the most columns with couplers of their own.
-      score: [supported.size ? 1 : 0, supported.size, frames ? 1 : 0, -ghosts, -legs.length, held.size,
+      // A rig that holds nothing is no rig. Of the rest, the most columns held; then the fewest
+      // sticks to buy, so one is bought only to hold more; then legs tied together by spans over
+      // loose towers -- but never at the cost of a column left hanging; then the fewest ghosts and
+      // the fewest legs; then the most columns with couplers of their own.
+      score: [supported.size ? 1 : 0, supported.size, -bought, frames ? 1 : 0, -ghosts, -legs.length, held.size,
         headerY ?? -1e9, clamps.length, -pieceCount, -shim],
     };
   };
@@ -1448,7 +1461,9 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   }
   for (const f of shortfall) {
     const k = f.need - f.have;
-    warnings.push(`${f.name}: ${f.need} needed, ${f.have} available - ${k} drawn as ${k === 1 ? 'a ghost' : 'ghosts'}.`);
+    warnings.push(buyIds.has(f.catalogId)
+      ? `${f.name}: ${k} to buy, drawn as ${k === 1 ? 'a ghost' : 'ghosts'}. We hold none, and our own sticks put no header on a row of holes here.`
+      : `${f.name}: ${f.need} needed, ${f.have} available - ${k} drawn as ${k === 1 ? 'a ghost' : 'ghosts'}.`);
   }
 
   return plan;

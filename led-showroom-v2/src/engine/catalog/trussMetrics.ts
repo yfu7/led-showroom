@@ -105,14 +105,14 @@ export const BASE_PLATE_THICK_IN = 0.5;
 export const GP_SECTION_IN = 11.16;
 
 /**
- * The DT-GP base plate: 36 in square and about 1 in thick, as measured. The order gives no
+ * The DT-GP base plate: 36 in square and 1.5 in thick, as measured. The order gives no
  * geometry, so these are nominal.
  *
  * Shared with the planner because the plate decides two things a rig cannot fudge. It lies flat on
  * the floor and reaches forward under the cabinets, so a wall rigged to these legs comes no lower
  * than its top; and a leg's first stick, whose chords take couplers, bolts straight onto it.
  */
-export const GP_BASE_PLATE_IN = { size: 36, thick: 1 } as const;
+export const GP_BASE_PLATE_IN = { size: 36, thick: 1.5 } as const;
 
 /**
  * What a `truss-base` of `dims` draws: a plate the full declared footprint, as thick as

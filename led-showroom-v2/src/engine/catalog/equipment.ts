@@ -162,8 +162,8 @@ export const VELOXITY_PRODUCTS: EquipmentDef[] = [
  *   DT-GP  11.156" section, end plates bolted with (4) 5/8" Gr.8 bolts.
  *            #735958  5/20/2026  6 x 5 ft, 6 x 4 ft, 3 x 8 ft, 6 x 6-way corners, 6 base plates
  *            #736643   7/1/2026  6 x 4 ft
- *          No 3 ft stick is on any of the orders, so there is none in the catalog: the orders are
- *          the whole of our stock.
+ *          No 3 ft stick is on any of the orders: the orders are the whole of our stock. The 3 ft
+ *          is listed with none owned, as the stick to buy for the legs of a walk-through arch.
  *   F34    11.42" section, conical couplers.
  *            #733795   2/6/2026  2 x 1.5 m, 6 x 1.25 m, 2 x 2-way 90 deg corners, 2 x 3-way T junctions
  *            #734958  3/31/2026  2 x 1 x 4 ft steel base plates, 2 x 2-way 90 deg corners
@@ -224,6 +224,16 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
     ],
   },
   {
+    id: 'gp-truss-3ft', name: 'DT-GP3 box truss 3 ft', category: 'structure', geometry: 'truss', trussSystem: 'DT-GP',
+    dims: [36, 11.16, 11.16], color: '#17181b',
+    description: '3 ft end-plated DT-GP box truss, black. Not one of ours: the stick to buy so a leg lands the header on the lintel of a walk-through arch.',
+    specs: [
+      { label: 'Part no.', value: 'GP0118 - DT-GP3-BLK (from retailer listings; not on any order)' },
+      { label: 'Owned', value: '0 (on none of our orders; a DT-GP2 2 ft stick does the same job in a leg)' },
+      GP_SYSTEM, GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
+    ],
+  },
+  {
     id: 'gp-corner-6way', name: 'DT-GP 6-way corner block', category: 'structure', geometry: 'truss-block', trussSystem: 'DT-GP',
     dims: [11.16, 11.16, 11.16], color: '#17181b',
     description: 'Six-way GP truss corner block, black: a cube of the section with a way out of every face. The shoulder where a leg meets a span.',
@@ -235,12 +245,12 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
   },
   {
     id: 'gp-base-36', name: 'DT-GP base plate 36 in', category: 'structure', geometry: 'truss-base', trussSystem: 'DT-GP',
-    dims: [36, 1, 36], color: '#17181b',
-    description: 'Heavy-duty base plate, black: 36 x 36 in and about 1 in thick, flat on the floor. The first stick of a leg bolts straight onto it. One under each leg.',
+    dims: [36, 1.5, 36], color: '#17181b',
+    description: 'Heavy-duty base plate, black: 36 x 36 in and 1.5 in thick, flat on the floor. The first stick of a leg bolts straight onto it. One under each leg.',
     specs: [
       { label: 'Part no.', value: 'BP0300 - DT-GP-Base36-BLK' },
       { label: 'Owned', value: '6 (Sales Order #735958)' },
-      { label: 'Plate', value: '36 x 36 in, about 1 in thick (as we describe the plates we hold)' },
+      { label: 'Plate', value: '36 x 36 in, 1.5 in thick (as we measure the plates we hold)' },
       { label: 'On the order', value: 'Bills six of this part against a quantity of 0, and lists six GP0287 DT-GP BASE/30BLK (30 in raised GP base) beside it at no charge' },
       GP_SYSTEM, GP_SECTION, GP_CONN,
     ],

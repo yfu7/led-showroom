@@ -206,12 +206,12 @@ describe('buildEquipment', () => {
     disposeEquipmentBuild(build);
   });
 
-  it('draws a base as a plate the full footprint, an inch thick, with nothing standing on it', () => {
-    const build = buildEquipment(entity('truss-base', [36, 1, 36]));
+  it('draws a base as a plate the full footprint, 1.5 in thick, with nothing standing on it', () => {
+    const build = buildEquipment(entity('truss-base', [36, 1.5, 36]));
     expect(build.meshes).toHaveLength(1);
     const plate = meshBox(build.meshes[0]);
     for (const [v, want] of [[plate.min.x, -18], [plate.max.x, 18], [plate.min.z, -18], [plate.max.z, 18],
-      [plate.min.y, 0], [plate.max.y, 1]] as const) expect(v).toBeCloseTo(want, 6);
+      [plate.min.y, 0], [plate.max.y, 1.5]] as const) expect(v).toBeCloseTo(want, 6);
     disposeEquipmentBuild(build);
   });
 
@@ -221,11 +221,11 @@ describe('buildEquipment', () => {
     const riser = build.meshes.find(m => m.name === 'truss')!;
     const plate = meshBox(build.meshes.find(m => m !== riser)!), r = meshBox(riser);
     for (const [v, want] of [[plate.min.x, -18], [plate.max.x, 18], [plate.min.z, -18], [plate.max.z, 18],
-      [plate.min.y, 0], [plate.max.y, 1]] as const) expect(v).toBeCloseTo(want, 6);
+      [plate.min.y, 0], [plate.max.y, 1.5]] as const) expect(v).toBeCloseTo(want, 6);
     expect(r.max.x - r.min.x).toBeCloseTo(11.16, 6);
     expect(r.max.z - r.min.z).toBeCloseTo(11.16, 6);
     // The riser's chords start on the plate's top, which is where the planner closes its lowest jaw.
-    expect(r.min.y).toBeCloseTo(1, 6);
+    expect(r.min.y).toBeCloseTo(1.5, 6);
     expect(r.max.y).toBeCloseTo(36.5, 6);
     disposeEquipmentBuild(build);
   });

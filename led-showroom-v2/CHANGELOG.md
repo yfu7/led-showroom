@@ -1,6 +1,30 @@
 # Changelog
 
-## 2.4.0 — 2026-11-20
+## Unreleased
+
+### Auto truss: a walk-through arch gets its header, on a 3 ft stick to buy
+
+**The base plate is 1.5 in thick**, as measured, where the catalog had it about an inch. Every rig
+and the wall on it stand half an inch higher than 2.4.0 says; nothing changes between the truss and
+the wall.
+
+**A 3 ft DT-GP stick is back in the catalog, with none owned.** It is on none of our orders. The
+planner puts one only in a frame's leg, only where it lands the header on a row of holes, and takes
+such a rig only where it supports more columns than every rig of our own sticks. The stick is drawn
+as a ghost, and the planner says how many to buy. A 2 ft DT-GP2 does the same job beside a 5 ft
+stick (a 4 and a 3 make 7 ft, as a 5 and a 2 do), but the planner draws the 3 ft.
+
+**A 30 x 7 arch under a two-row lintel now frames.** A leg behind each pier stands on a plate, a
+4 ft and a 3 ft stick and two blocks, the lower one a spacer: 107.82 in. Spans run block face to
+block face behind both doorways, and the header's bottom chord lands on the lintel's low holes, on a
+0.15 in shim. 28 of the 30 columns have couplers and all 30 are supported, where three towers gave 3
+and 6. It takes three 3 ft sticks to buy, and 52 couplers where we have 38.
+
+In a sweep of 30-column arches of 3 to 12 rows, with bezels on, every arch of six rows or more with
+doorways three to five rows high now frames on one 3 ft stick per leg (21 arches). With bezels off,
+walls of five to nine rows with doorways two to four rows high frame on two per leg (15). Doorways of
+six rows or more with bezels on, and of five or more on walls under ten rows with bezels off, still
+stand on towers alone. No rectangular wall of 3 to 14 rows, 4 to 20 columns wide, takes one.
 
 ### Truss inventory: every order, and two systems that never mix
 

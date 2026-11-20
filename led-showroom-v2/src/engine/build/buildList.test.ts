@@ -286,13 +286,13 @@ describe('buildList', () => {
   });
 
   it('lists a part the catalog no longer carries by its id, with no stock count', () => {
-    // A scene saved when the catalog held a DT-GP 3 ft stick, which is on none of our orders.
+    // A scene saved with a stick since taken out of the catalog.
     const list = buildList(docWith(createEquipment({
-      id: 'gp-truss-3ft', name: 'DT-GP3 box truss 3 ft', geometry: 'truss',
-      dims: [36, 11.16, 11.16], color: '#17181b',
+      id: 'gp-truss-7ft', name: 'DT-GP7 box truss 7 ft', geometry: 'truss',
+      dims: [84, 11.16, 11.16], color: '#17181b',
     })));
 
-    expect(list.equipment[0]).toMatchObject({ catalogId: 'gp-truss-3ft', name: 'gp-truss-3ft', qty: 1, owned: null, short: 0 });
+    expect(list.equipment[0]).toMatchObject({ catalogId: 'gp-truss-7ft', name: 'gp-truss-7ft', qty: 1, owned: null, short: 0 });
     expect(buildListText(list, 'in')).not.toContain('SHORT');
   });
 

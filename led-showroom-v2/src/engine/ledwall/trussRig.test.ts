@@ -33,7 +33,7 @@ const R = 25 / 25.4;                          // DT-GP chord: a 50 mm tube
 const CO = SECTION / 2 - R;                   // a leg's axis to its chords
 const REACH = 1.96875;                        // 8002 bolt face to the chord axis in its jaw
 const JAW_HALF = 1.26 / 2;                    // 8002 jaw, each way along the chord
-const PLATE = 1;                              // DT-GP base: a plate on the floor, nothing standing on it
+const PLATE = 1.5;                            // DT-GP base: a plate on the floor, nothing standing on it
 const LEG_Z = -PD / 2 - REACH - CO;           // a leg's axis, behind a wall at the origin
 const BASE_ID = 'gp-base-36';
 
@@ -241,11 +241,11 @@ describe('planTrussRig', () => {
       expect(leg.topY).toBeCloseTo(PLATE + 48, 9);
     });
 
-    // The plate reaches forward under the cabinets, so the wall stands on it: an inch up, no shim.
+    // The plate reaches forward under the cabinets, so the wall stands on it: 1.5 in up, no shim.
     expect(plan.bottomY).toBeCloseTo(PLATE, 9);
     expect(plan.liftIn).toBeCloseTo(PLATE, 9);
     expect(plan.shimIn).toBe(0);
-    expect(plan.warnings).toContain('The wall rises 1.00 in to sit on the 1.00 in base plates.');
+    expect(plan.warnings).toContain('The wall rises 1.50 in to sit on the 1.50 in base plates.');
 
     // The holes on its line between the stick's ends. The stick stands where the wall does, so each
     // hole is its own height up the stick: 1.20 in sits on the foot weld and 36.66 in on the panel
@@ -421,7 +421,7 @@ describe('planTrussRig', () => {
     expect(plan.bottomY).toBeCloseTo(PLATE, 9);
     expect(plan.liftIn).toBeCloseTo(PLATE - 10, 9);
     expect(plan.liftLocalIn).toBeCloseTo(PLATE - 10, 9);
-    expect(plan.warnings).toContain('The wall comes down 9.00 in to sit on the 1.00 in base plates.');
+    expect(plan.warnings).toContain('The wall comes down 8.50 in to sit on the 1.50 in base plates.');
     expect(plan.legs.every(l => l.pieces[0].position[1] === 0)).toBe(true);
   });
 
@@ -524,21 +524,72 @@ describe('planTrussRig', () => {
     expect(plan.ghosts).toBe(plan.shortfall[0].need - plan.shortfall[0].have);
   });
 
-  it('stands a walk-through arch on towers alone: no leg of our sticks lands a header on its lintel', () => {
-    // Over five-row doorways, the lintel's lowest holes stand 96.00 in up the wall. Of the legs that
-    // stand under its top, the nearest is a block on 8 ft of stick, its header's bottom chord 0.99 in
-    // over them: past the quarter-inch shim. Each pier stands on a tower, and nothing holds the
-    // lintel's 24 columns.
+  it('frames a walk-through arch over both doorways, on a 3 ft stick to buy in each leg', () => {
+    // Over five-row doorways, the lintel's lowest holes stand 96.00 in up the wall. Of the legs of our
+    // own sticks that stand under its top, the nearest is a block on 8 ft of stick, its header's
+    // bottom chord 0.99 in over them: past the quarter-inch shim. A 4 ft and a 3 ft under a spare
+    // block put it 0.15 in under them, inside it. We hold no 3 ft stick, so each leg's is a ghost, to
+    // buy: the frame holds the lintel's 24 columns, which a tower behind each pier cannot reach.
     const miss = 96 + R - (5 * PITCH + LOW);
     expect(miss).toBeCloseTo(0.99, 2);
     expect(miss).toBeGreaterThan(SHIM_MAX_IN);
+    const blockY = PLATE + 48 + 36 + SECTION;                // the span's block, on a spare one
+    const shim = blockY + R - PLATE - (5 * PITCH + LOW);
+    expect(shim).toBeCloseTo(0.147, 3);
+    expect(shim).toBeLessThanOrEqual(SHIM_MAX_IN);
 
     const wall = arch();
     const plan = planTrussRig(docWith(wall), wall);
-    expect(plan.frames).toBe(0);
-    expect(plan.legs.map(l => l.kind)).toEqual(['tower', 'tower', 'tower']);
-    expect([plan.held, plan.supported, plan.columns]).toEqual([3, 6, 30]);
-    expect(plan.warnings).toContain('24 columns are out of reach of every coupler, and nothing holds them.');
+    const W = 30 * PW + 29 * GAP;
+    const edge = (c: number): number => -W / 2 + c * STEP;   // a column's left edge
+    const piers = [[0, 2], [14, 16], [28, 30]].map(([a, b]) => [edge(a), edge(b) - GAP]);
+
+    expect(plan.frames).toBe(1);
+    expect(plan.legs.map(l => l.kind)).toEqual(['frame', 'frame', 'frame']);
+    plan.legs.forEach((leg, i) => {
+      const [l, r] = piers[i];
+      expect(leg.axis[0] - SECTION / 2).toBeGreaterThanOrEqual(l - 1e-9);
+      expect(leg.axis[0] + SECTION / 2).toBeLessThanOrEqual(r + 1e-9);
+      if (i > 0) expect(leg.axis[0] - 18).toBeGreaterThanOrEqual(l - 1e-9);
+      if (i < 2) expect(leg.axis[0] + 18).toBeLessThanOrEqual(r + 1e-9);
+      expect(leg.pieces.map(p => p.catalogId))
+        .toEqual([BASE_ID, 'gp-truss-4ft', 'gp-truss-3ft', 'gp-corner-6way', 'gp-corner-6way']);
+      expect(leg.pieces.map(p => p.ghost)).toEqual([false, false, true, false, false]);
+      expect(leg.topY).toBeCloseTo(blockY + SECTION, 9);
+    });
+
+    // Each doorway is bridged block face to block face, behind the lintel over it.
+    const chains: (typeof plan.spans)[] = [[], []];
+    for (const s of plan.spans) {
+      expect(s.position[1]).toBeCloseTo(blockY, 9);
+      expect(s.ghost).toBe(false);
+      chains[s.position[0] < plan.legs[1].axis[0] ? 0 : 1].push(s);
+    }
+    chains.forEach((chain, i) => {
+      let x = plan.legs[i].axis[0] + SECTION / 2;
+      for (const s of [...chain].sort((a, b) => a.position[0] - b.position[0])) {
+        expect(s.position[0] - s.dims[0] / 2).toBeCloseTo(x, 9);
+        x += s.dims[0];
+      }
+      expect(x).toBeCloseTo(plan.legs[i + 1].axis[0] - SECTION / 2, 9);
+      // Couplers close on it over the doorway, where only the lintel stands.
+      expect(plan.clamps.some(c => c.position[0] > piers[i][1] && c.position[0] < piers[i + 1][0])).toBe(true);
+    });
+
+    // The header's bottom chord lands on the low holes of the sixth row up, the lintel's lowest.
+    expect(plan.headerY).toBeCloseTo(blockY + R, 9);
+    expect(plan.shimIn).toBeCloseTo(shim, 9);
+    expect(plan.bottomY).toBeCloseTo(PLATE + shim, 9);
+    expect(PLATE + shim + 5 * PITCH - GAP).toBeLessThan(blockY);   // the doorways' tops, under it
+
+    expect([plan.held, plan.supported, plan.columns]).toEqual([28, 30, 30]);
+    expect(plan.warnings).toContain('The wall rises 1.65 in to sit on the 1.50 in base plates, on a 0.15 in shim so the header chord meets a row of holes.');
+    expect(plan.warnings).toContain('DT-GP3 box truss 3 ft: 3 to buy, drawn as ghosts. We hold none, and our own sticks put no header on a row of holes here.');
+    expect(plan.warnings).toContain('2 spans run past 20 ft, where the DT-GP span table stops (the longest is 30 ft): '
+      + 'have them checked before they carry the wall.');
+    expect(plan.shortfall.map(f => f.catalogId)).toEqual(['gp-truss-3ft', 'clamp-8002']);
+    expect(plan.shortfall[0]).toMatchObject({ need: 3, have: 0 });
+    expect(plan.ghosts).toBe(3 + plan.shortfall[1].need - plan.shortfall[1].have);
   });
 
   it('bridges a pier one column wide, where no plate can stand, with one span from pier to pier', () => {
@@ -666,14 +717,15 @@ describe('planTrussRig', () => {
   });
 
   it('refuses a wall shorter than its shortest leg, and a tilted one', () => {
-    // The shortest leg is a plate and a 4 ft stick, 49 in: over two rows on the plates, under three.
-    for (const [rows, tall] of [[1, '19.9'], [2, '38.9']] as const) {
+    // The shortest leg is a plate and a 4 ft stick, 49.5 in: over two rows on the plates, under three.
+    // A 3 ft stick, which we would have to buy, stands a leg only where it lands a header.
+    for (const [rows, tall] of [[1, '20.4'], [2, '39.4']] as const) {
       const wall = createLedWall({ cols: 2, rows });
       const plan = planTrussRig(docWith(wall), wall);
       expect(plan.legs).toEqual([]);
       expect(plan.clamps).toEqual([]);
       expect(plan.warnings).toContain('The shortest leg, a base plate and a 4 ft stick, stands '
-        + `49.0 in: taller than the wall in front of it, which stands ${tall} in, so it would show above it.`);
+        + `49.5 in: taller than the wall in front of it, which stands ${tall} in, so it would show above it.`);
     }
 
     const tilted = createLedWall({ cols: 2, rows: 3 });
@@ -1037,11 +1089,11 @@ describe('every rig it draws, across folds', () => {
 
 describe('applyTrussRig', () => {
   it('plans round a stick the catalog no longer carries, and leaves it be', () => {
-    // A scene saved when the catalog held a DT-GP 3 ft stick, which is on none of our orders: one
-    // stands apart from the wall. The plan is the one the wall gets alone, and the stick is untouched.
+    // A scene saved with a stick since taken out of the catalog stands apart from the wall. The plan
+    // is the one the wall gets alone, and the stick is untouched.
     const wall = createLedWall({ cols: 11, rows: 4 });
     const stale = createEquipment({
-      id: 'gp-truss-3ft', name: 'DT-GP3 box truss 3 ft', geometry: 'truss', dims: [36, SECTION, SECTION], color: '#17181b',
+      id: 'gp-truss-7ft', name: 'DT-GP7 box truss 7 ft', geometry: 'truss', dims: [84, SECTION, SECTION], color: '#17181b',
     }, [0, 0, 200]);
     expect(equipmentDef(stale.catalogId)).toBeUndefined();
     const doc = docWith(wall, stale);

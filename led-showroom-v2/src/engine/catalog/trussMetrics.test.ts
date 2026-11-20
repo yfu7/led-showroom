@@ -127,15 +127,15 @@ describe('clearOfBraceNodes', () => {
 });
 
 describe('trussBaseProfile', () => {
-  it('draws the catalog base as the measured 36 in plate, an inch thick, with nothing standing on it', () => {
+  it('draws the catalog base as the measured 36 in plate, 1.5 in thick, with nothing standing on it', () => {
     expect(GP_SECTION_IN).toBe(GP);
-    expect(GP_BASE_PLATE_IN).toEqual({ size: 36, thick: 1 });
-    expect(trussBaseProfile([36, 1, 36])).toEqual({ plateThick: 1, section: GP, riserLen: 0 });
+    expect(GP_BASE_PLATE_IN).toEqual({ size: 36, thick: 1.5 });
+    expect(trussBaseProfile([36, 1.5, 36])).toEqual({ plateThick: 1.5, section: GP, riserLen: 0 });
   });
 
   it('stands a riser on the plate only for height past it, never one wider than the plate', () => {
     // A base placed at 36.5 in before the catalog's became the plate alone keeps its riser.
-    expect(trussBaseProfile([36, 36.5, 36])).toEqual({ plateThick: 1, section: GP, riserLen: 35.5 });
+    expect(trussBaseProfile([36, 36.5, 36])).toEqual({ plateThick: 1.5, section: GP, riserLen: 35 });
     expect(trussBaseProfile([20, 0.5, 20])).toEqual({ plateThick: 0.5, section: GP, riserLen: 0 });
     expect(trussBaseProfile([8, 36, 10]).section).toBe(8);
   });
