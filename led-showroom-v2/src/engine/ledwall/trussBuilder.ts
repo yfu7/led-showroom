@@ -992,7 +992,9 @@ export function autoTrussRig(doc: Document, wall: LedWallEntity): AutoTruss | { 
   if (loose > 0) notes.push(`${loose} ${loose === 1 ? 'column is' : 'columns are'} out of reach of every coupler, and nothing holds ${loose === 1 ? 'it' : 'them'}.`);
   // Why, which only the planner can say: the holes a mitre cuts away, and the columns a fold keeps
   // every piece from. The builder couples the same columns, so its loose ones are the plan's.
-  notes.push(...plan.warnings.filter(w => MITRE.test(w) || (loose > 0 && FOLD.test(w))));
+  // The fold line follows the loose one: its "It" / "They" is those columns.
+  if (loose > 0) notes.push(...plan.warnings.filter(w => FOLD.test(w)));
+  notes.push(...plan.warnings.filter(w => MITRE.test(w)));
   if (auto.refused.length) {
     const n = auto.refused.length;
     const [first] = auto.refused;
