@@ -5,8 +5,8 @@
 ### Auto truss: hidden behind the wall, and built from what we own
 
 2.2.0's rig stood a tower behind every column and stacked it to the top row, which left truss
-showing over the top of most walls and ignored what was on the shelf. A rig is now planned the way
-the Financial Times wall was built.
+showing over the top of most walls and ignored what was on the shelf. A rig now aims at what the
+Financial Times wall needed: out of sight behind the cabinets, and built from our own stock.
 
 **Nothing shows from the front.** Every stick, block and riser stands behind the cabinets in front
 of it: no higher than their top, no wider than the wall. Only the base plates reach out, flat on the
@@ -18,8 +18,9 @@ frame: legs of base, sticks and a 6-way corner block, with 4, 5 and 8 ft spans b
 the top. The header's chords take couplers too, wherever a row of holes lands on one clear of a weld.
 The 11 x 8 Financial Times wall comes out as four legs of base, 4 ft stick and block, spans of
 5 + 8 + 5 ft, the header on the fifth row's top holes, every column held, 18 couplers and nothing
-short. Columns a frame cannot reach get towers, and no two base plates ever overlap, across a fold
-included.
+short. That rests on the base standing 36.5 in overall, which is still to be measured: at 36.0 in
+no header lands within the shim and the same wall gets towers. Columns a frame cannot reach get
+towers, and a tower's plate never overlaps another plate, across a fold included.
 
 **The stock we own is the limit.** 8 ft: 3. 5 ft: 6. 4 ft: 8. Corner blocks: 6. Raised bases: 6.
 Half couplers: 38. Pieces already standing elsewhere in the scene come off those counts first. What
