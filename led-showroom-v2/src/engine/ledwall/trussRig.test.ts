@@ -558,12 +558,14 @@ describe('planTrussRig', () => {
   });
 
   it('keeps a plate out of a doorway round a fold, and off the floor a plate either side of it', () => {
-    // Open at the floor: column 2 of the first wall, beside its 120 degree fold, and column 3 of the
-    // second, just past its 90 degree fold. A plate behind the run on the other side of the fold can
-    // reach round onto the floor of the opening, or the floor just in front of or behind it.
-    const tight = createLedWall({ cols: 5, rows: 3 });
-    tight.corners = [{ afterCol: 2, angle: 120 }];
-    tight.shape = { mode: 'custom', cells: ['0,0', '1,1', '1,2', '3,0', '3,1', '3,2', '4,0', '4,1', '4,2'] };
+    // Open at the floor under a lintel: column 1 of the first wall, just past its 120 degree fold, and
+    // column 3 of the second, just past its 90 degree fold. A plate behind the run on the other side
+    // of the fold can reach round onto the floor of the opening, or the floor just in front of or
+    // behind it; on 61555a4 the first wall's only plate stood in its doorway. Both walls still get a
+    // tower, so the check below has plates to look at.
+    const tight = createLedWall({ cols: 3, rows: 3 });
+    tight.corners = [{ afterCol: 0, angle: 120 }];
+    tight.shape = { mode: 'custom', cells: ['0,0', '0,1', '0,2', '1,0', '2,0', '2,1', '2,2'] };
     const square = createLedWall({ cols: 4, rows: 3 });
     square.corners = [{ afterCol: 2, angle: 90 }];
     square.shape = { mode: 'custom', cells: ['0,0', '0,1', '0,2', '1,0', '1,1', '1,2', '2,0', '2,1', '2,2', '3,0'] };
@@ -583,6 +585,7 @@ describe('planTrussRig', () => {
       const layout = computeColumnLayout(wallDims(wall), wall.corners);
       const cells = new Set(filledCells(wall));
       const plates = rigOf(after, wall.id).filter(e => e.geometry === 'truss-base');
+      expect(plates.length, `the ${wall.cols} x ${wall.rows} wall has no plates to check`).toBeGreaterThan(0);
       for (let c = 0; c < wall.cols; c++) {
         if (cells.has(`${c},${wall.rows - 1}`)) continue;
         // Between the jambs, from a plate's width in front of the face to a plate's width behind the back.
@@ -595,7 +598,6 @@ describe('planTrussRig', () => {
         }
       }
     }
-    expect(planTrussRig(docWith(square), square).legs.length).toBeGreaterThan(0);
   });
 
   it('counts only the columns with cabinets in them', () => {

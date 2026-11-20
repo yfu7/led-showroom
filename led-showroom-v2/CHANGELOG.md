@@ -57,8 +57,13 @@ whose lintel is one row deep stands on towers alone, its lintel columns mostly o
 lands a header on a single lintel row within the shim. A one-column end pier leaves a leg a window
 of 1.6 in (its section behind the column, its plate reaching out past the wall's end but clear of
 the doorway), so a frame reaches it only where a whole number of feet of span lands a leg there;
-otherwise that end stands on a tower. Where a wall folds at 120 or 135 degrees, the wedge behind the
-fold has room for one plate, not two, so some columns on the far side of it are out of reach. With bezels off, an 11 x 8 now frames on legs of
+otherwise that end stands on a tower. Beside a fold, at any angle, some columns can be out of reach.
+Across a fold the planner keeps every plate out of the other run's doorways and a tower's plate off
+the other plates; two frames' plates can still overlap, with a warning. Nothing else is checked
+across a fold: a tower or span behind one run can stand inside the cabinets of the run past it (a
+7 x 4 folded 90 degrees puts a leg 0.67 in into the corner column; it happens most at 120 to 150
+degrees), stand in front of that run where the wall folds forward, or show above or through it
+where it is shorter or open. With bezels off, an 11 x 8 now frames on legs of
 plate, two 3 ft sticks and two blocks over a 0.03 in shim, every column held, which takes 8 blocks
 and 8 3 ft sticks of our 6 each. Spans past 20 ft are drawn but not rated.
 
