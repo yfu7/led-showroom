@@ -100,7 +100,9 @@ long spans: a 29 x 6 arch over two-row openings, with a one-column middle pier, 
 of 1.6 in (its section behind the column, its plate reaching out past the wall's end but clear of
 the doorway), so a frame reaches it only where a whole number of feet of span lands a leg there;
 otherwise that end stands on a tower. Beside a fold, at any angle, some columns can be out of reach.
-Within a run, a coupler on a column's outer hole line can reach about 0.2 in past the column's side,
+Across a fold, each column is looked at square on, not at a slant: at a slant, rig behind one run
+can show beside another run's cabinets on a wall folded more than once (3 of 378 folded walls drawn
+at random). Within a run, a coupler on a column's outer hole line can reach about 0.2 in past the column's side,
 behind an open slot in the column beside it; that is not checked, folded or straight. With bezels
 off, an 11 x 8 stands on six towers, every
 column held, but they take 66 couplers, 28 past our 38. Spans past 20 ft are drawn but not rated.

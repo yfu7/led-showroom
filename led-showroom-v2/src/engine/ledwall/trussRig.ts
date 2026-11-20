@@ -567,6 +567,8 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
         for (let i = 0; i < ivCount; i++) {
           if (out[i]) continue;
           if (z1 > slabHalf + TOL) {
+            // Seen from no further out than the nearest other cabinet: past it, a viewer looks at that
+            // cabinet, front or back, and not at this column, so what stands beyond is that one's to see.
             let stop = Infinity;
             for (const b of kz) if (coverIv[b.k][i] && b.z[1] > slabHalf) stop = Math.min(stop, Math.max(b.z[0], slabHalf));
             if (Math.max(z0, slabHalf) < Math.min(z1, stop) - TOL) { out[i] = true; continue; }
