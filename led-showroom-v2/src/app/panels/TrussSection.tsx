@@ -1,10 +1,11 @@
 /**
- * The wall's truss: a way into the builder, and while it is on, the builder's panel. The panel is
- * the stock to build with, what the piece in hand would do where the pointer is, and what the rig
- * comes to. The engine's TrussBuildTool does the work; this only reads its state.
+ * The wall's truss: Auto truss and a way into the builder, and while the builder is on, its panel.
+ * The panel is the stock to build with, what the piece in hand would do where the pointer is, and
+ * what the rig comes to, with Auto truss to plan it whole and go on by hand from there. The
+ * engine's TrussBuildTool does the work; this only reads its state.
  */
 import { useSyncExternalStore, type MouseEvent } from 'react';
-import { Check, Construction, MoveHorizontal } from 'lucide-react';
+import { Check, Construction, Hammer, MoveHorizontal } from 'lucide-react';
 import { useEngine, useStore } from '@/app/store';
 import { Button } from '@/app/components/Button';
 import { Section } from '@/app/components/Section';
@@ -12,6 +13,7 @@ import { GodOnly, Raw } from '@/app/shell/GodMode';
 import type { LedWallEntity } from '@/engine/document/types';
 import { pieceName, stockLeft } from '@/engine/ledwall/trussBuilder';
 import { EMPTY_TRUSS_STATE, type TrussBuildTool } from '@/engine/tools/TrussBuildTool';
+import { autoTruss, autoTrussLabel, autoTrussReport } from '@/app/panels/trussActions';
 
 interface Props { wall: LedWallEntity }
 
@@ -21,6 +23,7 @@ const emptyState = () => EMPTY_TRUSS_STATE;
 const keepFocus = (e: MouseEvent) => e.preventDefault();
 const f3 = (v: number): string => v.toFixed(3);
 const xyz = (v: readonly number[]): string => v.map(f3).join(', ');
+const AUTO_TIP = 'Plan the whole rig from the DT-GP stock and put it up piece by piece, to go on with by hand';
 
 export function TrussSection({ wall }: Props) {
   const engine = useEngine();
@@ -28,13 +31,32 @@ export function TrussSection({ wall }: Props) {
   return (
     <Section title="Truss" id="wall-truss">
       {tool === 'truss' ? <TrussBuilder wall={wall} /> : (
-        <Button block size="sm" icon={<Construction size={14} strokeWidth={1.5} />} kbd="Shift+T"
-          tip="Put the rig up piece by piece from the DT-GP stock" onClick={() => engine.tools.activate('truss')}>
-          Build truss
-        </Button>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+          <Button block size="sm" icon={<Construction size={14} strokeWidth={1.5} />} tip={AUTO_TIP} onClick={() => autoTruss(engine, wall)}>
+            {autoTrussLabel(engine, wall)}
+          </Button>
+          <Button block size="sm" icon={<Hammer size={14} strokeWidth={1.5} />} kbd="Shift+T"
+            tip="Put the rig up piece by piece from the DT-GP stock" onClick={() => engine.tools.activate('truss')}>
+            Build truss
+          </Button>
+        </div>
       )}
+      <GodOnly><AutoTrussRaw wall={wall} /></GodOnly>
     </Section>
   );
+}
+
+/** The last Auto truss on this wall, planned against put up. */
+function AutoTrussRaw({ wall }: Props) {
+  const r = useSyncExternalStore(autoTrussReport.subscribe, autoTrussReport.get);
+  if (!r || r.wallId !== wall.id) return <Raw label="auto truss" value="not run on this wall" />;
+  if (r.fail) return <Raw label="auto truss" value={`failed in ${r.ms.toFixed(0)} ms: ${r.fail}`} />;
+  return <>
+    <Raw label="auto legs / spans / clamps" value={`plan ${r.planned.join(' / ')} → up ${r.built.join(' / ')} (${r.ms.toFixed(0)} ms)`} />
+    <Raw label="auto shim / held / supported" value={`plan ${f3(r.shim[0])} / ${r.held[0]} / ${r.supported[0]} → up ${f3(r.shim[1])} / ${r.held[1]} / ${r.supported[1]} of ${r.columns}`} />
+    <Raw label="auto F-filled / kept / refused" value={`${r.filled} / ${r.kept} / ${r.refused.length}`} />
+    {r.refused.map(x => <Raw key={x} label="refused" value={x} />)}
+  </>;
 }
 
 function TrussBuilder({ wall }: Props) {
@@ -93,9 +115,15 @@ function TrussBuilder({ wall }: Props) {
       </div>
       {sum.warnings.map(w => <div className="hint" key={w} style={{ color: 'var(--warn)' }}>{w}</div>)}
 
-      <Button block size="sm" icon={<Check size={14} strokeWidth={1.5} />} kbd="Esc" onClick={() => engine.tools.activate('select')} style={{ marginTop: 8 }}>
-        Done
-      </Button>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginTop: 8 }}>
+        <Button block size="sm" icon={<Construction size={14} strokeWidth={1.5} />} tip={AUTO_TIP}
+          onMouseDown={keepFocus} onClick={() => autoTruss(engine, b.wall)}>
+          {autoTrussLabel(engine, wall)}
+        </Button>
+        <Button block size="sm" icon={<Check size={14} strokeWidth={1.5} />} kbd="Esc" onClick={() => engine.tools.activate('select')}>
+          Done
+        </Button>
+      </div>
 
       <GodOnly>
         <Raw label="rig" value={`${b.group?.id ?? 'none'} · ${b.hand ? 'by hand' : b.group ? 'Auto truss' : 'new'}`} />

@@ -19,6 +19,11 @@
  *
  * Stock decides what is drawn, not what may be built: a piece past what we own (less what the rest
  * of the scene stands up) is a ghost, and so is every 3 ft stick, which we have to buy.
+ *
+ * Auto truss puts its rig up through here too (`autoTrussRig`): the planner says where the legs stand
+ * and how tall, and each piece then goes up as one put up by hand would, the gaps between frame
+ * legs closed as F closes them. So an Auto truss rig is one the builder lets you build, piece by
+ * piece, and edit from there.
  */
 import * as THREE from 'three';
 import { parentMatrix, worldMatrix } from '../behaviours';
@@ -29,7 +34,8 @@ import type { Vec3 } from '../math';
 import type { MountPoint } from './layout';
 import {
   BUY_STICK_IDS, CLAMP_ID, RIG_GROUP_NAME, SHIM_MAX_IN, SPAN_TABLE_IN, STICK_IDS,
-  clampPiece, rigContext, rigEntityIds, type ChordSpan, type RigContext, type RigPiece, type Run,
+  clampPiece, planTrussRig, rigContext, rigEntityIds,
+  type ChordSpan, type RigContext, type RigLeg, type RigPiece, type Run, type TrussRigPlan,
 } from './trussRig';
 
 const EPS = 1e-4;
@@ -120,6 +126,20 @@ export interface Coupling {
 const isStickId = (id: string): boolean =>
   (STICK_IDS as readonly string[]).includes(id) || (BUY_STICK_IDS as readonly string[]).includes(id);
 
+/** A rig part as a piece, from where it stands in the world; null for anything but a plate, stick or block. */
+function partAsPiece(catalogId: string, geometry: EquipmentGeometry, dims: Vec3, pos: THREE.Vector3, quat: THREE.Quaternion): BuildPiece | null {
+  const kind: BuildKind | null = geometry === 'truss-base' ? 'base' : geometry === 'truss-block' ? 'block'
+    : geometry === 'truss' || geometry === 'truss-vertical' ? 'stick' : null;
+  if (!kind) return null;
+  const vertical = kind !== 'stick' || geometry === 'truss-vertical';
+  return {
+    catalogId, kind, vertical,
+    len: kind === 'stick' && !vertical ? dims[0] : dims[1],
+    position: [pos.x, pos.y, pos.z],
+    yaw: new THREE.Euler().setFromQuaternion(quat, 'YXZ').y,
+  };
+}
+
 /** Open the builder on `wall`: its measures, its rig, and the stock to build with. */
 export function openBuilder(doc: Document, wall: LedWallEntity): Builder | { fail: string } {
   const ctx = rigContext(doc, wall);
@@ -132,17 +152,9 @@ export function openBuilder(doc: Document, wall: LedWallEntity): Builder | { fai
   const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scale = new THREE.Vector3();
   for (const e of doc.entities) {
     if (e.type !== 'equipment' || !mine.has(e.id) || e.catalogId === CLAMP_ID) continue;
-    const kind: BuildKind | null = e.geometry === 'truss-base' ? 'base' : e.geometry === 'truss-block' ? 'block'
-      : e.geometry === 'truss' || e.geometry === 'truss-vertical' ? 'stick' : null;
-    if (!kind) continue;
     worldMatrix(e, byId).decompose(pos, quat, scale);
-    const vertical = kind !== 'stick' || e.geometry === 'truss-vertical';
-    pieces.push({
-      id: e.id, catalogId: e.catalogId, kind, vertical,
-      len: kind === 'stick' && !vertical ? e.dims[0] : e.dims[1],
-      position: [pos.x, pos.y, pos.z],
-      yaw: new THREE.Euler().setFromQuaternion(quat, 'YXZ').y,
-    });
+    const p = partAsPiece(e.catalogId, e.geometry, e.dims, pos, quat);
+    if (p) pieces.push({ id: e.id, ...p });
   }
 
   const elsewhere = new Map<string, number>();
@@ -773,18 +785,18 @@ export function pieceEntity(b: Builder, p: BuildPiece, ghost: boolean, parentId?
 
 /**
  * The next document with the rig built from `pieces`: the wall's old rig out, this one in under a
- * group marked as built by hand, coupled whole, and the wall set down on its plates. One function,
- * so one `cmdPatchDocument` covers a placement and it is a single undo. With no pieces left, the rig
- * goes and the wall stays where it is.
+ * group marked as built by hand (unless `hand` is false: Auto truss's), coupled whole, and the wall
+ * set down on its plates. One function, so one `cmdPatchDocument` covers a placement and it is a
+ * single undo. With no pieces left, the rig goes and the wall stays where it is.
  */
-export function applyBuild(doc: Document, b: Builder, pieces: readonly BuildPiece[]): Document {
+export function applyBuild(doc: Document, b: Builder, pieces: readonly BuildPiece[], hand = true): Document {
   const wall = (doc.entities.find(e => e.id === b.wall.id) as LedWallEntity | undefined) ?? b.wall;
   const stale = rigEntityIds(doc, wall.id);
   if (!pieces.length) return { ...doc, entities: doc.entities.filter(e => !stale.has(e.id)) };
   const sum = summarize(b, pieces);
   const fresh = createGroup(RIG_GROUP_NAME);
   const group: GroupEntity = {
-    ...fresh, id: b.group?.id ?? fresh.id, name: b.group?.name ?? RIG_GROUP_NAME, rigFor: wall.id, rigHand: true,
+    ...fresh, id: b.group?.id ?? fresh.id, name: b.group?.name ?? RIG_GROUP_NAME, rigFor: wall.id, ...(hand ? { rigHand: true } : {}),
   };
   const parts = [
     ...pieces.map((p, i) => pieceEntity(b, p, sum.pieceGhosts[i], group.id)),
@@ -826,4 +838,162 @@ export function applyBuild(doc: Document, b: Builder, pieces: readonly BuildPiec
 export function stockLeft(item: PaletteItem, pieces: readonly BuildPiece[]): number {
   const used = pieces.filter(p => p.catalogId === item.catalogId).length;
   return item.owned - item.elsewhere - used;
+}
+
+/* ───────────────────────────── Auto truss ───────────────────────────── */
+
+/** What Auto truss put up through the builder, and what of its plan would not go up. */
+export interface AutoBuild {
+  pieces: BuildPiece[];
+  /** Gaps between frame legs closed as F closes one. */
+  filled: number;
+  /** Planned span sticks put up as planned, in gaps F found no run of sticks for. */
+  kept: number;
+  /** Planned pieces that would not go up, with why: none where planner and builder agree. */
+  refused: { piece: BuildPiece; why: Verdict }[];
+}
+
+/** A planned part as a piece. */
+function planned(p: RigPiece): BuildPiece | null {
+  const quat = new THREE.Quaternion().setFromEuler(new THREE.Euler(p.rotation[0] / DEG, p.rotation[1] / DEG, p.rotation[2] / DEG, 'YXZ'));
+  return partAsPiece(p.catalogId, p.geometry, p.dims, v3(p.position), quat);
+}
+
+/** Whether horizontal stick `s` lies on the line from `a` to `z`, between them. */
+function liesBetween(b: Builder, s: BuildPiece, a: THREE.Vector3, z: THREE.Vector3): boolean {
+  if (s.kind !== 'stick' || s.vertical) return false;
+  const C = v3(s.position).addScaledVector(UP, b.ctx.section / 2);
+  const line = z.clone().sub(a);
+  const len = line.length();
+  const t = C.clone().sub(a).dot(line.divideScalar(len));
+  return t > 0 && t < len && C.sub(a).addScaledVector(line, -t).length() < b.ctx.section / 2;
+}
+
+/**
+ * Put `plan` up through the builder, as it would be put up by hand. Each leg goes up from its plate
+ * where the planner stands it, a piece at a time, only onto a face of the piece below and only
+ * where `check` passes: the frames, then the towers. Then each gap between frame tops that the plan
+ * spans is closed as F closes it (`fillGap`: columns held, then the stock on hand), with every leg
+ * already counted out of the stock, as the planner counts it. A planned span stick in a gap F
+ * cannot close goes up as planned where it bolts on and passes; whatever does not go up is
+ * `refused`, with why. The pieces come back in the planner's order, frames, spans, towers, so the
+ * same ones come out ghosts.
+ */
+export function autoBuild(b: Builder, plan: TrussRigPlan): AutoBuild {
+  const pieces: BuildPiece[] = [];
+  const refused: AutoBuild['refused'] = [];
+  const bolts = (p: BuildPiece): boolean => {
+    const mine = portsOf(b, p, pieces.length);
+    return openPorts(b, pieces).some(q => mine.some(m => meets(q, m)));
+  };
+  const verdict = (p: BuildPiece): Verdict => (p.kind === 'base' || bolts(p) ? check(b, pieces, p) : ['Nothing is up for it to bolt onto.']);
+  /** The leg's pieces bottom up; the index of its top, or -1 where it stopped short. */
+  const putLeg = (leg: RigLeg): number => {
+    const parts = leg.pieces.map(planned).filter((p): p is BuildPiece => !!p);
+    for (let k = 0; k < parts.length; k++) {
+      const why = verdict(parts[k]);
+      if (why.length) {
+        refused.push({ piece: parts[k], why });
+        for (const p of parts.slice(k + 1)) refused.push({ piece: p, why: ['What it stands on would not go up.'] });
+        return -1;
+      }
+      pieces.push(parts[k]);
+    }
+    return parts.length ? pieces.length - 1 : -1;
+  };
+
+  const tops = plan.legs.filter(l => l.kind === 'frame').map(putLeg).filter(t => t >= 0);
+  const frames = pieces.length;
+  plan.legs.filter(l => l.kind === 'tower').forEach(putLeg);
+  const legs = pieces.length;
+  let spans = plan.spans.map(planned).filter((p): p is BuildPiece => !!p);
+  let filled = 0;
+  for (const t of tops) {
+    for (const port of openPorts(b, pieces)) {
+      if (port.piece !== t || Math.abs(port.dir.y) > 0.5) continue;
+      const gap = gapFrom(b, pieces, port);
+      if (!gap) continue;
+      // Only a gap the plan spans: one it leaves open, it leaves open for a reason.
+      const mine = spans.filter(s => liesBetween(b, s, port.point, gap.to.point));
+      if (!mine.length) continue;
+      const fill = fillGap(b, pieces, port);
+      if (!('add' in fill)) continue;
+      pieces.push(...fill.add);
+      spans = spans.filter(s => !mine.includes(s));
+      filled++;
+    }
+  }
+  let kept = 0;
+  for (let more = true; more && spans.length;) {
+    more = false;
+    for (const s of [...spans]) {
+      if (!bolts(s)) continue;
+      spans = spans.filter(x => x !== s);
+      more = true;
+      const why = check(b, pieces, s);
+      if (why.length) refused.push({ piece: s, why });
+      else { pieces.push(s); kept++; }
+    }
+  }
+  for (const s of spans) refused.push({ piece: s, why: ['Nothing is up for it to bolt onto.'] });
+  return { pieces: [...pieces.slice(0, frames), ...pieces.slice(legs), ...pieces.slice(frames, legs)], filled, kept, refused };
+}
+
+/** Auto truss on `wall`: the next document, and what it came to. */
+export interface AutoTruss {
+  next: Document;
+  plan: TrussRigPlan;
+  auto: AutoBuild;
+  summary: BuildSummary;
+  /** Legs (plates) and horizontal sticks put up. */
+  legs: number;
+  spans: number;
+  /** For the person who asked: what moved, what is short, what would not go up. */
+  notes: string[];
+}
+
+/**
+ * Auto truss: plan the rig behind `wall` and put it up through the builder, replacing the rig it
+ * has. Null `next` with why where nothing can go up. The rig is written as Auto truss's, not as
+ * one built by hand, so Auto truss replaces it again without asking.
+ */
+export function autoTrussRig(doc: Document, wall: LedWallEntity): AutoTruss | { fail: string } {
+  const plan = planTrussRig(doc, wall);
+  if (!plan.legs.length) return { fail: plan.warnings[0] ?? 'There is nothing on this wall to bolt a coupler into.' };
+  const b = openBuilder(doc, wall);
+  if ('fail' in b) return b;
+  const auto = autoBuild(b, plan);
+  if (!auto.pieces.length) return { fail: auto.refused[0]?.why[0] ?? 'No piece of the plan would go up.' };
+  const summary = summarize(b, auto.pieces);
+  const c = summary.coupling;
+  const notes: string[] = [];
+  const lift = c.bottomY - b.currentBottom;
+  const plate = b.ctx.base.plateThick;
+  if (Math.abs(lift) > 1e-6) {
+    notes.push(`The wall ${lift > 0 ? 'rises' : 'comes down'} ${Math.abs(lift).toFixed(2)} in to sit on the ${plate.toFixed(2)} in base plates${
+      c.shim > 1e-6 ? `, on a ${c.shim.toFixed(2)} in shim so the header chord meets a row of holes` : ''}.`);
+  } else if (c.shim > 1e-6) {
+    notes.push(`The wall sits on a ${c.shim.toFixed(2)} in shim on the base plates, so the header chord meets a row of holes.`);
+  }
+  if (b.ctx.dropAccessories) notes.push('The floor-stand base plates and back supports come off: they stand where the legs do.');
+  const carried = c.supported.size - c.held.size;
+  if (carried > 0) {
+    notes.push(`${carried} ${carried === 1 ? 'column has' : 'columns have'} no coupler of ${carried === 1 ? 'its' : 'their'} own: `
+      + `${carried === 1 ? 'it is' : 'each is'} held by a coupled column beside it.`);
+  }
+  const loose = summary.columns - c.supported.size;
+  if (loose > 0) notes.push(`${loose} ${loose === 1 ? 'column is' : 'columns are'} out of reach of every coupler, and nothing holds ${loose === 1 ? 'it' : 'them'}.`);
+  if (auto.refused.length) {
+    const n = auto.refused.length;
+    const [first] = auto.refused;
+    notes.push(`${n} planned ${n === 1 ? 'piece' : 'pieces'} would not go up. The first, a ${pieceName(first.piece)}: ${first.why[0]}`);
+  }
+  notes.push(...summary.warnings);
+  return {
+    next: applyBuild(doc, b, auto.pieces, false),
+    plan, auto, summary,
+    legs: auto.pieces.filter(p => p.kind === 'base').length,
+    spans: auto.pieces.filter(p => p.kind === 'stick' && !p.vertical).length,
+    notes,
+  };
 }

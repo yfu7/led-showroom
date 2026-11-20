@@ -11,15 +11,15 @@ import {
   Maximize2, Monitor, MousePointer2, Pencil, Plus, RotateCcw, Ruler, Scissors, Shapes, Trash2, X,
 } from 'lucide-react';
 import type { Engine } from '@/engine/Engine';
-import type { Entity, EntityType, GroupEntity, LedWallEntity, StageEntity } from '@/engine/document/types';
+import type { Entity, EntityType, LedWallEntity, StageEntity } from '@/engine/document/types';
 import { isLedWall, isStage } from '@/engine/document/types';
-import { cmdAddEntities, cmdPatchDocument, cmdUpdateEntities } from '@/engine/commands/entity';
+import { cmdAddEntities, cmdUpdateEntities } from '@/engine/commands/entity';
 import { descendants, uniqueName } from '@/engine/document/Document';
 import { createStage } from '@/engine/document/defaults';
 import { duplicateEntities } from '@/engine/tools/SelectTool';
 import { stageTopY } from '@/engine/behaviours';
 import { canReorderWindow } from '@/engine/ledwall/contentWindows';
-import { applyTrussRig, planTrussRig, rigEntityIds } from '@/engine/ledwall/trussRig';
+import { rigEntityIds } from '@/engine/ledwall/trussRig';
 import { hiddenEntityIds } from '@/engine/tools/BoxSelect';
 import { STAGE_HEIGHTS_IN } from '@/engine/ledwall/specs';
 import type { Vec3 } from '@/engine/math';
@@ -28,8 +28,8 @@ import { useStore } from '@/app/store';
 import { instantiateCatalogItem } from '@/app/panels/Catalog';
 import { buildCatalog, catalogGroups, GROUP_LED, GROUP_STAGING, GROUP_VENUE } from '@/app/panels/catalogItems';
 import { addWindow, clearWindowSource, duplicateWindow, moveWindow, removeWindow } from '@/app/panels/contentActions';
+import { autoTruss, autoTrussLabel, removeTrussRig } from '@/app/panels/trussActions';
 import { requestClearScene } from '@/app/shell/ClearSceneDialog';
-import { requestConfirm } from '@/app/shell/ConfirmDialog';
 
 const DEG = Math.PI / 180;
 
@@ -262,7 +262,7 @@ function wallSection(engine: Engine, wall: LedWallEntity): MenuItem[] {
     { label: 'Mount holes', checked: wall.mountHoles, onSelect: () => patch({ mountHoles: !wall.mountHoles }, wall.mountHoles ? 'Hide mount holes' : 'Show mount holes') },
     'sep',
     {
-      label: hasRig ? 'Rebuild truss rig' : 'Auto truss',
+      label: autoTrussLabel(engine, wall),
       icon: <Construction />,
       onSelect: () => autoTruss(engine, wall),
     },
@@ -275,66 +275,6 @@ function wallSection(engine: Engine, wall: LedWallEntity): MenuItem[] {
     ...rigItems,
   ];
 }
-
-/* ---------------------------- auto truss ---------------------------- */
-
-/**
- * Plan a truss rig for `wall` and put the whole thing in with one command.
- *
- * One `cmdPatchDocument`, because a rig is one thing: the group, every leg, span and coupler, the
- * wall set down on the base plates, and the floor-stand kit coming off because its back supports
- * stand where the legs do. A single undo takes all of it back out, which is what makes trying it
- * safe.
- *
- * Only `entities` is patched, and the next document is computed once rather than inside the
- * command: a redo that re-ran the planner would mint fresh ids and strand anything holding the
- * old ones.
- */
-function autoTruss(engine: Engine, wall: LedWallEntity): void {
-  const rig = engine.doc.entities.find((e): e is GroupEntity => e.type === 'group' && e.rigFor === wall.id);
-  if (!rig?.rigHand) { planAndApply(engine, wall); return; }
-  // A rig put up by hand is work Auto truss would throw away: ask first.
-  requestConfirm({
-    title: 'Replace the rig built by hand?',
-    body: 'Auto truss plans the rig over from scratch, so every piece put up by hand comes down. Undo puts them back.',
-    confirm: 'Replace with Auto truss',
-    onConfirm: () => {
-      const live = engine.entity<LedWallEntity>(wall.id);
-      if (live) planAndApply(engine, live);
-    },
-  });
-}
-
-function planAndApply(engine: Engine, wall: LedWallEntity): void {
-  const plan = planTrussRig(engine.doc, wall);
-  if (!plan.legs.length) {
-    engine.toast('error', plan.warnings[0] ?? 'There is nothing on this wall to bolt a coupler into.');
-    return;
-  }
-  const rebuild = rigEntityIds(engine.doc, wall.id).size > 0;
-  const next = applyTrussRig(engine.doc, wall, plan);
-  engine.run(cmdPatchDocument(engine, { entities: next.entities }, {
-    label: rebuild ? 'Rebuild truss rig' : 'Auto truss',
-  }));
-
-  const n = (k: number, one: string, many: string): string => `${k} ${k === 1 ? one : many}`;
-  const parts = [
-    plan.frames ? n(plan.frames, 'frame', 'frames') : '',
-    n(plan.legs.length, 'leg', 'legs'),
-    // Sticks, not spans: one spliced span across a doorway can take several.
-    plan.spans.length ? n(plan.spans.length, 'span stick', 'span sticks') : '',
-    n(plan.clamps.length, 'half coupler', 'half couplers'),
-  ].filter(Boolean);
-  const head = `${parts.join(', ')} - ${plan.supported} of ${n(plan.columns, 'column', 'columns')} held, ${plan.held} by couplers of their own`;
-  engine.toast(plan.ghosts ? 'info' : 'success', [head, ...plan.warnings].join(' - '));
-}
-
-/** Take the generated rig off a wall. The wall stays where the rig left it. */
-function removeTrussRig(engine: Engine, wall: LedWallEntity): void {
-  const ids = [...rigEntityIds(engine.doc, wall.id)];
-  if (ids.length) engine.remove(ids);
-}
-
 
 /* ───────────────────────────── empty viewport menu ───────────────────────────── */
 

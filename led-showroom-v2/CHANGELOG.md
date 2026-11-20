@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Auto truss puts the rig up through the builder
+
+**Auto truss** is back, in the Truss section of the wall's inspector, in the Build truss panel and
+on the wall's right-click menu. It plans the legs as before, then puts every piece up as Build truss
+would: each piece is checked as a click would be, the gaps between frame tops are closed with F,
+and the couplers come with the pieces. The rig then opens in Build truss to go on with by hand.
+
+- On the 30 x 7 arch, flat and folded walls, and walls turned and moved, it comes to the same legs,
+  sticks, couplers, shim and ghosts as the plan, with no piece refused.
+- A planned piece that would not go up is left out and named in the message.
+- Run again, it replaces its own rig without asking. A rig built by hand is asked about first.
+- God Mode shows the last run on the wall: planned against put up, the gaps F filled, anything
+  refused and why, and how long it took.
+
 ### Build truss: put a wall's rig up by hand, a piece at a time
 
 **Build truss** (Shift+T, the wall's right-click menu, or the Truss section of its inspector) puts

@@ -5,7 +5,7 @@ import { createDocument, createLedWall } from '../document/defaults';
 import type { Document, Entity, GroupEntity, LedWallEntity } from '../document/types';
 import { applyTrussRig, planTrussRig, rigEntityIds, type RigPiece, type TrussRigPlan } from './trussRig';
 import {
-  applyBuild, attach, baseAt, check, fillGap, gapFrom, openBuilder, openPorts, portsOf, removePiece, stockLeft, summarize,
+  applyBuild, attach, autoTrussRig, baseAt, check, fillGap, gapFrom, openBuilder, openPorts, portsOf, removePiece, stockLeft, summarize,
   type BuildPiece, type Builder, type Port,
 } from './trussBuilder';
 
@@ -367,5 +367,77 @@ describe('truss builder', () => {
     const snapped = baseAt(b, first, new THREE.Vector3(want + 1.5, 0, 0))!;
     expect(snapped.position[0]).toBeCloseTo(want, 9);
     expect(snapped.position[2]).toBeCloseTo(first[0].position[2], 9);
+  });
+});
+
+describe('Auto truss through the builder', () => {
+  /** Auto truss on `wall`, against the plan it puts up: every piece goes up, coupled as planned. */
+  function same(wall: LedWallEntity) {
+    const doc = docWith(wall);
+    const plan = planTrussRig(doc, wall);
+    const got = autoTrussRig(doc, wall);
+    if ('fail' in got) throw new Error(got.fail);
+    const c = got.summary.coupling;
+    expect(got.auto.refused).toEqual([]);
+    expect(got.legs).toBe(plan.legs.length);
+    expect(got.spans).toBe(plan.spans.length);
+    expect(c.shim).toBeCloseTo(plan.shimIn, 9);
+    expect(c.bottomY).toBeCloseTo(plan.bottomY, 9);
+    expect(c.clamps.map(x => keyOf(x.piece)).sort()).toEqual(plan.clamps.map(keyOf).sort());
+    expect([c.held.size, c.supported.size, got.summary.columns]).toEqual([plan.held, plan.supported, plan.columns]);
+    expect(got.summary.ghosts).toBe(plan.ghosts);
+    return { doc, plan, got };
+  }
+
+  it('puts up the 30 x 7 arch as planned, as a rig Auto truss replaces again without asking', () => {
+    const { plan, got } = same(arch());
+    // Every gap between frame tops that the plan spans is closed by F.
+    expect(got.auto.filled).toBe(2);
+    expect(got.auto.kept).toBe(0);
+    expect(got.auto.pieces.filter(p => p.kind === 'stick' && !p.vertical).map(p => p.catalogId).sort())
+      .toEqual(plan.spans.map(s => s.catalogId).sort());
+
+    const group = got.next.entities.find((e): e is GroupEntity => e.type === 'group' && e.rigFor === got.plan.wallId);
+    expect(group).toBeDefined();
+    expect(group!.rigHand).toBeUndefined();
+
+    // It opens in Build truss piece by piece, as Auto truss's, coupled the same.
+    const wall2 = got.next.entities.find(e => e.id === got.plan.wallId) as LedWallEntity;
+    const b = open(got.next, wall2);
+    expect(b.hand).toBe(false);
+    expect(b.pieces).toHaveLength(got.auto.pieces.length);
+    expect(summarize(b, b.pieces).coupling.clamps.map(x => keyOf(x.piece)).sort()).toEqual(plan.clamps.map(keyOf).sort());
+
+    // Run again over its own rig, it replaces it with the same rig, not a second one.
+    const again = autoTrussRig(got.next, wall2);
+    if ('fail' in again) throw new Error(again.fail);
+    expect(rigEntityIds(again.next, wall2.id).size).toBe(rigEntityIds(got.next, wall2.id).size);
+    expect(again.summary.coupling.clamps.map(x => keyOf(x.piece)).sort()).toEqual(plan.clamps.map(keyOf).sort());
+  });
+
+  it('puts up a wall turned and moved as planned', () => {
+    const arched = arch();
+    arched.transform = { ...arched.transform, rotation: [0, -120, 0] };
+    same(arched);
+    const flat = createLedWall({ cols: 20, rows: 7 });
+    flat.transform = { ...flat.transform, position: [100, 0, -50], rotation: [0, 37, 0] };
+    expect(same(flat).got.auto.filled).toBe(5);
+  });
+
+  it('puts up a folded wall as planned, either way round', () => {
+    for (const angle of [90, -90]) {
+      const wall = createLedWall({ cols: 10, rows: 5 });
+      wall.corners = [{ afterCol: 4, angle }];
+      expect(same(wall).got.legs).toBe(4);
+    }
+  });
+
+  it('says why where no leg fits, and puts nothing up', () => {
+    const wall = createLedWall({ cols: 1, rows: 1 });
+    const doc = docWith(wall);
+    const plan = planTrussRig(doc, wall);
+    const got = autoTrussRig(doc, wall);
+    expect(plan.legs).toHaveLength(0);
+    expect(got).toEqual({ fail: plan.warnings[0] });
   });
 });
