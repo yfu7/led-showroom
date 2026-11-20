@@ -203,7 +203,7 @@ describe('the numbers a rig is laid out from', () => {
     const owned = (id: string): number | undefined => ownedCount(equipmentDef(id));
     expect(owned('gp-truss-8ft')).toBe(3);
     expect(owned('gp-truss-5ft')).toBe(6);
-    expect(owned('gp-truss-4ft')).toBe(8);
+    expect(owned('gp-truss-4ft')).toBe(12);          // 6 on each of two orders
     expect(owned('gp-truss-3ft')).toBe(6);           // on hand: our count, not on the order
     expect(owned('gp-corner-6way')).toBe(6);
     expect(owned(BASE_ID)).toBe(6);
@@ -705,6 +705,17 @@ describe('every rig it draws', () => {
       const jaw = jawOf(after, c);
       const along = new THREE.Vector3(1, 0, 0).transformDirection(m);
       expect(carriers.some(p => grips(after, p, jaw, along)), `jaw at ${fmt(jaw)} closes on no chord`).toBe(true);
+    }
+  });
+
+  it.each(SCENES)('%s: builds from DT-GP alone, never a part of F34', (_, make) => {
+    // DT-GP and F34 do not connect, so a rig takes DT-GP parts and couplers and nothing else, ghosts included.
+    const { doc, wall } = make();
+    const parts = rigOf(applyTrussRig(doc, wall, planTrussRig(doc, wall)), wall.id);
+    expect(parts.length).toBeGreaterThan(0);
+    for (const p of parts) {
+      if (p.catalogId === 'clamp-8002') continue;
+      expect(equipmentDef(p.catalogId)?.trussSystem, `${p.name} (${p.catalogId})`).toBe('DT-GP');
     }
   });
 

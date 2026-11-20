@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Truss inventory: every order, and two systems that never mix
+
+The catalog now holds what the five Stage Lighting Store sales orders say we bought.
+
+- **DT-GP:** 3 x 8 ft, 6 x 5 ft, 12 x 4 ft (6 more on #736643; was 8), 6 x 3 ft (our own count, on
+  no order), 6 six-way corners and 6 base plates. The planner has four more 4 ft sticks to build
+  from before it draws ghosts.
+- **F34 was bought, not just quoted:** 2 x 1.5 m, 6 x 1.25 m, 4 two-way corners, 2 T junctions, 2
+  steel 1 x 4 ft plates and 2 black 30 x 30 in plates, the last new to the catalog (the order says
+  only 30 x 30; 3/8 in aluminium is from retailer listings). The 6-way junction block and the
+  12 x 12 in plate were quoted but never ordered; they now show 0 owned, so the build list flags any
+  placed as short.
+- **DT-GP and F34 do not connect** (11.156 in section on bolted end plates, 11.42 in on conical
+  couplers). Every truss part now names its system, the inspector shows it, and the planner builds
+  from DT-GP alone: a test checks every rig it draws for a part of any other system. The half
+  coupler is in neither; it closes on the 50 mm chord of both.
+- Sales Order #735958 bills six DT-GP-Base36 plates against a quantity of 0, and lists six 30 in
+  raised GP bases (GP0287) beside them at no charge. The catalog keeps the 36 x 36 in plate about an
+  inch thick, as the plates we hold were described; GP0287 is not in the catalog.
+
 ### Auto truss: spans across doorways, legs from 3, 4, 5 and 8 ft sticks, and fewer towers
 
 **Frames span openings.** A frame no longer needs one unbroken run of full-height columns. Where a

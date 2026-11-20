@@ -274,15 +274,25 @@ describe('buildList', () => {
   });
 
   it('reports no shortfall for a part the catalog does not say we own', () => {
-    // The F34 estimates record their quantity under `Quoted`, not `Owned`. A quote is not stock,
-    // and it is not zero stock either, so the line carries no shortfall rather than a false one.
+    // A generic prop has no `Owned` row. That is not stock, and it is not zero stock either, so the
+    // line carries no shortfall rather than a false one.
     const list = buildList(docWith(createEquipment({
-      id: 'f34-straight-1500', name: 'F34 square truss 1.5 m', geometry: 'truss',
-      dims: [59.06, 11.42, 11.42], color: '#17181b',
+      id: 'truss-12-8ft', name: 'Box truss 12" x 8 ft', geometry: 'truss',
+      dims: [96, 12, 12], color: '#b9bcc2',
     })));
 
     expect(list.equipment[0]?.owned).toBeNull();
     expect(list.equipment[0]?.short).toBe(0);
+  });
+
+  it('flags a part we were quoted but never ordered as short', () => {
+    // The F34 6-way block is on an estimate and on none of our sales orders: we hold none.
+    const list = buildList(docWith(createEquipment({
+      id: 'f34-block-6way', name: 'F34 6-way junction block', geometry: 'truss-block',
+      dims: [22, 22, 22], color: '#17181b',
+    })));
+
+    expect(list.equipment[0]).toMatchObject({ catalogId: 'f34-block-6way', qty: 1, owned: 0, short: 1 });
   });
 
   it('lists stage decks as hardware, one line per size', () => {
