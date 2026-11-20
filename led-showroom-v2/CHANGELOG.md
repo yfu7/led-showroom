@@ -8,38 +8,41 @@
 showing over the top of most walls and ignored what was on the shelf. A rig now aims at what the
 Financial Times wall needed: out of sight behind the cabinets, and built from our own stock.
 
-**Nothing shows from the front.** Every stick, block and riser stands behind the cabinets in front
+**Nothing shows from the front.** Every stick and block stands behind the cabinets in front
 of it: no higher than their top, no wider than the wall. Only the base plates reach out, flat on the
 floor under the cabinets. A notched wall is read column by column, so a short column gets a leg
 under its own top rather than one sized for its neighbours.
 
 **Frames, not just towers.** Where a run of full-height columns allows it, the planner builds a
-frame: legs of base, sticks and a 6-way corner block, with 4, 5 and 8 ft spans block to block across
-the top. The header's chords take couplers too, wherever a row of holes lands on one clear of a weld.
-The 11 x 8 Financial Times wall comes out as four legs of base, 4 ft stick and block, spans of
-5 + 8 + 5 ft, the header on the fifth row's top holes, every column held, 18 couplers and nothing
-short. The base is modelled at a nominal 36.5 in overall; at 36.0 in
-no header lands within the shim and the same wall gets towers. Columns a frame cannot reach get
+frame: legs of base plate, sticks and a 6-way corner block, with 4, 5 and 8 ft spans block to block
+across the top. The header's chords take couplers too, wherever a row of holes lands on one clear of
+a weld. The 11 x 8 Financial Times wall comes out as four legs of plate, 4 ft stick and block, 60.16
+in tall, spans of 5 + 8 + 5 ft, the header on the fourth row's bottom holes over a 0.10 in shim,
+every column held, 18 couplers and nothing short. That 4 ft leg is the only height of ours that lands
+a header within the shim, so a frame needs a wall four rows high. Columns a frame cannot reach get
 towers, and a tower's plate never overlaps another plate, across a fold included.
 
-**The stock we own is the limit.** 8 ft: 3. 5 ft: 6. 4 ft: 8. Corner blocks: 6. Raised bases: 6.
+**The stock we own is the limit.** 8 ft: 3. 5 ft: 6. 4 ft: 8. Corner blocks: 6. Base plates: 6.
 Half couplers: 38. Pieces already standing elsewhere in the scene come off those counts first. What
 a plan needs past them is still drawn, see-through and named "(not owned)", and the toast, the
 build list and Copy as text all say how many of each are ghosts. The F34 is quoted, not owned, so
 the planner does not use it.
 
-**The wall sits on the base plates.** A raised base is now the 36 x 36 in plate, about an inch
-thick, with a 35.5 in GP riser standing on it, and the wall rests on the plates' top: up by the
-plate's thickness, plus at most a quarter-inch shim when that lands a header chord on a row of
-holes. A wall standing higher comes down to the plates. This replaces 2.2.0's hunt upward for a
-height that cleared every weld; a hole on a weld now goes without a coupler and is reported.
+**The legs stand on the base plates, and so does the wall.** 2.2.0 drew a base as a 36 in riser.
+It is the 36 x 36 in plate, about an inch thick, flat on the floor, and a leg's first stick bolts
+straight onto it. The wall rests on the plates' top: up by the plate's thickness, plus at most a
+quarter-inch shim when that lands a header chord on a row of holes. A wall standing higher comes
+down to the plates. This replaces 2.2.0's hunt upward for a height that cleared every weld; a hole
+on a weld now goes without a coupler and is reported.
 
 The corner block is drawn as the 11.16 in cube it is rather than a 22 in junction, and the 4 ft
 count is 8. Rigs placed before this keep their old pieces until Auto truss runs again.
 
-Known limits: with bezels off no header lands within a quarter inch (it would take 0.37 in), so
-those walls get towers. Two frames meeting at a fold can still put plates on top of each other,
-and the planner says so when they do.
+Known limits: a wall under three rows gets no rig. The shortest leg we can stand, a plate and a
+4 ft stick, is 49 in, and two rows on the plates stand 38.86 in, so it would show over the top.
+With bezels off no header lands within a quarter inch (it would take 0.28 in), so those walls get
+towers. Two frames meeting at a fold can still put plates on top of each other, and the planner
+says so when they do.
 
 ### Build list: stage decks
 

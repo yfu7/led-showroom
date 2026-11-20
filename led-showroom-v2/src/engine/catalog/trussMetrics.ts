@@ -101,30 +101,32 @@ export function clampFitsChord(clamp: ClampMetrics, sectionIn: number): boolean 
 /** Thickness of the plate under a generic `truss-upright` prop. The DT-GP base is {@link GP_BASE_PLATE_IN}. */
 export const BASE_PLATE_THICK_IN = 0.5;
 
-/** DT-GP section: the outside of the square, shared by every GP stick, block and riser. */
+/** DT-GP section: the outside of the square, shared by every GP stick and block. */
 export const GP_SECTION_IN = 11.16;
 
 /**
- * The DT-GP raised base plate: 36 in square and about 1 in thick, as measured. The order gives no
+ * The DT-GP base plate: 36 in square and about 1 in thick, as measured. The order gives no
  * geometry, so these are nominal.
  *
- * Shared with the planner because the plate decides two things a rig cannot fudge. It reaches
- * forward under the cabinets, so a wall rigged to these legs comes no lower than its top; and the
- * riser's chords, which take couplers, only start there.
+ * Shared with the planner because the plate decides two things a rig cannot fudge. It lies flat on
+ * the floor and reaches forward under the cabinets, so a wall rigged to these legs comes no lower
+ * than its top; and a leg's first stick, whose chords take couplers, bolts straight onto it.
  */
 export const GP_BASE_PLATE_IN = { size: 36, thick: 1 } as const;
 
 /**
- * What a `truss-base` of `dims` draws: a plate the full declared footprint, then a riser of the GP
- * section standing ON it. One function, so the drawing and the planner agree on where the riser's
- * chords start, which is the lowest a jaw can close.
+ * What a `truss-base` of `dims` draws: a plate the full declared footprint, as thick as
+ * {@link GP_BASE_PLATE_IN} or the whole height if that is less, and for any height past the plate a
+ * riser of the GP section standing ON it. The catalog's base is the plate alone, so its riser is
+ * zero; a base placed at 36.5 in before that still draws its 35.5 in riser. One function, so the
+ * drawing and the planner agree on where a riser's chords start.
  */
 export function trussBaseProfile(dims: readonly [number, number, number]): {
   plateThick: number; section: number; riserLen: number;
 } {
   const [w, h, d] = dims;
-  const plateThick = Math.min(GP_BASE_PLATE_IN.thick, h / 4);
-  return { plateThick, section: Math.min(GP_SECTION_IN, w, d), riserLen: h - plateThick };
+  const plateThick = Math.min(GP_BASE_PLATE_IN.thick, Math.max(h, 0));
+  return { plateThick, section: Math.min(GP_SECTION_IN, w, d), riserLen: Math.max(h - plateThick, 0) };
 }
 
 /**

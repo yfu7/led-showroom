@@ -3,11 +3,11 @@
  *
  * Two shapes of rig, from the stock we hold:
  *
- *  - A FRAME on a straight run of full-height columns: legs (a raised base, GP sticks, a 6-way block
+ *  - A FRAME on a straight run of full-height columns: legs (a base plate, GP sticks, a 6-way block
  *    on top) with horizontal sticks spanning block to block. The header's front chord runs along a
  *    row of holes, so a half coupler goes into every hole on that row that is clear of a weld, and
  *    where a leg's front chord happens to run down a line of holes those take couplers too.
- *  - A TOWER behind a column the frame does not reach: a base and sticks, one front chord on one of
+ *  - A TOWER behind a column the frame does not reach: a base plate and sticks, one front chord on one of
  *    the column's two hole lines, every hole on that line clamped.
  *
  * Three rules every rig keeps:
@@ -60,7 +60,7 @@ export const RIG_GROUP_NAME = 'Truss rig';
  * Most a wall may stand above its base plates' top, in inches.
  *
  * A packer under a cabinet, and all the slack there is: a header chord either meets a row of holes
- * within it or that header height is out. Raising the wall further would put bare riser under it.
+ * within it or that header height is out.
  */
 export const SHIM_MAX_IN = 0.25;
 
@@ -289,6 +289,12 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   const blockH = blockDef.dims[1];
   const stickLens = stickDefs.map(d => d.dims[0]);
   const stickOf = (len: number): EquipmentDef => stickDefs.find(d => d.dims[0] === len) ?? stickDefs[0];
+  /**
+   * The shortest leg with a chord a coupler can close on: a base that stands a riser of its own,
+   * otherwise the base plate and the shortest stick. A column whose top is lower hides no leg.
+   */
+  const shortestStick = Math.min(...stickLens);
+  const shortestLeg = baseH + (base.riserLen > EPS ? 0 : shortestStick);
 
   // The wall's world placement. A tilted or unevenly scaled wall has no vertical line of holes for a
   // vertical chord to follow, so there is nothing honest to generate.
@@ -528,7 +534,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     const legAt = (run: Run, u: number, sticks: readonly number[], blocks: number) => {
       const axis = at(run, u, supportY, depth);
       const pieces = [place(baseDef, baseDef.geometry, baseDef.dims, axis, run.yaw)];
-      const chords: ChordSpan[] = [{ footY: supportY + base.plateThick, len: base.riserLen }];
+      const chords: ChordSpan[] = base.riserLen > EPS ? [{ footY: supportY + base.plateThick, len: base.riserLen }] : [];
       let y = supportY + baseH;
       for (const len of sticks) {
         pieces.push(place(stickOf(len), 'truss-vertical', [section, len, section], axis.clone().setY(y), run.yaw));
@@ -603,7 +609,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
       for (let c = run.start; c <= run.end; c++) {
         if (held.has(c)) continue;
         const top = bottomY + hiddenRise(c);
-        if (supportY + baseH > top + EPS) continue;
+        if (supportY + shortestLeg > top + EPS) continue;
         const centre = s * (c - run.start) * step;
         for (const l of run.lines) {
           if (l.col !== c) continue;
@@ -662,8 +668,9 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
 
   if (!best.legs.length) {
     const tallest = Math.max(...layout.map((_, c) => hiddenRise(c)));
-    warnings.push(plateTop + tallest < supportY + baseH - EPS
-      ? `A ${baseH} in base is taller than the wall standing on it (${tallest.toFixed(1)} in), so any leg would show above it.`
+    const what = base.riserLen > EPS ? 'its base alone' : `a base plate and a ${+(shortestStick / 12).toFixed(2)} ft stick`;
+    warnings.push(plateTop + tallest < supportY + shortestLeg - EPS
+      ? `The shortest leg, ${what}, stands ${shortestLeg.toFixed(1)} in: taller than the wall in front of it, which stands ${(base.plateThick + tallest).toFixed(1)} in, so it would show above it.`
       : 'No leg fits behind this wall with a coupler on it.');
     return empty(currentBottom);
   }

@@ -206,7 +206,16 @@ describe('buildEquipment', () => {
     disposeEquipmentBuild(build);
   });
 
-  it('draws a raised base as a plate the full footprint, with a riser of the section standing on it', () => {
+  it('draws a base as a plate the full footprint, an inch thick, with nothing standing on it', () => {
+    const build = buildEquipment(entity('truss-base', [36, 1, 36]));
+    expect(build.meshes).toHaveLength(1);
+    const plate = meshBox(build.meshes[0]);
+    for (const [v, want] of [[plate.min.x, -18], [plate.max.x, 18], [plate.min.z, -18], [plate.max.z, 18],
+      [plate.min.y, 0], [plate.max.y, 1]] as const) expect(v).toBeCloseTo(want, 6);
+    disposeEquipmentBuild(build);
+  });
+
+  it('still stands a riser on the plate of a base placed taller than it, at 36.5 in', () => {
     const build = buildEquipment(entity('truss-base', [36, 36.5, 36]));
     expect(build.meshes).toHaveLength(2);
     const riser = build.meshes.find(m => m.name === 'truss')!;

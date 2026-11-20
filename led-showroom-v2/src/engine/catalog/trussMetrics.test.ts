@@ -75,8 +75,7 @@ describe('clampMetrics', () => {
 
 describe('braceNodesAlong', () => {
   it('rings both ends and every panel boundary of a 35.5 in chord', () => {
-    // The span a 36 in base leaves above its half-inch plate. Three bays of 11.8333 in, plus an end
-    // frame one diagonal radius in from each end.
+    // Three bays of 11.8333 in, plus an end frame one diagonal radius in from each end.
     expect([...braceNodesAlong(35.5, GP)].map(x => Number(x.toFixed(5)))).toEqual([
       0, 0.49213, 11.83333, 23.66667, 35.00787, 35.5,
     ]);
@@ -95,7 +94,7 @@ describe('braceNodesAlong', () => {
 
 describe('clearOfBraceNodes', () => {
   const JAW_HALF = 1.26 / 2;                              // the 8002, across its jaw
-  const SPAN = 35.5;                                      // chord of a 36 in base
+  const SPAN = 35.5;                                      // a chord three bays long
 
   it('rejects a jaw that would land on the end-frame weld', () => {
     // 0.69685 in up the chord is the lowest mount hole of a wall standing on the floor, and the
@@ -127,14 +126,16 @@ describe('clearOfBraceNodes', () => {
 });
 
 describe('trussBaseProfile', () => {
-  it('stands the GP riser on the measured 36 in plate, an inch thick, so its chords start an inch up', () => {
+  it('draws the catalog base as the measured 36 in plate, an inch thick, with nothing standing on it', () => {
     expect(GP_SECTION_IN).toBe(GP);
     expect(GP_BASE_PLATE_IN).toEqual({ size: 36, thick: 1 });
-    expect(trussBaseProfile([36, 36.5, 36])).toEqual({ plateThick: 1, section: GP, riserLen: 35.5 });
+    expect(trussBaseProfile([36, 1, 36])).toEqual({ plateThick: 1, section: GP, riserLen: 0 });
   });
 
-  it('keeps a squat base mostly riser, and never draws a riser wider than its plate', () => {
-    expect(trussBaseProfile([20, 2, 20])).toEqual({ plateThick: 0.5, section: GP, riserLen: 1.5 });
+  it('stands a riser on the plate only for height past it, never one wider than the plate', () => {
+    // A base placed at 36.5 in before the catalog's became the plate alone keeps its riser.
+    expect(trussBaseProfile([36, 36.5, 36])).toEqual({ plateThick: 1, section: GP, riserLen: 35.5 });
+    expect(trussBaseProfile([20, 0.5, 20])).toEqual({ plateThick: 0.5, section: GP, riserLen: 0 });
     expect(trussBaseProfile([8, 36, 10]).section).toBe(8);
   });
 });

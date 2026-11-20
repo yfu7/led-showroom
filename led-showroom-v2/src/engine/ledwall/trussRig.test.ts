@@ -31,7 +31,7 @@ const R = 25 / 25.4;                          // DT-GP chord: a 50 mm tube
 const CO = SECTION / 2 - R;                   // a leg's axis to its chords
 const REACH = 1.96875;                        // 8002 bolt face to the chord axis in its jaw
 const JAW_HALF = 1.26 / 2;                    // 8002 jaw, each way along the chord
-const BASE = 36.5, PLATE = 1, RISER = 35.5;   // DT-GP raised base: overall, its plate, the riser on it
+const PLATE = 1;                              // DT-GP base: a plate on the floor, nothing standing on it
 const LEG_Z = -PD / 2 - REACH - CO;           // a leg's axis, behind a wall at the origin
 const BASE_ID = 'gp-base-36';
 
@@ -102,11 +102,13 @@ function grips(doc: Document, p: EquipmentEntity, jaw: THREE.Vector3, along: THR
 
 /**
  * The corners of the truss a piece draws, in world space. A base's plate is left out: it is the one
- * part of a rig meant to reach out from behind the wall, flat on the floor.
+ * part of a rig meant to reach out from behind the wall, flat on the floor. A base that is all plate
+ * has none.
  */
 function trussCorners(doc: Document, p: EquipmentEntity): THREE.Vector3[] {
   const [w, h, d] = p.dims;
   const base = p.geometry === 'truss-base' ? trussBaseProfile(p.dims) : null;
+  if (base && base.riserLen <= 1e-9) return [];
   const hw = base ? base.section / 2 : w / 2, hd = base ? base.section / 2 : d / 2, y0 = base ? base.plateThick : 0;
   const m = worldMatrix(p, byIdOf(doc));
   const out: THREE.Vector3[] = [];
@@ -124,20 +126,20 @@ function notched(): LedWallEntity {
 }
 
 function folded(angle: number): LedWallEntity {
-  const wall = createLedWall({ cols: 4, rows: 2 });
+  const wall = createLedWall({ cols: 4, rows: 3 });
   wall.corners = [{ afterCol: 1, angle }];
   return wall;
 }
 
 function turned(): LedWallEntity {
-  const wall = createLedWall({ cols: 2, rows: 2, position: [40, 0, -10] });
+  const wall = createLedWall({ cols: 2, rows: 3, position: [40, 0, -10] });
   wall.transform.rotation = [0, 90, 0];
   return wall;
 }
 
 function onDeck(): { doc: Document; wall: LedWallEntity } {
   const stage = createStage(24);
-  const wall = createLedWall({ cols: 2, rows: 2, position: [0, 24, 0] });
+  const wall = createLedWall({ cols: 2, rows: 3, position: [0, 24, 0] });
   wall.attachedTo = stage.id;
   return { doc: docWith(stage, wall), wall };
 }
@@ -155,9 +157,9 @@ describe('the numbers a rig is laid out from', () => {
     expect(equipmentDef('clamp-8002')!.dims[0] / 2).toBe(JAW_HALF);
   });
 
-  it('draw a base as a 36 in plate about an inch thick with a GP riser standing on it', () => {
-    expect(equipmentDef(BASE_ID)!.dims).toEqual([36, BASE, 36]);
-    expect(trussBaseProfile([36, BASE, 36])).toEqual({ plateThick: PLATE, section: SECTION, riserLen: RISER });
+  it('draw a base as a 36 in plate about an inch thick, flat on the floor with nothing standing on it', () => {
+    expect(equipmentDef(BASE_ID)!.dims).toEqual([36, PLATE, 36]);
+    expect(trussBaseProfile([36, PLATE, 36])).toEqual({ plateThick: PLATE, section: SECTION, riserLen: 0 });
     expect(equipmentDef('gp-corner-6way')!.dims).toEqual([SECTION, SECTION, SECTION]);
     expect(equipmentDef('gp-truss-8ft')!.dims).toEqual([96, SECTION, SECTION]);
     expect(equipmentDef('gp-truss-5ft')!.dims).toEqual([60, SECTION, SECTION]);
@@ -176,8 +178,8 @@ describe('the numbers a rig is laid out from', () => {
 });
 
 describe('planTrussRig', () => {
-  it('stands a 2 x 2 on two bare bases, a plate apart, and sets it down on the plates', () => {
-    const wall = createLedWall({ cols: 2, rows: 2 });
+  it('stands a 2 x 3 on two towers of a plate and a 4 ft stick, a plate apart, and sets it down on the plates', () => {
+    const wall = createLedWall({ cols: 2, rows: 3 });
     const plan = planTrussRig(docWith(wall), wall);
 
     expect(plan.frames).toBe(0);
@@ -192,13 +194,16 @@ describe('planTrussRig', () => {
       expect(leg.axis[1]).toBeCloseTo(LEG_Z, 5);
       expect(leg.axis[1] + SECTION / 2).toBeLessThan(-PD / 2);   // the whole section behind the cabinet
       expect(leg.rotY).toBeCloseTo(0, 9);
-      // Two rows stand 37.86 in: the bare base fits under them, and nothing taller would.
-      expect(leg.pieces.map(p => p.catalogId)).toEqual([BASE_ID]);
-      expect(leg.pieces[0].geometry).toBe('truss-base');
-      expect(leg.pieces[0].position[0]).toBeCloseTo(leg.axis[0], 9);
-      expect(leg.pieces[0].position[1]).toBe(0);
-      expect(leg.pieces[0].position[2]).toBeCloseTo(leg.axis[1], 9);
-      expect(leg.topY).toBeCloseTo(BASE, 9);
+      // Three rows on the plates top out at 57.82 in: a 4 ft stick on a plate (49 in) fits under
+      // them, and a 5 ft one (61 in) would not.
+      expect(leg.pieces.map(p => p.catalogId)).toEqual([BASE_ID, 'gp-truss-4ft']);
+      expect(leg.pieces.map(p => p.geometry)).toEqual(['truss-base', 'truss-vertical']);
+      expect(leg.pieces.map(p => p.position[1])).toEqual([0, PLATE]);
+      for (const p of leg.pieces) {
+        expect(p.position[0]).toBeCloseTo(leg.axis[0], 9);
+        expect(p.position[2]).toBeCloseTo(leg.axis[1], 9);
+      }
+      expect(leg.topY).toBeCloseTo(PLATE + 48, 9);
     });
 
     // The plate reaches forward under the cabinets, so the wall stands on it: an inch up, no shim.
@@ -207,18 +212,21 @@ describe('planTrussRig', () => {
     expect(plan.shimIn).toBe(0);
     expect(plan.warnings).toContain('The wall rises 1.00 in to sit on the 1.00 in base plates.');
 
-    // Per leg: the bottom row's top hole and the top row's bottom hole. The bottom row's bottom hole
-    // sits on the riser's first weld and the top row's top hole is above the riser.
-    expect(plan.clamps).toHaveLength(4);
-    expect(plan.skipped).toEqual({ offFace: 0, weld: 2 });
+    // Per leg, the holes on its line between the stick's ends. The stick stands where the wall does,
+    // so each hole is its own height up the stick: 1.20 in sits on the foot weld and 36.66 in on the
+    // panel weld at 36, which leaves the bottom row's top hole and the bottom holes of the two rows
+    // above it. The top row's top hole, 55.62 in up, is past the stick's 48.
+    expect(plan.clamps).toHaveLength(6);
+    expect(plan.skipped).toEqual({ offFace: 0, weld: 4 });
     expect([plan.held, plan.columns, plan.ghosts]).toEqual([2, 2, 0]);
 
     const after = applyTrussRig(docWith(wall), wall, plan);
     const left = equipmentOf(after).filter(e => e.catalogId === 'clamp-8002')
       .map(c => boltOf(after, c)).filter(b => b.x < 0).sort((a, b) => a.y - b.y);
-    expect(left).toHaveLength(2);
+    expect(left).toHaveLength(3);
     near(left[0], -STEP / 2 - HX, PLATE + HIGH, -PD / 2);
     near(left[1], -STEP / 2 - HX, PLATE + PITCH + LOW, -PD / 2);
+    near(left[2], -STEP / 2 - HX, PLATE + 2 * PITCH + LOW, -PD / 2);
   });
 
   it('frames the Financial Times wall: four legs, a header across them, every column held', () => {
@@ -230,22 +238,22 @@ describe('planTrussRig', () => {
     for (const leg of plan.legs) {
       expect(leg.kind).toBe('frame');
       expect(leg.pieces.map(p => p.catalogId)).toEqual([BASE_ID, 'gp-truss-4ft', 'gp-corner-6way']);
-      expect(leg.pieces.map(p => p.position[1])).toEqual([0, BASE, BASE + 48]);
-      expect(leg.topY).toBeCloseTo(BASE + 48 + SECTION, 9);
+      expect(leg.pieces.map(p => p.position[1])).toEqual([0, PLATE, PLATE + 48]);
+      expect(leg.topY).toBeCloseTo(PLATE + 48 + SECTION, 9);
     }
     // Spans meet the blocks face to face.
     expect(plan.spans.map(s => s.dims[0])).toEqual([60, 96, 60]);
     plan.spans.forEach((s, i) => {
       expect(plan.legs[i + 1].axis[0] - plan.legs[i].axis[0] - SECTION).toBeCloseTo(s.dims[0], 9);
-      expect(s.position[1]).toBeCloseTo(BASE + 48, 9);
+      expect(s.position[1]).toBeCloseTo(PLATE + 48, 9);
     });
 
-    // The header's top chord lands on the high hole of the fifth row up, which takes a 0.13 in shim.
-    const headerY = BASE + 48 + SECTION - R;
-    const shim = headerY - PLATE - (4 * PITCH + HIGH);
+    // The header's top chord lands on the low hole of the fourth row up, which takes a 0.10 in shim.
+    const headerY = PLATE + 48 + SECTION - R;
+    const shim = headerY - PLATE - (3 * PITCH + LOW);
     expect(plan.headerY).toBeCloseTo(headerY, 9);
     expect(plan.shimIn).toBeCloseTo(shim, 9);
-    expect(shim).toBeCloseTo(0.1326, 4);
+    expect(shim).toBeCloseTo(0.0989, 4);
     expect(plan.bottomY).toBeCloseTo(PLATE + shim, 9);
 
     expect([plan.held, plan.columns]).toEqual([11, 11]);
@@ -255,7 +263,8 @@ describe('planTrussRig', () => {
   });
 
   it('puts towers a plate apart where no header fits, and leaves the columns between them hanging', () => {
-    const wall = createLedWall({ cols: 8, rows: 4 });
+    // Three rows are too short for a frame: a block on a 4 ft stick tops out at 60.16 in, over their 57.82.
+    const wall = createLedWall({ cols: 8, rows: 3 });
     const plan = planTrussRig(docWith(wall), wall);
 
     expect(plan.frames).toBe(0);
@@ -267,7 +276,9 @@ describe('planTrussRig', () => {
   });
 
   it('draws what it needs past our stock as ghosts, and says what is short', () => {
-    const wall = createLedWall({ cols: 11, rows: 4 });
+    // Towers a plate apart hold eight of eleven columns: eight bases, two past our six. Eight 4 ft
+    // sticks are all we own and 24 couplers are well inside our 38, so the bases are all that is short.
+    const wall = createLedWall({ cols: 11, rows: 3 });
     const doc = docWith(wall);
     const plan = planTrussRig(doc, wall);
     const name = equipmentDef(BASE_ID)!.name;
@@ -295,7 +306,7 @@ describe('planTrussRig', () => {
       return e;
     });
 
-    const wall = createLedWall({ cols: 2, rows: 2 });
+    const wall = createLedWall({ cols: 2, rows: 3 });
     const short = planTrussRig(docWith(wall, ...placed(5, 0)), wall);
     expect(short.legs.map(l => l.pieces[0].ghost)).toEqual([false, true]);
     expect(short.shortfall).toEqual([{ catalogId: BASE_ID, name: def.name, need: 2, have: 1 }]);
@@ -305,7 +316,7 @@ describe('planTrussRig', () => {
   });
 
   it('brings a wall standing higher down onto the plates', () => {
-    const wall = createLedWall({ cols: 2, rows: 2, position: [0, 10, 0] });
+    const wall = createLedWall({ cols: 2, rows: 3, position: [0, 10, 0] });
     const plan = planTrussRig(docWith(wall), wall);
 
     expect(plan.bottomY).toBeCloseTo(PLATE, 9);
@@ -361,7 +372,7 @@ describe('planTrussRig', () => {
   });
 
   it('takes the floor-stand kit off, since its back supports stand where the legs do', () => {
-    const wall = createLedWall({ cols: 2, rows: 2, accessories: true });
+    const wall = createLedWall({ cols: 2, rows: 3, accessories: true });
     const plan = planTrussRig(docWith(wall), wall);
 
     expect(plan.dropAccessories).toBe(true);
@@ -369,12 +380,18 @@ describe('planTrussRig', () => {
     expect(wallOf(applyTrussRig(docWith(wall), wall, plan), wall.id).accessories).toBe(false);
   });
 
-  it('refuses a wall shorter than a base, and a tilted one', () => {
-    const short = createLedWall({ cols: 1, rows: 1 });
-    const one = planTrussRig(docWith(short), short);
-    expect(one.legs).toEqual([]);
-    expect(one.clamps).toEqual([]);
-    expect(one.warnings.join(' ')).toMatch(/taller than the wall/);
+  it('refuses a wall shorter than its shortest leg, and a tilted one', () => {
+    // The shortest leg is a plate and a 4 ft stick, 49 in: over one row on the plates and over two.
+    for (const rows of [1, 2]) {
+      const short = createLedWall({ cols: 2, rows });
+      const plan = planTrussRig(docWith(short), short);
+      expect(plan.legs).toEqual([]);
+      expect(plan.clamps).toEqual([]);
+      expect(plan.warnings.join(' ')).toMatch(/taller than the wall/);
+    }
+    const two = createLedWall({ cols: 2, rows: 2 });
+    expect(planTrussRig(docWith(two), two).warnings).toContain('The shortest leg, a base plate and a 4 ft stick, stands '
+      + '49.0 in: taller than the wall in front of it, which stands 38.9 in, so it would show above it.');
 
     const tilted = createLedWall({ cols: 2, rows: 2 });
     tilted.transform.rotation = [10, 0, 0];
@@ -386,17 +403,18 @@ describe('planTrussRig', () => {
 
 /** Walls of every shape the planner handles, each as a scene with the wall in it. */
 const SCENES: [string, () => { doc: Document; wall: LedWallEntity }][] = [
-  ['2 x 2', () => solo(createLedWall({ cols: 2, rows: 2 }))],
+  ['2 x 3', () => solo(createLedWall({ cols: 2, rows: 3 }))],
+  ['8 x 3', () => solo(createLedWall({ cols: 8, rows: 3 }))],
   ['8 x 4', () => solo(createLedWall({ cols: 8, rows: 4 }))],
   ['11 x 8', () => solo(createLedWall({ cols: 11, rows: 8 }))],
   ['11 x 8 without bezels', () => solo(createLedWall({ cols: 11, rows: 8, bezels: false }))],
-  ['11 x 4, past our bases', () => solo(createLedWall({ cols: 11, rows: 4 }))],
+  ['11 x 3, past our bases', () => solo(createLedWall({ cols: 11, rows: 3 }))],
   ['8 x 6 with a notch', () => solo(notched())],
-  ['4 x 2 folded 90 degrees', () => solo(folded(90))],
-  ['4 x 2 folded 120 degrees', () => solo(folded(120))],
-  ['2 x 2 turned to face +x', () => solo(turned())],
-  ['2 x 2 standing 10 in up', () => solo(createLedWall({ cols: 2, rows: 2, position: [0, 10, 0] }))],
-  ['2 x 2 on a stage deck', onDeck],
+  ['4 x 3 folded 90 degrees', () => solo(folded(90))],
+  ['4 x 3 folded 120 degrees', () => solo(folded(120))],
+  ['2 x 3 turned to face +x', () => solo(turned())],
+  ['2 x 3 standing 10 in up', () => solo(createLedWall({ cols: 2, rows: 3, position: [0, 10, 0] }))],
+  ['2 x 3 on a stage deck', onDeck],
 ];
 
 describe('every rig it draws', () => {
@@ -458,7 +476,7 @@ describe('every rig it draws', () => {
 
 describe('applyTrussRig', () => {
   it('adds one group holding every piece, and moves the wall onto the plates', () => {
-    const wall = createLedWall({ cols: 2, rows: 2, position: [0, 10, 0] });
+    const wall = createLedWall({ cols: 2, rows: 3, position: [0, 10, 0] });
     const doc = docWith(wall);
     const plan = planTrussRig(doc, wall);
     const after = applyTrussRig(doc, wall, plan);
@@ -491,13 +509,13 @@ describe('applyTrussRig', () => {
   });
 
   it("leaves another wall's rig alone", () => {
-    const a = createLedWall({ cols: 2, rows: 2 });
-    const b = createLedWall({ cols: 2, rows: 2, position: [200, 0, 0] });
+    const a = createLedWall({ cols: 2, rows: 3 });
+    const b = createLedWall({ cols: 2, rows: 3, position: [200, 0, 0] });
     let doc = docWith(a, b);
     doc = applyTrussRig(doc, a, planTrussRig(doc, a));
     doc = applyTrussRig(doc, b, planTrussRig(doc, b));
     const bRig = rigEntityIds(doc, b.id);
-    expect(bRig.size).toBe(1 + 2 + 4);   // the group, two bases, four couplers
+    expect(bRig.size).toBe(1 + 2 + 2 + 6);   // the group, two bases, two 4 ft sticks, six couplers
 
     const a2 = wallOf(doc, a.id);
     doc = applyTrussRig(doc, a2, planTrussRig(doc, a2));

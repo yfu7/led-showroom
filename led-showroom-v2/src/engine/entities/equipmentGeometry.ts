@@ -355,14 +355,15 @@ const buildTrussVertical: Builder = (p, w, h, d) => {
 };
 
 /**
- * DT-GP raised base: a plate the full declared footprint, and a riser of the GP section standing ON
- * it, from the plate's top to `h`. The riser's chords therefore start where the planner expects a
- * jaw can first close (`trussBaseProfile`), and the plate is drawn the size it is on the floor --
- * it reaches forward under the wall, which is why a wall on these legs sits at the plate's top.
+ * DT-GP base: a plate the full declared footprint, drawn the size it is on the floor -- it reaches
+ * forward under the wall, which is why a wall on these legs sits at the plate's top. A base taller
+ * than its plate (one placed before the catalog's became the plate alone) also stands a riser of
+ * the GP section on it, from the plate's top to `h`, with its chords where `trussBaseProfile` says.
  */
 const buildTrussBase: Builder = (p, w, h, d) => {
   const { plateThick, section, riserLen } = trussBaseProfile([w, h, d]);
   p.box(w, plateThick, d, p.pal.dark);
+  if (riserLen <= 1e-6) return;
   const riser = trussAlong(p, riserLen, section, section, p.pal.alloy, 0);
   riser.rotation.z = Math.PI / 2;
   riser.position.set(0, plateThick + riserLen / 2, 0);

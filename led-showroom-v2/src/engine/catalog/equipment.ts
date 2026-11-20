@@ -149,7 +149,7 @@ export const VELOXITY_PRODUCTS: EquipmentDef[] = [
  * The truss on the Global Truss paperwork. Two systems that do NOT connect to each other:
  *
  *   DT-GP  11.156" section, joints bolted with (4) 5/8" Gr.8 bolts. Bought - Sales Order #735958.
- *          Six legs (5 ft + 4 ft), three 8 ft spans, six 6-way corners, six raised bases: three arches.
+ *          Six legs (5 ft + 4 ft), three 8 ft spans, six 6-way corners, six base plates: three arches.
  *   F34    11.42" section, conical couplers. QUOTED ONLY - Estimates #162181 rev. and #162195 are
  *          estimates, not sales orders, so these parts may never have been bought.
  *
@@ -214,14 +214,13 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
     ],
   },
   {
-    id: 'gp-base-36', name: 'DT-GP raised base 36 in', category: 'structure', geometry: 'truss-base',
-    dims: [36, 36.5, 36], color: '#17181b',
-    description: 'Heavy-duty raised base, black: a 36 x 36 in plate about 1 in thick with a GP truss riser standing on it. One under each leg.',
+    id: 'gp-base-36', name: 'DT-GP base plate 36 in', category: 'structure', geometry: 'truss-base',
+    dims: [36, 1, 36], color: '#17181b',
+    description: 'Heavy-duty base plate, black: 36 x 36 in and about 1 in thick, flat on the floor. The first stick of a leg bolts straight onto it. One under each leg.',
     specs: [
       { label: 'Part no.', value: 'BP0300 - DT-GP-Base36-BLK' },
       { label: 'Owned', value: '6 (Sales Order #735958)' },
       { label: 'Plate', value: '36 x 36 in, about 1 in thick (measured)' },
-      { label: 'Riser', value: '35.5 in on the plate, 36.5 in overall - nominal' },
       GP_SECTION, GP_CONN,
     ],
   },

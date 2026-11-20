@@ -117,7 +117,7 @@ export type EquipmentGeometry =
   | 'box' | 'cylinder' | 'kiosk' | 'totem' | 'truss' | 'truss-upright' | 'figure' | 'table-round'
   /** A stick stood on end, origin at its foot and no base plate: what a tower stacks. */
   | 'truss-vertical'
-  /** A raised base: a plate the full `dims` footprint with a GP riser standing on it (`trussBaseProfile`). */
+  /** A truss base: a plate the full `dims` footprint, with a GP riser on it only for height past the plate (`trussBaseProfile`). */
   | 'truss-base'
   /** Truss junctions. `dims` is the overall extent, arms included — not the section. */
   | 'truss-corner' | 'truss-tee' | 'truss-block'
