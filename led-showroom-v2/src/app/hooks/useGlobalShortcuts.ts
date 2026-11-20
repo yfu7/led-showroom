@@ -97,6 +97,8 @@ export function useGlobalShortcuts(engine: Engine | null): void {
         if (isModalOpen()) return;
         if (st.presentation) { st.setPresentation(false); e.preventDefault(); return; }
         if (engine.camera.flyMode) { engine.camera.setFlyMode(false); e.preventDefault(); return; }
+        // The truss builder's Esc is "done" wherever the focus is.
+        if (engine.tools.activeId === 'truss' && engine.tools.keyDown(e)) e.preventDefault();
         return;
       }
       if (isModalOpen() || st.shortcutsOpen) return;
@@ -138,6 +140,10 @@ export function useGlobalShortcuts(engine: Engine | null): void {
         return;
       }
       if (ctrl || e.altKey) return; // nothing else uses modifiers
+
+      // The truss builder's keys (its palette digits, F) reach it with the focus off the canvas too;
+      // here they would switch tools and end the build. Enter stays with a focused button.
+      if (engine.tools.activeId === 'truss' && key !== 'Enter' && engine.tools.keyDown(e)) return handled();
 
       /* ───── tools ───── */
       if (e.shiftKey) {

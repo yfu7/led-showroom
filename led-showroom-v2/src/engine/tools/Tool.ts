@@ -209,6 +209,9 @@ export class ToolManager {
   };
   private onKeyUp = (e: KeyboardEvent): void => { this.active?.onKeyUp?.(e); };
 
+  /** A key from off the viewport, for the active tool; true when it took it. */
+  keyDown(e: KeyboardEvent): boolean { return this.active?.onKeyDown?.(e) ?? false; }
+
   frame(dt: number): boolean { return this.active?.frame?.(dt) ?? false; }
 
   get lastPointer(): PointerInfo | null { return this.hover; }

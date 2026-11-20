@@ -326,15 +326,35 @@ describe('truss builder', () => {
       pieces = legBy(b, pieces, new THREE.Vector3(leg.axis[0], 0, leg.axis[1]), leg.pieces.slice(1).map(p => p.catalogId), i === 0);
       tops.push(pieces.length - 1);
     });
+    const fills: number[][] = [];
     for (const t of [tops[1], tops[0]]) {
       const got = fillGap(b, pieces, portOf(b, pieces, t, b.ctx.runs[0].U));
       if ('fail' in got) throw new Error(got.fail);
       pieces = [...pieces, ...got.add];
+      fills.push(got.add.map(p => Math.round(p.len / 12)).sort((a, z) => a - z));
     }
+    expect(fills).toEqual([[4, 8, 8, 8], [5, 5, 5, 5, 5, 5]]);
     for (const i of b.palette.filter(p => p.kind === 'stick' && !p.buy)) expect([i.catalogId, stockLeft(i, pieces) >= 0]).toEqual([i.catalogId, true]);
     const sum = summarize(b, pieces);
     expect(sum.coupling.supported.size).toBe(plan.supported);
     expect(sum.coupling.shim).toBeCloseTo(plan.shimIn, 9);
+  });
+
+  it.each([90, -90])('stands a leg behind either run of a wall folded %i degrees', angle => {
+    // Behind an outside corner a piece stands behind both runs at once. It is judged by the run it
+    // stands a coupler's reach behind, as its plate is snapped, or a plate behind the second run was
+    // refused for not standing that far behind the first.
+    const wall = createLedWall({ cols: 10, rows: 5 });
+    wall.corners = [{ afterCol: 4, angle }];
+    const b = open(docWith(wall), wall);
+    expect(b.ctx.runs.length).toBe(2);
+    let pieces: BuildPiece[] = [];
+    for (const run of b.ctx.runs) {
+      const [e0, e1] = b.ctx.extentOf(run, run.start, run.end);
+      const at = run.origin.clone().addScaledVector(run.U, (e0 + e1) / 2).addScaledVector(run.N, b.ctx.depth).setY(0);
+      pieces = legBy(b, pieces, at, ['gp-truss-4ft', 'gp-corner-6way']);
+    }
+    expect(summarize(b, pieces).coupling.bared.size).toBe(0);
   });
 
   it('snaps a plate a whole number of sticks from the last, block face to block face', () => {

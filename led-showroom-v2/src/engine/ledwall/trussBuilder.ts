@@ -259,19 +259,28 @@ function inRun(run: Run, p: BuildPiece): { u: number; n: number; along: boolean;
   return { u: rel.dot(run.U), n: rel.dot(run.N), along: Math.abs(s) < 1e-6, square: Math.abs(s) < 1e-6 || Math.abs(c) < 1e-6 };
 }
 
-/** The run a piece stands behind: square to it, its middle within the run's ends and not in front of it. */
+/**
+ * The run a piece stands behind: square to it, its middle within the run's ends and not in front of
+ * it. Behind an outside corner a piece is behind both runs at once; it goes with the one it stands
+ * nearest a coupler's reach behind, as {@link baseAt} picks a plate's run, the first on a tie.
+ */
 function runOf(b: Builder, p: BuildPiece): { ri: number; u: number; n: number; hu: number; hn: number; along: boolean } | null {
   const { ctx } = b;
   const [sx, , sz] = sizeOf(b, p);
+  let best: { ri: number; u: number; n: number; hu: number; hn: number; along: boolean } | null = null;
+  let off = Infinity;
   for (let ri = 0; ri < ctx.runs.length; ri++) {
     const run = ctx.runs[ri];
     const f = inRun(run, p);
     if (!f.square) continue;
     const [e0, e1] = ctx.extentOf(run, run.start, run.end);
     if (f.u < e0 - EPS || f.u > e1 + EPS || f.n < -EPS) continue;
-    return { ri, u: f.u, n: f.n, hu: (f.along ? sx : sz) / 2, hn: (f.along ? sz : sx) / 2, along: f.along };
+    const d = Math.abs(f.n - ctx.depth);
+    if (d >= off - EPS) continue;
+    off = d;
+    best = { ri, u: f.u, n: f.n, hu: (f.along ? sx : sz) / 2, hn: (f.along ? sz : sx) / 2, along: f.along };
   }
-  return null;
+  return best;
 }
 
 /** Corners of a piece's footprint on the floor, in order. */
@@ -447,8 +456,10 @@ export function check(b: Builder, pieces: readonly BuildPiece[], cand: BuildPiec
     const c = couple(b, [...pieces, cand]);
     const mine = c.bared.get(pieces.length);
     if (mine) why.push(mine);
-    else if (c.bared.size && c.bared.size > couple(b, pieces).bared.size) {
-      why.push('It would move the wall on its shim, and another piece would show.');
+    else if (c.bared.size) {
+      // Which pieces show, not how many: a new shim can hide one and bare another.
+      const before = couple(b, pieces).bared;
+      if ([...c.bared.keys()].some(k => !before.has(k))) why.push('It would move the wall on its shim, and another piece would show.');
     }
   }
   return why;
@@ -541,7 +552,8 @@ export function gapFrom(b: Builder, pieces: readonly BuildPiece[], port: Port): 
  * Sticks that close the gap from `port` to the port across from it exactly, end to end. The rule is
  * Auto truss's for a spliced span, so a span filled by hand comes out as Auto truss would lay it: any
  * mix of no more than two sticks past the fewest that splice to its length, in any order worth
- * trying, best by columns held, sticks we have left, couplers, then fewest sticks. Fewest first
+ * trying, best by columns held up, sticks we have left, couplers, then fewest sticks; which columns
+ * have couplers of their own, Auto truss does not weigh, and neither does this. Fewest first
  * would spend ghosts where stock on hand closes the gap: two 8 ft to buy over six 5 ft on the rack.
  * Null with why where none can.
  */
@@ -589,21 +601,29 @@ export function fillGap(b: Builder, pieces: readonly BuildPiece[], port: Port): 
       }
       if (!ok) continue;
       const c = couple(b, [...pieces, ...add]);
-      const score = [c.supported.size, -short, c.held.size, c.clamps.length, -order.length];
+      const score = [c.supported.size, -short, c.clamps.length, -order.length];
       if (!pick || rankDesc(score, pick.score) < 0) pick = { score, add };
     }
   }
   return pick ? { add: pick.add } : { fail: 'Every run of sticks that closes the gap would show from the front.' };
 }
 
-/** Each distinct order of a handful of sticks; past four, longest first and its reverse. */
+/**
+ * Each distinct order of a handful of sticks; past four, the three Auto truss tries: longest first,
+ * its reverse, and longest in the middle.
+ */
 function orders(mix: readonly PaletteItem[]): PaletteItem[][] {
+  const seen = new Set<string>();
   if (mix.length > 4) {
     const desc = [...mix].sort((a, z) => z.len - a.len);
-    return [desc, [...desc].reverse()];
+    const middleOut: PaletteItem[] = [];
+    desc.forEach((it, i) => (i % 2 ? middleOut.push(it) : middleOut.unshift(it)));
+    return [desc, [...desc].reverse(), middleOut].filter(o => {
+      const k = o.map(i => i.catalogId).join(',');
+      return seen.has(k) ? false : (seen.add(k), true);
+    });
   }
   const out: PaletteItem[][] = [];
-  const seen = new Set<string>();
   const walk = (left: PaletteItem[], acc: PaletteItem[]): void => {
     if (!left.length) {
       const k = acc.map(i => i.catalogId).join(',');

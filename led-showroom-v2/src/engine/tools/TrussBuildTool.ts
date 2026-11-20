@@ -15,6 +15,7 @@ import { cmdPatchDocument } from '../commands/entity';
 import { rayFromNdc, type Hit } from '../scene/Picking';
 import { buildEquipment, disposeEquipmentBuild, type EquipmentBuild } from '../entities/equipmentGeometry';
 import { rigEntityIds } from '../ledwall/trussRig';
+import { hiddenEntityIds } from './BoxSelect';
 import {
   applyBuild, attach, baseAt, check, fillGap, gapFrom, openBuilder, openPorts, pieceEntity, pieceName, removePiece,
   summarize, type BuildPiece, type BuildSummary, type Builder, type Port, type Verdict,
@@ -293,8 +294,11 @@ export class TrussBuildTool implements Tool {
     const ray = rayFromNdc(ndc, this.engine.camera.camera).ray;
     const local = new THREE.Ray(), inv = new THREE.Matrix4(), at = new THREE.Vector3();
     let best = -1, near = hit?.distance ?? Infinity;
+    // Only what can be seen, as pickAt does: a piece under a hidden rig is not there to take down.
+    const hidden = hiddenEntityIds(this.engine.doc.entities);
     b.pieces.forEach((q, i) => {
-      for (const m of (q.id && this.engine.scene.get(q.id)?.selectionMeshes()) || []) {
+      if (!q.id || hidden.has(q.id)) return;
+      for (const m of this.engine.scene.get(q.id)?.selectionMeshes() ?? []) {
         if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
         local.copy(ray).applyMatrix4(inv.copy(m.matrixWorld).invert());
         if (!local.intersectBox(m.geometry.boundingBox!, at)) continue;
@@ -325,9 +329,11 @@ export class TrussBuildTool implements Tool {
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
     const b = this.state.builder;
     if (e.key === 'Escape') { this.engine.tools.activate('select'); return true; }
-    if (e.key === 'Enter') { this.place(); return true; }
-    if (!e.shiftKey && e.key.toLowerCase() === 'f') { this.fill(); return true; }
-    if (b && /^[1-9]$/.test(e.key) && Number(e.key) <= b.palette.length) { this.choose(Number(e.key) - 1); return true; }
+    // One press, one step: a key held down repeats, and would put up a piece on every repeat.
+    if (e.key === 'Enter') { if (!e.repeat) this.place(); return true; }
+    if (!e.shiftKey && e.key.toLowerCase() === 'f') { if (!e.repeat) this.fill(); return true; }
+    // The digit row only: the numpad keeps the keys it has everywhere else (views on 1, 3, 5 and 7).
+    if (b && !e.code.startsWith('Numpad') && /^[1-9]$/.test(e.key) && Number(e.key) <= b.palette.length) { this.choose(Number(e.key) - 1); return true; }
     return false;
   }
 }
