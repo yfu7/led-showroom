@@ -3,14 +3,13 @@ import { TRUSS_INVENTORY, equipmentDef, ownedCount, type TrussSystem } from './e
 
 /**
  * What we hold, read off the five Stage Lighting Store sales orders (#733795, #734958, #735958,
- * #736526, #736643) and our own count of the 3 ft sticks, not off this catalog. The F34 block and
- * 12 x 12 in plate were quoted and never ordered.
+ * #736526, #736643), not off this catalog. The orders are the whole of our stock: no 3 ft stick is
+ * on them, so there is none. The F34 block and 12 x 12 in plate were quoted and never ordered.
  */
 const HELD: [id: string, system: TrussSystem, owned: number][] = [
   ['gp-truss-8ft', 'DT-GP', 3],
   ['gp-truss-5ft', 'DT-GP', 6],
   ['gp-truss-4ft', 'DT-GP', 12],
-  ['gp-truss-3ft', 'DT-GP', 6],
   ['gp-corner-6way', 'DT-GP', 6],
   ['gp-base-36', 'DT-GP', 6],
   ['f34-straight-1500', 'F34', 2],
@@ -31,6 +30,11 @@ describe('the truss inventory', () => {
 
   it('is every truss part on the paperwork, and the coupler', () => {
     expect(TRUSS_INVENTORY.map(d => d.id).sort()).toEqual([...HELD.map(([id]) => id), 'clamp-8002'].sort());
+  });
+
+  it('has no 3 ft stick, which is on none of the orders', () => {
+    expect(equipmentDef('gp-truss-3ft')).toBeUndefined();
+    expect(TRUSS_INVENTORY.some(d => d.trussSystem === 'DT-GP' && d.geometry === 'truss' && d.dims[0] === 36)).toBe(false);
   });
 
   it('puts the coupler in neither system', () => {

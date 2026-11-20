@@ -6,9 +6,9 @@
 
 The catalog now holds what the five Stage Lighting Store sales orders say we bought.
 
-- **DT-GP:** 3 x 8 ft, 6 x 5 ft, 12 x 4 ft (6 more on #736643; was 8), 6 x 3 ft (our own count, on
-  no order), 6 six-way corners and 6 base plates. The planner has four more 4 ft sticks to build
-  from before it draws ghosts.
+- **DT-GP:** 3 x 8 ft, 6 x 5 ft, 12 x 4 ft (6 more on #736643; was 8), 6 six-way corners and 6
+  base plates. The planner has four more 4 ft sticks to build from before it draws ghosts. No 3 ft
+  stick is on any order, so none is in the catalog: the orders are the whole of our stock.
 - **F34 was bought, not just quoted:** 2 x 1.5 m, 6 x 1.25 m, 4 two-way corners, 2 T junctions, 2
   steel 1 x 4 ft plates and 2 black 30 x 30 in plates, the last new to the catalog (the order says
   only 30 x 30; 3/8 in aluminium is from retailer listings). The 6-way junction block and the
@@ -22,7 +22,7 @@ The catalog now holds what the five Stage Lighting Store sales orders say we bou
   raised GP bases (GP0287) beside them at no charge. The catalog keeps the 36 x 36 in plate about an
   inch thick, as the plates we hold were described; GP0287 is not in the catalog.
 
-### Auto truss: spans across doorways, legs from 3, 4, 5 and 8 ft sticks, and fewer towers
+### Auto truss: spans across openings, legs from 4, 5 and 8 ft sticks, and fewer towers
 
 **Frames span openings.** A frame no longer needs one unbroken run of full-height columns. Where a
 wall stands on piers with doorways between them, as an arch does, the planner puts a leg behind each
@@ -44,17 +44,15 @@ columns with the fewest towers: an 8 x 3 wall stands on three towers where it to
 one. It warns separately about columns held by a neighbour and columns nothing holds. The 8 ft line is
 a working assumption, not a rated figure.
 
-**Leg heights from every stick we have.** A leg is any stack of 3, 4, 5 and 8 ft sticks, with a
+**Leg heights from every stick we have.** A leg is any stack of 4, 5 and 8 ft sticks, with a
 corner block under the header's block as a spacer when that helps, so the header lands on a row of
-holes within the quarter-inch shim. A 6 or 7 row wall now frames on legs of plate, 4 ft, 3 ft and two
-blocks, 107.32 in, the header's bottom chord on the sixth row's bottom holes over a 0.15 in shim. A
-2 x 2 wall now gets a tower of plate and 3 ft stick. Where no leg lands a header on a row, a frame
-can still stand as a brace with no couplers on its header, where it supports as many columns as
-towers would: a 3 x 3 stands on two legs of plate, 3 ft stick and block, a 3 ft span between them.
-
-**The DT-GP3 3 ft stick is in the catalog** (GP0118, DT-GP3-BLK; the part number is from retailer
-listings, not from our order). We have 6 on hand, by our own count: they are not on the paperwork.
-The planner draws any past those six as ghosts.
+holes within the quarter-inch shim. With bezels on, one leg does: plate, 4 ft stick and block, 60.16
+in, the Financial Times frame, its header's top chord on the fourth row's low holes. With bezels
+off, legs of 4 + 5 + 5 ft and a block (180.16 in, the ninth row's high holes) frame walls of ten to
+twelve rows, and 4 + 4 + 5 + 5 ft or 5 + 5 + 8 ft with a spacer (239.32 in, the thirteenth row's low
+holes) taller ones; nine rows and under stand on towers. Where no leg lands a header on a row, a
+frame can still stand as a brace with no couplers on its header, where it supports as many columns
+as towers would; with our sticks, no rectangular wall of three to nine rows comes out that way.
 
 **Towers and spans count stock.** A tower takes the stack that leaves us least short, and a spliced
 span takes sticks we still have before ones we would be short of. A frame's legs are laid out to
@@ -63,18 +61,25 @@ leave room for a tower's plate beside them.
 **Spans past 20 ft are flagged.** That is where the DT-GP span table stops, so the planner warns
 that a longer span wants checking before it carries the wall.
 
-For example, a 30 x 7 arch with two-column piers at both ends and in the middle, and a two-row lintel
-over its doorways, gets three legs and spans of 4 + 8 + 8 + 8 ft (28 ft) and six 5 ft sticks (30 ft).
-Every column is held, 28 by couplers of their own and 2 by the coupled column beside them. It needs
-52 couplers, 14 past our 38.
+For example, a 30 x 6 arch with two-column piers at both ends and in the middle, and a four-row
+lintel over two-row openings, gets three legs of plate, 4 ft stick and block, and spans of 30 ft (4,
+5, 8, 8 and 5 ft sticks) and 28 ft (an 8 and five 4 ft sticks), block faces 49 in up, over the
+openings' 38.96 in tops. Every column is held, 28 by couplers of their own and 2 by the coupled
+column beside them. It needs 48 couplers, 10 past our 38.
 
-Known limits: a one-row wall still gets no rig. The shortest leg, a plate and a 3 ft stick, is 37 in,
-and one row on the plates stands 19.9 in. On three rows no leg lands a header within the shim, so
-those walls stand on towers or a braced frame, most columns held by a neighbour rather than couplers
-of their own. Bridging a one-column pier makes long spans: a 29 x 7 arch with a one-column middle
-pier gets one 57 ft span (six 8 ft sticks, a 5 and a 4), three 8 ft sticks past our three. An arch
-whose lintel is one row deep stands on towers alone, its lintel columns mostly out of reach: no leg
-lands a header on a single lintel row within the shim. A one-column end pier leaves a leg a window
+A walk-through arch cannot frame. Over five-row doorways the lintel's lowest holes stand 96 in up
+the wall, and the nearest header our sticks give, on a block on 8 ft of stick, has its bottom chord
+0.99 in over them: past the shim. A 30 x 7 arch with a two-row lintel stands on three towers, one per
+pier, which hold the six pier columns; nothing holds the lintel's 24.
+
+Known limits: one- and two-row walls get no rig. The shortest leg, a plate and a 4 ft stick, is
+49 in, and two rows on the plates stand 38.9 in. On three rows no leg lands a header within the
+shim, and a frame leg, 60.16 in, would show over their 57.82, so those walls stand on towers, most
+columns held by a neighbour rather than couplers of their own. A frame spans only openings two rows
+high or less, under its spans' 49 in; an arch over taller openings, a walk-through one included,
+stands on towers alone, its lintel columns mostly out of reach. Bridging a one-column pier makes
+long spans: a 29 x 6 arch over two-row openings, with a one-column middle pier, gets one 57 ft span
+(six 8 ft sticks, a 5 and a 4), three 8 ft sticks past our three. A one-column end pier leaves a leg a window
 of 1.6 in (its section behind the column, its plate reaching out past the wall's end but clear of
 the doorway), so a frame reaches it only where a whole number of feet of span lands a leg there;
 otherwise that end stands on a tower. Beside a fold, at any angle, some columns can be out of reach.
@@ -83,9 +88,8 @@ the other plates; two frames' plates can still overlap, with a warning. Nothing 
 across a fold: a tower or span behind one run can stand inside the cabinets of the run past it (a
 7 x 4 folded 90 degrees puts a leg 0.67 in into the corner column; it happens most at 120 to 150
 degrees), stand in front of that run where the wall folds forward, or show above or through it
-where it is shorter or open. With bezels off, an 11 x 8 now frames on legs of
-plate, two 3 ft sticks and two blocks over a 0.03 in shim, every column held, which takes 8 blocks
-and 8 3 ft sticks of our 6 each. Spans past 20 ft are drawn but not rated.
+where it is shorter or open. With bezels off, an 11 x 8 stands on six towers, every
+column held, but they take 66 couplers, 28 past our 38. Spans past 20 ft are drawn but not rated.
 
 ## 2.3.0 — 2026-11-19
 

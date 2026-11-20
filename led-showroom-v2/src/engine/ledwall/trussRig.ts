@@ -61,7 +61,7 @@ const DEG = 180 / Math.PI;
 const BASE_ID = 'gp-base-36';
 const BLOCK_ID = 'gp-corner-6way';
 /** DT-GP stock. The catalog dims are for a stick lying down; a leg stands them on end. */
-const STICK_IDS = ['gp-truss-8ft', 'gp-truss-5ft', 'gp-truss-4ft', 'gp-truss-3ft'] as const;
+const STICK_IDS = ['gp-truss-8ft', 'gp-truss-5ft', 'gp-truss-4ft'] as const;
 const CLAMP_ID = 'clamp-8002';
 
 export const RIG_GROUP_NAME = 'Truss rig';

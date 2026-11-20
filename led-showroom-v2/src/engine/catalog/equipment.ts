@@ -162,8 +162,8 @@ export const VELOXITY_PRODUCTS: EquipmentDef[] = [
  *   DT-GP  11.156" section, end plates bolted with (4) 5/8" Gr.8 bolts.
  *            #735958  5/20/2026  6 x 5 ft, 6 x 4 ft, 3 x 8 ft, 6 x 6-way corners, 6 base plates
  *            #736643   7/1/2026  6 x 4 ft
- *          Six 3 ft DT-GP3 sticks are on hand as well, though on none of the orders: the count is
- *          our own, and the part number is from retailer listings.
+ *          No 3 ft stick is on any of the orders, so there is none in the catalog: the orders are
+ *          the whole of our stock.
  *   F34    11.42" section, conical couplers.
  *            #733795   2/6/2026  2 x 1.5 m, 6 x 1.25 m, 2 x 2-way 90 deg corners, 2 x 3-way T junctions
  *            #734958  3/31/2026  2 x 1 x 4 ft steel base plates, 2 x 2-way 90 deg corners
@@ -220,16 +220,6 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
     specs: [
       { label: 'Part no.', value: 'GP0079 - DT-GP4-BLK' },
       { label: 'Owned', value: '12 (Sales Orders #735958 and #736643, 6 on each)' },
-      GP_SYSTEM, GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
-    ],
-  },
-  {
-    id: 'gp-truss-3ft', name: 'DT-GP3 box truss 3 ft', category: 'structure', geometry: 'truss', trussSystem: 'DT-GP',
-    dims: [36, 11.16, 11.16], color: '#17181b',
-    description: '3 ft end-plated DT-GP box truss, black. Tops a leg or a span up to the length the wall needs.',
-    specs: [
-      { label: 'Part no.', value: 'GP0118 - DT-GP3-BLK (from retailer listings; not on any order)' },
-      { label: 'Owned', value: '6 (on hand - our count, not on the paperwork)' },
       GP_SYSTEM, GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
     ],
   },
