@@ -80,17 +80,6 @@ export function hasWebCodecs(): boolean {
   return typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined';
 }
 
-async function pickCodec(width: number, height: number, bitrate: number, framerate: number): Promise<CodecCandidate | null> {
-  if (!hasWebCodecs()) return null;
-  for (const cc of CODEC_CANDIDATES) {
-    try {
-      const res = await VideoEncoder.isConfigSupported({ codec: cc.codec, width, height, bitrate, framerate });
-      if (res.supported) return cc;
-    } catch { /* try the next one */ }
-  }
-  return null;
-}
-
 /** A codec the browser says it cannot encode at the size: the usual fall-through, not worth a word. */
 export const NOT_SUPPORTED = 'not supported at this size';
 
@@ -117,8 +106,10 @@ export async function pickWorkingCodec(candidates: readonly CodecCandidate[], pr
  * Nothing of it is kept; the take opens its own encoder and muxer once a codec is known to work.
  */
 export async function probeEncoder(cc: CodecCandidate, frame: CanvasImageSource, width: number, height: number, bitrate: number, framerate: number): Promise<string | null> {
-  const support = await VideoEncoder.isConfigSupported({ codec: cc.codec, width, height, bitrate, framerate });
-  if (!support.supported) return NOT_SUPPORTED;
+  // A browser that does not know the codec string may reject rather than answer: the same as no.
+  const supported = await VideoEncoder.isConfigSupported({ codec: cc.codec, width, height, bitrate, framerate })
+    .then(s => !!s.supported, () => false);
+  if (!supported) return NOT_SUPPORTED;
   const muxer = new Muxer({
     target: new ArrayBufferTarget(),
     video: { codec: cc.mux, width, height },
@@ -138,7 +129,13 @@ export async function probeEncoder(cc: CodecCandidate, frame: CanvasImageSource,
     encoder.configure({ codec: cc.codec, width, height, bitrate, framerate });
     const vf = new VideoFrame(frame, { timestamp: 0, alpha: 'discard' });
     try { encoder.encode(vf, { keyFrame: true }); } finally { vf.close(); }
-    await encoder.flush();
+    // An encoder that never settles the flush would hold the take's setup, and stop(), forever.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<'late'>(res => { timer = setTimeout(() => res('late'), PROBE_TIMEOUT_MS); });
+    const flushed = encoder.flush().then(() => 'done' as const);
+    flushed.catch(() => { /* closed below once late: that rejection is expected */ });
+    const done = await Promise.race([flushed, late]).finally(() => clearTimeout(timer));
+    if (done === 'late') fault ??= `the encoder did not finish a test frame in ${PROBE_TIMEOUT_MS / 1000} s`;
   } catch (e) {
     fault ??= e instanceof Error ? e.message || e.name : String(e);
   } finally {
@@ -150,9 +147,21 @@ export async function probeEncoder(cc: CodecCandidate, frame: CanvasImageSource,
   return muxer.target.buffer.byteLength ? null : 'the MP4 file came out empty';
 }
 
-/** True when a WebCodecs encoder + MP4 mux path is available in this browser. */
-export async function isMp4Supported(): Promise<boolean> {
-  return (await pickCodec(1280, 720, 8_000_000, 30)) !== null;
+/** How long a codec probe waits for its one frame. */
+export const PROBE_TIMEOUT_MS = 4000;
+
+/**
+ * The codec a take would record MP4 with, by the same probe the take runs (on a blank 1280x720
+ * frame), or null where it would fall back to WebM. The take probes again at its own size.
+ */
+export async function previewMp4Codec(): Promise<string | null> {
+  if (!hasWebCodecs() || typeof document === 'undefined') return null;
+  const c = document.createElement('canvas');
+  c.width = 1280; c.height = 720;
+  const g = c.getContext('2d');
+  if (g) { g.fillStyle = '#000'; g.fillRect(0, 0, c.width, c.height); }
+  const { cc } = await pickWorkingCodec(CODEC_CANDIDATES, x => probeEncoder(x, c, c.width, c.height, 8_000_000, 30));
+  return cc?.label ?? null;
 }
 
 /** mp4-muxer needs a colour space on the decoder config; Chrome sometimes leaves it null. */
@@ -413,6 +422,8 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
         throw encoderError
           ?? (muxError ? new Error(`The MP4 writer refused every frame: ${muxError.message}`) : new Error('No frames were recorded: the encoder returned none'));
       }
+      // Frames refused after some went in: the file holds what came before, so say it stops early.
+      if (muxError && !encoderError) engine.toast('error', `The video stops early: the MP4 writer refused a frame after ${chunks} (${muxError.message})`);
       try { m.finalize(); } catch (e) {
         throw new Error('Could not finalise the MP4 file' + (e instanceof Error && e.message ? `: ${e.message}` : ''));
       }

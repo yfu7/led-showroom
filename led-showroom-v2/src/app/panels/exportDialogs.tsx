@@ -19,7 +19,7 @@ import { Select } from '@/app/components/Select';
 import { ToggleRow } from '@/app/components/Toggle';
 import { Prop, Section } from '@/app/components/Section';
 import { saveImage } from '@/engine/export/image';
-import { recordVideo, isMp4Supported } from '@/engine/export/video';
+import { recordVideo, previewMp4Codec } from '@/engine/export/video';
 import { exportGltf } from '@/engine/export/gltf';
 import { generateDrawing, type DrawingStats } from '@/engine/export/drawing';
 import { buildLineArt } from '@/engine/export/lineArt';
@@ -136,7 +136,8 @@ export function RecordVideoDialog({ onClose }: { onClose(): void }) {
   const [turntable, setTurntable] = useState(false);
   const [crop, setCrop] = useState<Crop>('auto');
   const [live, setLive] = useState(engine.settings.liveWebsiteInRecordings);
-  const [mp4, setMp4] = useState<boolean | null>(null);
+  /** undefined while probing; the MP4 codec's label, or null for WebM. */
+  const [mp4, setMp4] = useState<string | null | undefined>(undefined);
   const [phase, setPhase] = useState<Phase>('setup');
   const [elapsed, setElapsed] = useState(0);
   const rec = useRef<{ stop(): Promise<Blob>; promise: Promise<Blob> } | null>(null);
@@ -144,7 +145,7 @@ export function RecordVideoDialog({ onClose }: { onClose(): void }) {
 
   useEffect(() => {
     let on = true;
-    isMp4Supported().then(v => { if (on) setMp4(v); }).catch(() => { if (on) setMp4(false); });
+    previewMp4Codec().then(v => { if (on) setMp4(v); }).catch(() => { if (on) setMp4(null); });
     return () => { on = false; };
   }, []);
   useEffect(() => () => { if (timer.current) window.clearInterval(timer.current); }, []);
@@ -185,7 +186,7 @@ export function RecordVideoDialog({ onClose }: { onClose(): void }) {
 
   const stop = () => { const r = rec.current; if (r && phase === 'recording') { setPhase('saving'); void r.stop(); } };
 
-  const badge = mp4 === null ? '…' : mp4 ? 'MP4 · H.264' : 'WebM';
+  const badge = mp4 === undefined ? '…' : mp4 ? `MP4 · ${mp4}` : 'WebM';
 
   if (phase !== 'setup') {
     // No Modal here: the app stays live so the take can capture camera moves, drags and slider rides.

@@ -9,7 +9,9 @@ but its encoder then returned nothing, or returned frames the MP4 writer would n
 codec first encodes the opening frame into a throwaway file, and only one that comes out as a file
 is used: H.264, then VP9, then VP8, then WebM. Where one the browser offered fails, the message says
 which it fell back to and why, and a take that still ends empty says what the encoder or the MP4
-writer reported.
+writer reported. A codec whose encoder never finishes its test frame is given up on after 4 s, a
+take the MP4 writer cut short says so, and the Record dialog's badge names the codec the same test
+picks (MP4 · H.264, MP4 · VP9, or WebM).
 
 ### Auto truss puts the rig up through the builder
 
