@@ -299,7 +299,8 @@ function autoTruss(engine: Engine, wall: LedWallEntity): void {
   const parts = [
     plan.frames ? n(plan.frames, 'frame', 'frames') : '',
     n(plan.legs.length, 'leg', 'legs'),
-    plan.spans.length ? n(plan.spans.length, 'span', 'spans') : '',
+    // Sticks, not spans: one spliced span across a doorway can take several.
+    plan.spans.length ? n(plan.spans.length, 'span stick', 'span sticks') : '',
     n(plan.clamps.length, 'half coupler', 'half couplers'),
   ].filter(Boolean);
   const head = `${parts.join(', ')} - ${plan.held} of ${n(plan.columns, 'column', 'columns')} held`;
