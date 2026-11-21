@@ -133,9 +133,9 @@ describe('truss builder', () => {
     expect(sum.coupling.welds).toBe(plan.skipped.weld);
     expect(sum.coupling.bared.size).toBe(0);
 
-    // The same stock: the packers to make and the couplers past ours are ghosts.
+    // The same stock: the 3 ft sticks to buy and the couplers past ours are ghosts.
     expect(sum.ghosts).toBe(plan.ghosts);
-    expect(pieces.filter((p, i) => sum.pieceGhosts[i]).map(p => p.catalogId)).toEqual(['gp-leg-packer', 'gp-leg-packer', 'gp-leg-packer']);
+    expect(pieces.filter((p, i) => sum.pieceGhosts[i]).map(p => p.catalogId)).toEqual(['gp-truss-3ft', 'gp-truss-3ft', 'gp-truss-3ft']);
     expect(sum.buyUsd).toBeCloseTo(plan.buyUsd, 6);
     expect(sum.shortfall).toEqual(plan.shortfall);
     expect(sum.long).toHaveLength(2);
@@ -182,9 +182,6 @@ describe('truss builder', () => {
     const again = open(next, moved);
     expect(again.hand).toBe(true);
     expect(again.pieces).toHaveLength(pieces.length);
-    // The packers to make come back as packers, still on their plates under each leg's first stick.
-    expect(again.pieces.filter(p => p.kind === 'packer')).toHaveLength(3);
-    expect(again.pieces.filter(p => p.kind === 'packer').every(p => p.position[1] > 0)).toBe(true);
     again.pieces.forEach((p, i) => {
       expect(p.catalogId).toBe(pieces[i].catalogId);
       expect(p.vertical).toBe(pieces[i].vertical);
@@ -337,9 +334,7 @@ describe('truss builder', () => {
       pieces = [...pieces, ...got.add];
       fills.push(got.add.map(p => Math.round(p.len / 12)).sort((a, z) => a - z));
     }
-    // Each 9 ft leg takes a 5 ft and a 4 ft, which leaves three 5 ft and nine 4 ft: the 30 ft closes
-    // from them, with none to buy.
-    expect(fills).toEqual([[4, 8, 8, 8], [4, 4, 4, 4, 4, 5, 5]]);
+    expect(fills).toEqual([[4, 8, 8, 8], [5, 5, 5, 5, 5, 5]]);
     for (const i of b.palette.filter(p => p.kind === 'stick' && !p.buy)) expect([i.catalogId, stockLeft(i, pieces) >= 0]).toEqual([i.catalogId, true]);
     const sum = summarize(b, pieces);
     expect(sum.coupling.supported.size).toBe(plan.supported);

@@ -14,7 +14,7 @@ import {
 } from './layout';
 import { IPOSTER } from './specs';
 import {
-  applyTrussRig, buyPrice, costNote, forgivenNote, inches, PACKER_ID, planTrussRig, rigEntityIds, RIG_GROUP_NAME, SHIM_MAX_IN,
+  applyTrussRig, buyPrice, costNote, forgivenNote, inches, planTrussRig, rigEntityIds, RIG_GROUP_NAME, SHIM_MAX_IN,
   UNPRICED_USD, usd,
 } from './trussRig';
 
@@ -216,7 +216,7 @@ describe('the numbers a rig is laid out from', () => {
 });
 
 describe('what a rig costs to buy', () => {
-  it('prices each part from the orders, the 3 ft from a listing, and the packer at nothing', () => {
+  it('prices each part from the orders, and the 3 ft from a listing', () => {
     expect(buyPrice('gp-truss-8ft')).toBeCloseTo(948.68, 6);
     expect(buyPrice('gp-truss-5ft')).toBeCloseTo(682.28, 6);
     expect(buyPrice('gp-truss-4ft')).toBeCloseTo(599.4, 6);
@@ -224,7 +224,6 @@ describe('what a rig costs to buy', () => {
     expect(buyPrice(BASE_ID)).toBeCloseTo(1468.16, 6);
     expect(buyPrice('clamp-8002')).toBeCloseTo(18.75, 6);
     expect(buyPrice('gp-truss-3ft')).toBeCloseTo(478, 6);
-    expect(buyPrice(PACKER_ID)).toBe(0);
     expect(buyPrice('no-such-part')).toBe(UNPRICED_USD);
   });
 
@@ -583,16 +582,32 @@ describe('planTrussRig', () => {
     expect(plan.ghosts).toBe(plan.shortfall[0].need - plan.shortfall[0].have);
   });
 
-  it('frames a walk-through arch over both doorways, its header on the lintel’s second row of holes', () => {
-    // Over five-row doorways the lintel's lowest holes, 96.00 in up the wall, are left alone: a coupler
-    // there shows under the lintel. Its next holes up stand 112.50 in. A 5 ft and a 4 ft on a 3.52 in
-    // packer put the header's bottom chord a thousandth under them, inside the shim. The packer is
-    // ours to make, so each is a ghost costing nothing to buy: only the couplers past ours are bought.
-    const blockY = PLATE + 3.52 + 60 + 48;                   // the span's block, on the 9 ft leg
-    const shim = blockY + R - PLATE - (5 * PITCH + HIGH);
-    expect(shim).toBeCloseTo(0.0011, 4);
-    expect(shim).toBeGreaterThanOrEqual(0);
+  it('frames a walk-through arch over both doorways, on a 3 ft stick to buy in each leg', () => {
+    // Over five-row doorways, the lintel's lowest holes stand 96.00 in up the wall. Of the legs of our
+    // own sticks that stand under its top, the nearest is a block on 8 ft of stick, its header's
+    // bottom chord 0.99 in over them: past the quarter-inch shim. A 4 ft and a 3 ft under a spare
+    // block put it 0.15 in under them, inside it. We hold no 3 ft stick, so each leg's is a ghost, to
+    // buy: the frame holds the lintel's 24 columns, which a tower behind each pier cannot reach.
+    const miss = 96 + R - (5 * PITCH + LOW);
+    expect(miss).toBeCloseTo(0.99, 2);
+    expect(miss).toBeGreaterThan(SHIM_MAX_IN);
+    const blockY = PLATE + 48 + 36 + SECTION;                // the span's block, on a spare one
+    const shim = blockY + R - PLATE - (5 * PITCH + LOW);
+    expect(shim).toBeCloseTo(0.147, 3);
     expect(shim).toBeLessThanOrEqual(SHIM_MAX_IN);
+    // No leg of real sticks (whole feet) and blocks puts either header chord on the lintel's other
+    // rows of holes inside the shim: the lowest row is the only one a header can take here, so its
+    // couplers show under the lintel over the doorways.
+    for (const hole of [5 * PITCH + HIGH, 6 * PITCH + LOW, 6 * PITCH + HIGH]) {
+      for (let feet = 2; feet <= 12; feet++) {
+        for (let blocks = 1; blocks <= 5; blocks++) {
+          for (const chord of [R, SECTION - R]) {
+            const lift = 12 * feet + (blocks - 1) * SECTION + chord - hole;
+            expect(lift >= 0 && lift <= SHIM_MAX_IN).toBe(false);
+          }
+        }
+      }
+    }
 
     const wall = arch();
     const plan = planTrussRig(docWith(wall), wall);
@@ -609,8 +624,8 @@ describe('planTrussRig', () => {
       if (i > 0) expect(leg.axis[0] - 18).toBeGreaterThanOrEqual(l - 1e-9);
       if (i < 2) expect(leg.axis[0] + 18).toBeLessThanOrEqual(r + 1e-9);
       expect(leg.pieces.map(p => p.catalogId))
-        .toEqual([BASE_ID, 'gp-leg-packer', 'gp-truss-5ft', 'gp-truss-4ft', 'gp-corner-6way']);
-      expect(leg.pieces.map(p => p.ghost)).toEqual([false, true, false, false, false]);
+        .toEqual([BASE_ID, 'gp-truss-4ft', 'gp-truss-3ft', 'gp-corner-6way', 'gp-corner-6way']);
+      expect(leg.pieces.map(p => p.ghost)).toEqual([false, false, true, false, false]);
       expect(leg.topY).toBeCloseTo(blockY + SECTION, 9);
     });
 
@@ -632,33 +647,32 @@ describe('planTrussRig', () => {
       expect(plan.clamps.some(c => c.position[0] > piers[i][1] && c.position[0] < piers[i + 1][0])).toBe(true);
     });
 
-    // The header's bottom chord lands on the high holes of the sixth row up, the lintel's second.
+    // The header's bottom chord lands on the low holes of the sixth row up, the lintel's lowest.
     expect(plan.headerY).toBeCloseTo(blockY + R, 9);
     expect(plan.shimIn).toBeCloseTo(shim, 9);
     expect(plan.bottomY).toBeCloseTo(PLATE + shim, 9);
     expect(PLATE + shim + 5 * PITCH - GAP).toBeLessThan(blockY);   // the doorways' tops, under it
 
     expect([plan.held, plan.supported, plan.columns]).toEqual([28, 30, 30]);
-    expect(plan.warnings).toContain('The wall rises 1.50 in to sit on the 1.50 in base plates, on a 0.001 in shim so the header chord meets a row of holes.');
-    expect(plan.warnings).toContain('DT-GP leg packer 3.52 in: 3 to make, drawn as ghosts. It lifts each frame leg so the header chord meets a row of holes.');
+    expect(plan.warnings).toContain('The wall rises 1.65 in to sit on the 1.50 in base plates, on a 0.15 in shim so the header chord meets a row of holes.');
+    expect(plan.warnings).toContain('DT-GP3 box truss 3 ft: 3 to buy, drawn as ghosts. We hold none, and our own sticks put no header on a row of holes here.');
     expect(plan.warnings).toContain(costNote(plan.buyUsd, plan.shortfall));
     expect(plan.warnings).toContain('2 spans run past 20 ft, where the DT-GP span table stops (the longest is 30 ft): '
       + 'have them checked before they carry the wall.');
-    expect(plan.shortfall.map(f => f.catalogId)).toEqual(['gp-leg-packer', 'clamp-8002']);
+    expect(plan.shortfall.map(f => f.catalogId)).toEqual(['gp-truss-3ft', 'clamp-8002']);
     expect(plan.shortfall[0]).toMatchObject({ need: 3, have: 0 });
     expect(plan.ghosts).toBe(3 + plan.shortfall[1].need - plan.shortfall[1].have);
-    // Only the couplers past our 38 are bought, at $18.75 each; the packers are made.
-    expect(plan.buyUsd).toBeCloseTo((plan.shortfall[1].need - plan.shortfall[1].have) * 18.75, 6);
+    // Three 3 ft at the listed $478, and the couplers past our 38 at $18.75 each.
+    expect(plan.buyUsd).toBeCloseTo(3 * 478 + (plan.shortfall[1].need - plan.shortfall[1].have) * 18.75, 6);
     expect(plan.forgiven).toEqual([]);
 
-    // Over the doorways no coupler bolts into the lintel's lowest holes, where it would show under
-    // the lintel; the header's take the row above. (Behind a pier, a leg's coupler there is hidden.)
+    // Over the doorways the header's couplers bolt into the lintel's lowest holes, the only row it
+    // can take, where they show under the lintel.
     const after = applyTrussRig(docWith(wall), wall, plan);
     const over = rigOf(after, wall.id).filter(e => e.catalogId === 'clamp-8002').map(c => boltOf(after, c))
       .filter(p => [0, 1].some(i => p.x > piers[i][1] && p.x < piers[i + 1][0]));
     expect(over.length).toBeGreaterThan(0);
-    expect(over.some(p => Math.abs(p.y - (plan.bottomY + 5 * PITCH + LOW)) < 1e-6)).toBe(false);
-    expect(over.every(p => Math.abs(p.y - (plan.bottomY + 5 * PITCH + HIGH)) < 1e-6)).toBe(true);
+    expect(over.every(p => Math.abs(p.y - (plan.bottomY + 5 * PITCH + LOW)) < 1e-6)).toBe(true);
   });
 
   it('bridges a pier one column wide, where no plate can stand, with one span from pier to pier', () => {

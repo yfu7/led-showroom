@@ -261,17 +261,6 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
       GP_SYSTEM, GP_SECTION, GP_CONN,
     ],
   },
-  {
-    id: 'gp-leg-packer', name: 'DT-GP leg packer 3.52 in', category: 'structure', geometry: 'box', trussSystem: 'DT-GP',
-    dims: [11.16, 3.52, 11.16], color: '#2a2c31',
-    description: 'A section-square spacer, 3.52 in thick, bolted between a base plate and the first stick of a leg. It lifts the header past where whole sticks put it: on a 4 ft and a 5 ft leg, onto the second row of holes of a walk-through arch\'s lintel. Not stock: made to order.',
-    specs: [
-      { label: 'Part no.', value: 'None - a part we make' },
-      { label: 'Owned', value: '0 (to make: drawn as a ghost until made)' },
-      { label: 'Unit price', value: 'None - made, not bought, so it costs nothing to buy' },
-      GP_SYSTEM, GP_SECTION, GP_CONN,
-    ],
-  },
 
   {
     id: 'clamp-8002', name: 'Half coupler M10 slim (8002)', category: 'structure', geometry: 'clamp',

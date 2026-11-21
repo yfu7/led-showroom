@@ -33,7 +33,7 @@ import type { Document, EquipmentEntity, EquipmentGeometry, GroupEntity, LedWall
 import type { Vec3 } from '../math';
 import type { MountPoint } from './layout';
 import {
-  BUY_STICK_IDS, CLAMP_ID, PACKER_ID, RIG_GROUP_NAME, SHIM_MAX_IN, SPAN_TABLE_IN, STICK_IDS,
+  BUY_STICK_IDS, CLAMP_ID, RIG_GROUP_NAME, SHIM_MAX_IN, SPAN_TABLE_IN, STICK_IDS,
   buyPrice, clampPiece, costNote, forgivenNote, inches, planTrussRig, rigContext, rigEntityIds,
   type ChordSpan, type RigContext, type RigLeg, type RigPiece, type Run, type TrussRigPlan,
 } from './trussRig';
@@ -48,7 +48,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 /** Most sticks a gap is filled with. */
 const FILL_MAX_STICKS = 8;
 
-export type BuildKind = 'base' | 'packer' | 'stick' | 'block';
+export type BuildKind = 'base' | 'stick' | 'block';
 
 /** One piece of a hand-built rig, in world space. */
 export interface BuildPiece {
@@ -56,9 +56,9 @@ export interface BuildPiece {
   id?: string;
   catalogId: string;
   kind: BuildKind;
-  /** A stick's length; a base's, a packer's or a block's height. */
+  /** A stick's length; a base's or a block's height. */
   len: number;
-  /** A stick stood on end. Bases, packers and blocks are always upright. */
+  /** A stick stood on end. Bases and blocks are always upright. */
   vertical: boolean;
   /** Bottom centre, world inches. */
   position: Vec3;
@@ -130,10 +130,8 @@ const isStickId = (id: string): boolean =>
 
 /** A rig part as a piece, from where it stands in the world; null for anything but a plate, stick or block. */
 function partAsPiece(catalogId: string, geometry: EquipmentGeometry, dims: Vec3, pos: THREE.Vector3, quat: THREE.Quaternion): BuildPiece | null {
-  // A packer by its id: its geometry is a plain box, and stood on end it would read as a stick.
-  const kind: BuildKind | null = catalogId === PACKER_ID ? 'packer'
-    : geometry === 'truss-base' ? 'base' : geometry === 'truss-block' ? 'block'
-      : geometry === 'truss' || geometry === 'truss-vertical' ? 'stick' : null;
+  const kind: BuildKind | null = geometry === 'truss-base' ? 'base' : geometry === 'truss-block' ? 'block'
+    : geometry === 'truss' || geometry === 'truss-vertical' ? 'stick' : null;
   if (!kind) return null;
   const vertical = kind !== 'stick' || geometry === 'truss-vertical';
   return {
@@ -183,7 +181,6 @@ export function openBuilder(doc: Document, wall: LedWallEntity): Builder | { fai
     ...sticks.map(d => item(d, 'stick', d.dims[0], `${+(d.dims[0] / 12).toFixed(2)} ft`)),
     item(ctx.blockDef, 'block', ctx.blockH, 'Block'),
     item(ctx.baseDef, 'base', ctx.baseH, 'Base'),
-    ...(ctx.packerDef ? [item(ctx.packerDef, 'packer', ctx.packerH, 'Packer')] : []),
   ];
 
   return {
@@ -205,7 +202,6 @@ function sizeOf(b: Builder, p: BuildPiece): Vec3 {
   const { ctx } = b;
   if (p.kind === 'base') return [...ctx.baseDef.dims] as Vec3;
   if (p.kind === 'block') return [...ctx.blockDef.dims] as Vec3;
-  if (p.kind === 'packer') return [ctx.section, p.len, ctx.section];
   return p.vertical ? [ctx.section, p.len, ctx.section] : [p.len, ctx.section, ctx.section];
 }
 
@@ -216,7 +212,7 @@ export function portsOf(b: Builder, p: BuildPiece, i: number): Port[] {
   const { X, Z } = axesOf(p.yaw);
   const port = (point: THREE.Vector3, dir: THREE.Vector3): Port => ({ piece: i, point, dir });
   if (p.kind === 'base') return [port(O.clone().addScaledVector(UP, sy), UP.clone())];
-  if (p.kind === 'packer' || (p.kind === 'stick' && p.vertical)) {
+  if (p.kind === 'stick' && p.vertical) {
     return [port(O.clone(), UP.clone().negate()), port(O.clone().addScaledVector(UP, sy), UP.clone())];
   }
   const C = O.clone().addScaledVector(UP, sy / 2);
@@ -254,14 +250,9 @@ export function attach(b: Builder, pieces: readonly BuildPiece[], port: Port, it
     catalogId: item.catalogId, kind: item.kind, len: item.len, vertical, position: [O.x, O.y, O.z], yaw,
   });
   if (item.kind === 'base') {
-    // A plate goes only under a stick's or a packer's foot.
-    if (d.y > -0.5 || (A.kind !== 'stick' && A.kind !== 'packer')) return null;
+    // A plate goes only under a stick's foot.
+    if (d.y > -0.5 || A.kind !== 'stick') return null;
     return make(p.clone().addScaledVector(UP, -b.ctx.baseH), A.yaw, true);
-  }
-  if (item.kind === 'packer') {
-    // A packer goes only on a plate, under the first stick.
-    if (d.y < 0.5 || A.kind !== 'base') return null;
-    return make(p.clone(), A.yaw, true);
   }
   if (item.kind === 'block') {
     const { X, Z } = axesOf(A.yaw);
@@ -493,7 +484,6 @@ export function check(b: Builder, pieces: readonly BuildPiece[], cand: BuildPiec
 export function pieceName(p: BuildPiece): string {
   if (p.kind === 'base') return 'base plate';
   if (p.kind === 'block') return 'block';
-  if (p.kind === 'packer') return 'packer';
   return `${+(p.len / 12).toFixed(2)} ft stick`;
 }
 
@@ -697,7 +687,7 @@ export interface BuildSummary {
   clampGhosts: boolean[];
   ghosts: number;
   shortfall: { catalogId: string; name: string; need: number; have: number }[];
-  /** What the ghosts cost to buy, US dollars (a packer we make costs nothing). */
+  /** What the ghosts cost to buy, US dollars. */
   buyUsd: number;
   /** Columns with any cabinets in them. */
   columns: number;
@@ -775,9 +765,7 @@ export function summarize(b: Builder, pieces: readonly BuildPiece[]): BuildSumma
   }
   for (const f of shortfall) {
     const k = f.need - f.have;
-    warnings.push(f.catalogId === PACKER_ID
-      ? `${f.name}: ${k} to make, drawn as ${k === 1 ? 'a ghost' : 'ghosts'}.`
-      : (BUY_STICK_IDS as readonly string[]).includes(f.catalogId)
+    warnings.push((BUY_STICK_IDS as readonly string[]).includes(f.catalogId)
         ? `${f.name}: ${k} to buy, drawn as ${k === 1 ? 'a ghost' : 'ghosts'}.`
         : `${f.name}: ${f.need} needed, ${f.have} available - ${k} drawn as ${k === 1 ? 'a ghost' : 'ghosts'}.`);
   }
