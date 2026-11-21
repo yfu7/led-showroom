@@ -407,7 +407,8 @@ describe('planTrussRig', () => {
   it('draws what it needs past our stock as ghosts, and says what is short', () => {
     // A 24 x 8 frames as the Financial Times wall does, on legs of a plate, a 4 ft stick and a block,
     // but takes seven of them: seven plates and seven blocks, one of each past our six, so the last
-    // leg is drawn with those ghosts. Its spans take four 8 ft sticks, one past our three.
+    // leg is drawn with those ghosts. Its spans would take four 8 ft sticks, one past our three, so
+    // the fourth is spliced from two 4 ft we have left instead of bought.
     const wall = createLedWall({ cols: 24, rows: 8 });
     const doc = docWith(wall);
     const plan = planTrussRig(doc, wall);
@@ -418,20 +419,39 @@ describe('planTrussRig', () => {
     expect(plan.legs.map(l => l.pieces.map(p => p.catalogId))).toEqual(Array(7).fill([BASE_ID, 'gp-truss-4ft', BLOCK]));
     expect(plan.legs.map(l => l.pieces.map(p => p.ghost)))
       .toEqual([...Array(6).fill([false, false, false]), [true, false, true]]);
-    expect(plan.spans.filter(s => s.ghost).map(s => s.dims[0])).toEqual([96]);
-    expect(plan.ghosts).toBe(3);
+    expect(plan.spans.filter(s => s.ghost)).toEqual([]);
+    expect(plan.spans.map(s => s.dims[0]).filter(l => l === 96)).toHaveLength(3);
+    expect(plan.ghosts).toBe(2);
+    expect(plan.buyUsd).toBeCloseTo(1468.16 + 695.6, 6);
     expect([plan.supported, plan.columns]).toEqual([24, 24]);
     expect([...plan.shortfall].sort((a, b) => a.catalogId.localeCompare(b.catalogId))).toEqual([
       { catalogId: BASE_ID, name: name(BASE_ID), need: 7, have: 6 },
       { catalogId: BLOCK, name: name(BLOCK), need: 7, have: 6 },
-      { catalogId: S8, name: name(S8), need: 4, have: 3 },
     ]);
     for (const id of [BASE_ID, BLOCK]) expect(plan.warnings).toContain(`${name(id)}: 7 needed, 6 available - 1 drawn as a ghost.`);
-    expect(plan.warnings).toContain(`${name(S8)}: 4 needed, 3 available - 1 drawn as a ghost.`);
+    expect(plan.warnings.some(w => w.startsWith(name(S8)))).toBe(false);
 
     const ghosts = equipmentOf(applyTrussRig(doc, wall, plan)).filter(e => e.ghost);
-    expect(ghosts.map(g => g.catalogId).sort()).toEqual([BASE_ID, BLOCK, S8].sort());
+    expect(ghosts.map(g => g.catalogId).sort()).toEqual([BASE_ID, BLOCK].sort());
     for (const g of ghosts) expect(g.name).toBe(`${name(g.catalogId)} (not owned)`);
+  });
+
+  it('splices a span from sticks we have rather than buy the one stick it was laid out as', () => {
+    // An 18 x 7 lays four 8 ft spans; we hold three. Seven 4 ft are left after the legs: two close
+    // the fourth for nothing. With all three 8 ft standing elsewhere in the scene it lays none of
+    // them: three 8 ft spans and two 4 ft ones then take eight 4 ft, one past the seven left.
+    const wall = createLedWall({ cols: 18, rows: 7 });
+    const plan = planTrussRig(docWith(wall), wall);
+    expect(plan.buyUsd).toBe(0);
+    expect(plan.ghosts).toBe(0);
+    expect([plan.supported, plan.columns]).toEqual([18, 18]);
+    const s8 = equipmentDef('gp-truss-8ft')!;
+    const away = Array.from({ length: 3 }, (_, i) => createEquipment(s8, [600 + 40 * i, 0, 0]));
+    const busy = planTrussRig(docWith(wall, ...away), wall);
+    expect(busy.spans.some(s => s.catalogId === 'gp-truss-8ft')).toBe(false);
+    expect(busy.shortfall.map(f => [f.catalogId, f.need - f.have])).toEqual([['gp-truss-4ft', 1]]);
+    expect(busy.buyUsd).toBeCloseTo(599.4, 6);
+    expect([busy.supported, busy.columns]).toEqual([18, 18]);
   });
 
   it('counts stock already standing elsewhere in the scene, but not ghosts', () => {

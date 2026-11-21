@@ -453,8 +453,8 @@ describe('Auto truss through the builder', () => {
     expect([c.held.size, c.supported.size]).toEqual([plan.held, plan.supported]);
     // More, shorter sticks from stock where the plan reaches past it: fewer ghosts, never more, and
     // never more to spend.
-    expect([plan.spans.length, got.spans]).toEqual([7, 10]);
-    expect([plan.ghosts, got.summary.ghosts]).toEqual([14, 12]);
+    expect([plan.spans.length, got.spans]).toEqual([9, 10]);
+    expect([plan.ghosts, got.summary.ghosts]).toEqual([12, 12]);
     expect(got.summary.buyUsd).toBeLessThanOrEqual(plan.buyUsd + 1e-6);
   });
 

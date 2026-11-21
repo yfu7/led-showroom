@@ -11,7 +11,9 @@ note says that one is an estimate. Holding every column still comes first; the c
 rigs that hold as many, then the fewest pieces. Under a header span one column may go without a
 coupler or a tower where that saves money, and the note says which column and what it saved. The
 toast says what the parts to buy come to, and God Mode shows the plan's cost
-against the rig put up.
+against the rig put up. A span laid out as one stick we would have to buy is spliced from sticks
+we have left where they make it, and sticks already standing elsewhere in the scene count as used
+when layouts are compared.
 
 An arch's header no longer couples to the lintel's lowest row of holes, where its couplers showed
 under the lintel over the doorways. To reach the next row up, each frame leg stands a 5 ft and a 4 ft

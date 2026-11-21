@@ -885,8 +885,25 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     return could.size;
   };
 
-  /** What a mix of sticks past what we own costs to buy, so a layout can prefer what we hold, then what is cheap. */
-  const owned = (len: number): number => ownedCount(stickOf(len)) ?? Infinity;
+  // Stock left for this rig: what we own, less what the rest of the scene already stands up.
+  const mine = rigEntityIds(doc, wall.id);
+  const usedElsewhere = new Map<string, number>();
+  for (const e of doc.entities) {
+    if (e.type !== 'equipment' || mine.has(e.id) || e.ghost) continue;
+    usedElsewhere.set(e.catalogId, (usedElsewhere.get(e.catalogId) ?? 0) + 1);
+  }
+  const availMemo = new Map<string, number>();
+  const available = (id: string): number => {
+    let got = availMemo.get(id);
+    if (got === undefined) {
+      const own = ownedCount(equipmentDef(id));
+      availMemo.set(id, got = own === undefined ? Infinity : Math.max(0, own - (usedElsewhere.get(id) ?? 0)));
+    }
+    return got;
+  };
+
+  /** What a mix of sticks past what we have left costs to buy, so a layout can prefer what we hold, then what is cheap. */
+  const owned = (len: number): number => available(stickOf(len).id);
   const overuseOf = (sticks: readonly number[]): number => {
     const counts = new Map<number, number>();
     for (const l of sticks) counts.set(l, (counts.get(l) ?? 0) + 1);
@@ -1231,23 +1248,6 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     }
   }
 
-  // Stock left for this rig: what we own, less what the rest of the scene already stands up.
-  const mine = rigEntityIds(doc, wall.id);
-  const usedElsewhere = new Map<string, number>();
-  for (const e of doc.entities) {
-    if (e.type !== 'equipment' || mine.has(e.id) || e.ghost) continue;
-    usedElsewhere.set(e.catalogId, (usedElsewhere.get(e.catalogId) ?? 0) + 1);
-  }
-  const availMemo = new Map<string, number>();
-  const available = (id: string): number => {
-    let got = availMemo.get(id);
-    if (got === undefined) {
-      const own = ownedCount(equipmentDef(id));
-      availMemo.set(id, got = own === undefined ? Infinity : Math.max(0, own - (usedElsewhere.get(id) ?? 0)));
-    }
-    return got;
-  };
-
   /** Stacks a tower could stand at one spot, with the couplers each takes: the same spots recur across heights. */
   const towerMemo = new Map<string, { sticks: number[]; hits: number }[]>();
 
@@ -1347,11 +1347,12 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
           const from = f.legsU[j] + section / 2;
           const len = sum(laid);
           if (len > SPAN_TABLE_IN + EPS) long.push(len);
-          // A single stick stands as laid out. A spliced span is any mix of no more than two sticks
-          // past the fewest that make it, in any order worth trying, best by: columns it holds that
-          // nothing else does yet, sticks we have left, couplers on the header, then fewest sticks.
+          // A single stick we have stands as laid out. A spliced span, or a single stick we would have
+          // to buy, is any mix of no more than two sticks past the fewest that make it, in any order
+          // worth trying, best by: columns it holds that nothing else does yet, what is left to buy,
+          // couplers on the header, then fewest sticks.
           let sticks = laid;
-          if (laid.length > 1) {
+          if (laid.length > 1 || short(laid) > 0) {
             const mixes = mixesOf(len);
             const cap = (mixes[0]?.length ?? 0) + 2;
             let pick: { score: number[]; order: number[] } | null = null;
