@@ -924,6 +924,25 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     return Math.abs(len - r) < 1e-6 ? mixesByLen.get(r) ?? [] : [];
   };
   /**
+   * As {@link mixesOf}, with the sticks to buy as well: a span laid out of ours can still be spliced
+   * from one of ours and one cheap one to buy, where that costs less than the stick we lack.
+   */
+  const buyLens = buyDefs.map(d => d.dims[0]).filter(l => !stickLens.includes(l));
+  const spliceByLen = new Map<number, number[][]>();
+  if (buyLens.length) {
+    for (let n = 1; n <= MAX_SPAN_STICKS; n++) {
+      for (const mix of multisetsOf([...stickLens, ...buyLens], n)) {
+        const L = sum(mix);
+        spliceByLen.set(L, [...(spliceByLen.get(L) ?? []), mix]);
+      }
+    }
+  }
+  const spliceMixesOf = (len: number): number[][] => {
+    if (!buyLens.length) return mixesOf(len);
+    const r = Math.round(len);
+    return Math.abs(len - r) < 1e-6 ? (spliceByLen.get(r) ?? []).sort((a, z) => a.length - z.length) : [];
+  };
+  /**
    * The grid a frame's legs keep to: the sticks' common measure, a foot for ours. Every span is a
    * whole number of feet, so once one leg is placed the rest of the frame can only move in feet.
    */
@@ -1353,7 +1372,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
           // couplers on the header, then fewest sticks.
           let sticks = laid;
           if (laid.length > 1 || short(laid) > 0) {
-            const mixes = mixesOf(len);
+            const mixes = spliceMixesOf(len);
             const cap = (mixes[0]?.length ?? 0) + 2;
             let pick: { score: number[]; order: number[] } | null = null;
             for (const mix of mixes) {

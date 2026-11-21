@@ -12,7 +12,8 @@ rigs that hold as many, then the fewest pieces. Under a header span one column m
 coupler or a tower where that saves money, and the note says which column and what it saved. The
 toast says what the parts to buy come to, and God Mode shows the plan's cost
 against the rig put up. A span laid out as one stick we would have to buy is spliced from sticks
-we have left where they make it, and sticks already standing elsewhere in the scene count as used
+we have left, or with the cheapest stick to buy, where that costs less; sticks already standing
+elsewhere in the scene count as used
 when layouts are compared.
 
 An arch's header no longer couples to the lintel's lowest row of holes, where its couplers showed

@@ -439,7 +439,8 @@ describe('planTrussRig', () => {
   it('splices a span from sticks we have rather than buy the one stick it was laid out as', () => {
     // An 18 x 7 lays four 8 ft spans; we hold three. Seven 4 ft are left after the legs: two close
     // the fourth for nothing. With all three 8 ft standing elsewhere in the scene it lays none of
-    // them: three 8 ft spans and two 4 ft ones then take eight 4 ft, one past the seven left.
+    // them: three 8 ft spans and two 4 ft ones would take eight 4 ft, one past the seven left, so
+    // one 8 ft span is spliced from a 5 ft and a 3 ft to buy, the cheapest stick to buy.
     const wall = createLedWall({ cols: 18, rows: 7 });
     const plan = planTrussRig(docWith(wall), wall);
     expect(plan.buyUsd).toBe(0);
@@ -449,8 +450,8 @@ describe('planTrussRig', () => {
     const away = Array.from({ length: 3 }, (_, i) => createEquipment(s8, [600 + 40 * i, 0, 0]));
     const busy = planTrussRig(docWith(wall, ...away), wall);
     expect(busy.spans.some(s => s.catalogId === 'gp-truss-8ft')).toBe(false);
-    expect(busy.shortfall.map(f => [f.catalogId, f.need - f.have])).toEqual([['gp-truss-4ft', 1]]);
-    expect(busy.buyUsd).toBeCloseTo(599.4, 6);
+    expect(busy.shortfall.map(f => [f.catalogId, f.need - f.have])).toEqual([['gp-truss-3ft', 1]]);
+    expect(busy.buyUsd).toBeCloseTo(478, 6);
     expect([busy.supported, busy.columns]).toEqual([18, 18]);
   });
 

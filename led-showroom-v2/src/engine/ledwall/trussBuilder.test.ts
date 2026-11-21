@@ -451,11 +451,12 @@ describe('Auto truss through the builder', () => {
     expect(c.clamps.map(x => keyOf(x.piece)).sort()).toEqual(plan.clamps.map(keyOf).sort());
     expect(c.shim).toBeCloseTo(plan.shimIn, 9);
     expect([c.held.size, c.supported.size]).toEqual([plan.held, plan.supported]);
-    // More, shorter sticks from stock where the plan reaches past it: fewer ghosts, never more, and
-    // never more to spend.
-    expect([plan.spans.length, got.spans]).toEqual([9, 10]);
+    // The plan splices a span past our 8 ft from a 5 ft and a 3 ft to buy, as F does: the same
+    // sticks, ghosts and cost.
+    expect([plan.spans.length, got.spans]).toEqual([10, 10]);
     expect([plan.ghosts, got.summary.ghosts]).toEqual([12, 12]);
-    expect(got.summary.buyUsd).toBeLessThanOrEqual(plan.buyUsd + 1e-6);
+    expect(got.summary.buyUsd).toBeCloseTo(plan.buyUsd, 6);
+    expect(plan.spans.filter(s => s.ghost).map(s => s.catalogId)).toEqual(['gp-truss-3ft']);
   });
 
   it('says why a mitre or a fold leaves holes and columns out, as the plan does', () => {
