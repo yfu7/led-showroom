@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Dimension labels scale with zoom; the turntable turns slower
+
+Dimension and measure labels are now a fixed size in the room (12 in tall for a wall's dimensions)
+rather than a fixed size on screen, so they grow as you zoom in and shrink as you pull back. Far out
+they stop shrinking at half the size they used to hold, so a whole floor stays readable. In an
+orthographic view the zoom alone scales them.
+
+A turntable take turns no quicker than once every 30 s. Manual records one full turn (30 s); a
+shorter take shows that part of the turn, and the dialog says how many degrees.
+
 ### Record video: falls back when the browser's encoder records nothing
 
 Recording could fail with "No frames were recorded" where the browser said it could encode H.264

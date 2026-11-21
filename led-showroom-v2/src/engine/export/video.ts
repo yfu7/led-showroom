@@ -71,6 +71,8 @@ export const CODEC_CANDIDATES: CodecCandidate[] = [
 ];
 
 export const MAX_RECORD_SEC = 600;
+/** The quickest a turntable turns: one full turn in this many seconds (12 degrees a second). */
+export const TURNTABLE_TURN_SEC = 30;
 export const KEYFRAME_INTERVAL_US = 2_000_000;
 export const MAX_ENCODE_QUEUE = 4;
 /** Re-rasterise live websites every N encoded frames. */
@@ -179,8 +181,10 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
   const bitrate = opts.bitrate ?? 8_000_000;
   const scale = opts.scale ?? 1;
   const includeGrid = opts.includeGrid ?? true;
-  const durationSec = Math.min(MAX_RECORD_SEC, opts.durationSec ?? (opts.turntable ? 12 : MAX_RECORD_SEC));
-  const turnSec = opts.durationSec ?? 12;
+  const durationSec = Math.min(MAX_RECORD_SEC, opts.durationSec ?? (opts.turntable ? TURNTABLE_TURN_SEC : MAX_RECORD_SEC));
+  // A take of its own length turns once over that length, but never quicker than the slowest turn:
+  // a short take shows part of the turn rather than whipping round.
+  const turnSec = Math.max(TURNTABLE_TURN_SEC, opts.durationSec ?? TURNTABLE_TURN_SEC);
 
   let recording = false;
   let stopRequested = false;

@@ -19,7 +19,7 @@ import { Select } from '@/app/components/Select';
 import { ToggleRow } from '@/app/components/Toggle';
 import { Prop, Section } from '@/app/components/Section';
 import { saveImage } from '@/engine/export/image';
-import { recordVideo, previewMp4Codec } from '@/engine/export/video';
+import { recordVideo, previewMp4Codec, TURNTABLE_TURN_SEC } from '@/engine/export/video';
 import { exportGltf } from '@/engine/export/gltf';
 import { generateDrawing, type DrawingStats } from '@/engine/export/drawing';
 import { buildLineArt } from '@/engine/export/lineArt';
@@ -191,8 +191,8 @@ export function RecordVideoDialog({ onClose }: { onClose(): void }) {
   if (phase !== 'setup') {
     // No Modal here: the app stays live so the take can capture camera moves, drags and slider rides.
     const note = `${duration === 'manual'
-      ? (turntable ? 'Recording one full turn (12 s) — stop early at any time.' : 'Recording until you stop.')
-      : `Recording for ${duration} s — stop early at any time.`}${turntable ? ' The camera orbits the build.' : ' The scene stays live — orbit, drag and edit while it records.'}`;
+      ? (turntable ? `Recording one full turn (${TURNTABLE_TURN_SEC} s) — stop early at any time.` : 'Recording until you stop.')
+      : `Recording for ${duration} s${turntable && Number(duration) < TURNTABLE_TURN_SEC ? ` (${Math.round(360 * Number(duration) / TURNTABLE_TURN_SEC)}° of the turn)` : ''} — stop early at any time.`}${turntable ? ' The camera orbits the build.' : ' The scene stays live — orbit, drag and edit while it records.'}`;
     return <RecordingChip elapsed={elapsed} badge={badge} note={note} saving={phase === 'saving'} onStop={stop} />;
   }
 
@@ -215,7 +215,7 @@ export function RecordVideoDialog({ onClose }: { onClose(): void }) {
       <Prop label="Crop">
         <Segmented<Crop> value={crop} onChange={setCrop} options={[{ value: 'auto', label: 'Auto' }, { value: 'none', label: 'Full frame' }]} />
       </Prop>
-      <ToggleRow label="Turntable" checked={turntable} onChange={setTurntable} hint="Frame the build and orbit it once — a 360° view (frames the selection instead, if there is one)" />
+      <ToggleRow label="Turntable" checked={turntable} onChange={setTurntable} hint={`Frame the build and orbit it slowly, one turn per ${TURNTABLE_TURN_SEC} s — Manual records a full 360° (frames the selection instead, if there is one)`} />
       <ToggleRow label="Live websites" checked={live} onChange={setLive} hint="Re-rasterise website content each frame (slower; best on a discrete GPU)" />
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <span className="hint">Container</span>

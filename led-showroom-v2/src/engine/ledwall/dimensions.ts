@@ -53,9 +53,15 @@ const LABEL_CORNER_RADIUS_PX = 10;
 const LABEL_BASE_HEIGHT_IN = 6;
 const LABEL_FONT_FAMILY = '"Courier New", monospace';
 
-/** v1 distance compensation: `scale = max(0.4, camDist / 200)` (index.html 3792-3794). */
+/**
+ * Label size. A label is a fixed size in the room, `LABEL_WORLD_SCALE` x its base height, so it
+ * grows as the camera zooms in and shrinks as it pulls back, like the wall it measures. Only far
+ * out does it stop shrinking: never below `LABEL_FAR_SCREEN` of the size v1 held on screen
+ * (`camDist / 200` x base), so a whole floor's dimensions stay readable.
+ */
 const LABEL_REF_DIST_IN = 200;
-const LABEL_MIN_SCALE = 0.4;
+export const LABEL_WORLD_SCALE = 2;
+const LABEL_FAR_SCREEN = 0.5;
 
 /** Rect-wall dimension layout constants (index.html 4437-4444, 4498). */
 const RECT = {
@@ -210,7 +216,9 @@ export function updateLabelSpriteScale(sprite: THREE.Sprite, camera: THREE.Camer
   const camPos = new THREE.Vector3();
   camera.getWorldPosition(camPos);
   const camDist = camPos.distanceTo(pos);
-  const scale = Math.max(LABEL_MIN_SCALE, camDist / LABEL_REF_DIST_IN);
+  // An orthographic camera's zoom already scales world-sized things, and its distance is not a zoom.
+  const far = (camera as THREE.OrthographicCamera).isOrthographicCamera ? 0 : (camDist / LABEL_REF_DIST_IN) * LABEL_FAR_SCREEN;
+  const scale = Math.max(LABEL_WORLD_SCALE, far);
   const h = baseHeightIn * scale;
   sprite.scale.set(h * aspect, h, 1);
 }

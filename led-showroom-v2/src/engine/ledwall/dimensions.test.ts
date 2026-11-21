@@ -86,21 +86,35 @@ describe('createLabelSprite', () => {
 });
 
 describe('updateLabelSpriteScale', () => {
-  it('scales by max(0.4, camDist / 200) preserving aspect', () => {
+  it('keeps a fixed size in the room, so it grows as the camera zooms in, preserving aspect', () => {
     const s = createLabelSprite('42"');
     const aspect = s.userData.dimAspect as number;
     const cam = new THREE.PerspectiveCamera();
+    for (const z of [10, 400, 800]) {
+      cam.position.set(0, 0, z);
+      cam.updateMatrixWorld();
+      updateLabelSpriteScale(s, cam, 6);
+      expect(s.scale.y).toBeCloseTo(12);
+      expect(s.scale.x).toBeCloseTo(12 * aspect);
+    }
+  });
 
-    cam.position.set(0, 0, 400);
+  it('stops shrinking far out, at half the size it used to hold on screen', () => {
+    const s = createLabelSprite('42"');
+    const cam = new THREE.PerspectiveCamera();
+    cam.position.set(0, 0, 4000);
+    cam.updateMatrixWorld();
+    updateLabelSpriteScale(s, cam, 6);
+    expect(s.scale.y).toBeCloseTo(6 * (4000 / 200) * 0.5);
+  });
+
+  it('leaves an orthographic view to its zoom', () => {
+    const s = createLabelSprite('42"');
+    const cam = new THREE.OrthographicCamera();
+    cam.position.set(0, 0, 40000);
     cam.updateMatrixWorld();
     updateLabelSpriteScale(s, cam, 6);
     expect(s.scale.y).toBeCloseTo(12);
-    expect(s.scale.x).toBeCloseTo(12 * aspect);
-
-    cam.position.set(0, 0, 10); // below the 0.4 floor
-    cam.updateMatrixWorld();
-    updateLabelSpriteScale(s, cam, 6);
-    expect(s.scale.y).toBeCloseTo(2.4);
   });
 });
 
