@@ -12,6 +12,7 @@ import { Section } from '@/app/components/Section';
 import { GodOnly, Raw } from '@/app/shell/GodMode';
 import type { LedWallEntity } from '@/engine/document/types';
 import { pieceName, stockLeft } from '@/engine/ledwall/trussBuilder';
+import { usd } from '@/engine/ledwall/trussRig';
 import { EMPTY_TRUSS_STATE, type TrussBuildTool } from '@/engine/tools/TrussBuildTool';
 import { autoTruss, autoTrussLabel, autoTrussReport } from '@/app/panels/trussActions';
 
@@ -54,6 +55,7 @@ function AutoTrussRaw({ wall }: Props) {
   return <>
     <Raw label="auto legs / spans / clamps" value={`plan ${r.planned.join(' / ')} → up ${r.built.join(' / ')} (${r.ms.toFixed(0)} ms)`} />
     <Raw label="auto shim / held / supported" value={`plan ${f3(r.shim[0])} / ${r.held[0]} / ${r.supported[0]} → up ${f3(r.shim[1])} / ${r.held[1]} / ${r.supported[1]} of ${r.columns}`} />
+    <Raw label="auto buy $" value={`plan ${usd(r.buy[0])} → up ${usd(r.buy[1])}${r.saved > 0 ? ` (unheld columns save ${usd(r.saved)})` : ''}`} />
     <Raw label="auto F-filled / kept / refused" value={`${r.filled} / ${r.kept} / ${r.refused.length}`} />
     {r.refused.map(x => <Raw key={x} label="refused" value={x} />)}
   </>;

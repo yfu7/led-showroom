@@ -40,7 +40,7 @@
  */
 import * as THREE from 'three';
 import { parentMatrix, worldMatrix } from '../behaviours';
-import { equipmentDef, ownedCount, type EquipmentDef } from '../catalog/equipment';
+import { equipmentDef, ownedCount, unitPrice, type EquipmentDef } from '../catalog/equipment';
 import {
   chordOffsetIn, chordRadiusIn, clampMetrics, clearOfBraceNodes, trussBaseProfile,
 } from '../catalog/trussMetrics';
@@ -70,6 +70,20 @@ export const STICK_IDS = ['gp-truss-8ft', 'gp-truss-5ft', 'gp-truss-4ft'] as con
  */
 export const BUY_STICK_IDS = ['gp-truss-3ft'] as const;
 export const CLAMP_ID = 'clamp-8002';
+/**
+ * A leg packer: a section-square spacer on a base plate, under a leg's first stick, lifting the
+ * header past where whole sticks put it. A part we make, not buy: drawn as a ghost "to make", at no
+ * cost to buy. A 4 ft and a 5 ft on one puts the header of a 30 x 7 walk-through arch on its
+ * lintel's second row of holes, clear of the lowest.
+ */
+export const PACKER_ID = 'gp-leg-packer';
+/** What a part with no price is reckoned at, so cost never takes it for free. */
+export const UNPRICED_USD = 10000;
+/** What one of part `id` costs to buy: the catalog's price; nothing for the packer we make. */
+export function buyPrice(id: string): number {
+  if (id === PACKER_ID) return 0;
+  return unitPrice(equipmentDef(id)) ?? UNPRICED_USD;
+}
 
 export const RIG_GROUP_NAME = 'Truss rig';
 
@@ -156,6 +170,15 @@ export interface TrussRigPlan {
   /** Pieces drawn as ghosts. */
   ghosts: number;
   shortfall: RigShortfall[];
+  /** What the ghosts cost to buy, US dollars (a packer we make costs nothing). */
+  buyUsd: number;
+  /**
+   * Columns under a header span left with nothing holding them: one a span may go without, so a
+   * tower that would hold it is not bought for it.
+   */
+  forgiven: number[];
+  /** What leaving `forgiven` unheld saves to buy, against the cheapest rig that holds them. */
+  savedUsd: number;
   /** Mount holes on a chord that got no coupler, by reason. */
   skipped: { offFace: number; weld: number };
   warnings: string[];
@@ -286,8 +309,8 @@ export interface Run {
  */
 interface FrameLayout { run: number; legsU: number[]; spans: number[][] }
 
-/** A leg's rise between base and top block: sticks, longest lowest, then spare blocks. */
-interface LegStack { sticks: number[]; spacers: number; rise: number }
+/** A leg's rise between base and top block: a packer or none, sticks, longest lowest, then spare blocks. */
+interface LegStack { sticks: number[]; spacers: number; packer: number; rise: number }
 
 /** A chord a jaw can close on, in world y. */
 export interface ChordSpan { footY: number; len: number }
@@ -311,6 +334,7 @@ export function rigContext(doc: Document, wall: LedWallEntity) {
   const baseDef = equipmentDef(BASE_ID);
   const blockDef = equipmentDef(BLOCK_ID);
   const clampDef = equipmentDef(CLAMP_ID);
+  const packerDef = equipmentDef(PACKER_ID) ?? null;
   const stickDefs = STICK_IDS.map(id => equipmentDef(id)).filter((d): d is EquipmentDef => !!d);
   if (!baseDef || !blockDef || !clampDef || !stickDefs.length) {
     return { fail: 'The DT-GP truss, its base and block, or the 8002 coupler is missing from the catalog.', bottomY: 0 };
@@ -326,6 +350,8 @@ export function rigContext(doc: Document, wall: LedWallEntity) {
   const baseH = baseDef.dims[1];
   const plateSize = Math.max(baseDef.dims[0], baseDef.dims[2]);
   const blockH = blockDef.dims[1];
+  /** A packer's height; 0 where the catalog has none, and no leg takes one. */
+  const packerH = packerDef ? packerDef.dims[1] : 0;
   const stickLens = stickDefs.map(d => d.dims[0]);
   const buyDefs = BUY_STICK_IDS.map(id => equipmentDef(id)).filter((d): d is EquipmentDef => !!d && d.dims[1] === section);
   const buyIds = new Set(buyDefs.map(d => d.id));
@@ -436,6 +462,25 @@ export function rigContext(doc: Document, wall: LedWallEntity) {
     return out;
   });
   const runOfCol = layout.map((_, c) => runs.findIndex(r => c >= r.start && c <= r.end));
+
+  /**
+   * The lowest row of holes in each lintel: a band of cabinets that starts above the floor, over a
+   * doorway. A header there leaves its couplers bare under the lintel, so no header chord takes it,
+   * and no header is laid at its height -- the header goes to a row above.
+   */
+  const lintelLow = new Set<MountPoint>();
+  layout.forEach((_, c) => {
+    for (const [lo, hi] of bands[c]) {
+      if (lo <= EPS) continue;
+      const inBand = onFace.filter(m => m.col === c && s * m.pos[1] >= lo - EPS && s * m.pos[1] <= hi + EPS);
+      if (!inBand.length) continue;
+      const low = Math.min(...inBand.map(m => s * m.pos[1]));
+      for (const m of inBand) if (s * m.pos[1] < low + EPS) lintelLow.add(m);
+    }
+  });
+  /** Heights above the wall's bottom a header chord may meet holes at: every row's but a lintel's lowest. */
+  const headerHeights: readonly number[] = [...new Set(onFace.map(m => s * m.pos[1]))]
+    .filter(h => ![...lintelLow].some(m => Math.abs(s * m.pos[1] - h) < EPS));
 
   /*
    * Across a fold, a piece behind one run can stand in front of, inside, or behind the columns of
@@ -741,6 +786,7 @@ export function rigContext(doc: Document, wall: LedWallEntity) {
         const along = l.u - p;
         if (along <= 0 || along >= len) continue;
         for (const m of l.mounts) {
+          if (lintelLow.has(m)) continue;
           const y = bottomY + s * m.pos[1];
           const chordY = chordYs.find(cy => Math.abs(cy - y) < EPS);
           if (chordY === undefined) continue;
@@ -758,7 +804,7 @@ export function rigContext(doc: Document, wall: LedWallEntity) {
     supportY, plateTop, dropAccessories, dims, layout, cells, mounts, onFace, offFace, step, solidRows, hiddenRise,
     fullRise, runs, at, onLegChord, extentOf, bands, runOfCol, folded, colFrames, inCol, cuts, ivCount, coverIv,
     ivRange, anyIn, exposed, foldBlocked, blame, bandShows, legShows, spanShows, clampClear, lineClear, doorways,
-    plateClear, joined, holdsOf, legHitsAt, spanHitsAt,
+    plateClear, joined, holdsOf, legHitsAt, spanHitsAt, packerDef, packerH, lintelLow, headerHeights,
   };
 }
 
@@ -778,7 +824,8 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   const empty = (bottomY = 0): TrussRigPlan => ({
     wallId: wall.id, legs: [], spans: [], clamps: [], frames: 0, headerY: null,
     liftIn: 0, liftLocalIn: 0, bottomY, shimIn: 0, dropAccessories: false,
-    held: 0, supported: 0, columns: 0, ghosts: 0, shortfall: [], skipped: { offFace: 0, weld: 0 }, warnings,
+    held: 0, supported: 0, columns: 0, ghosts: 0, shortfall: [], buyUsd: 0, forgiven: [], savedUsd: 0,
+    skipped: { offFace: 0, weld: 0 }, warnings,
   });
 
   const ctx = rigContext(doc, wall);
@@ -792,7 +839,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     supportY, plateTop, dropAccessories, dims, layout, cells, mounts, onFace, offFace, step, solidRows, hiddenRise,
     fullRise, runs, at, onLegChord, extentOf, bands, runOfCol, folded, colFrames, inCol, cuts, ivCount, coverIv,
     ivRange, anyIn, exposed, foldBlocked, blame, bandShows, legShows, spanShows, clampClear, lineClear, doorways,
-    plateClear, joined, holdsOf, legHitsAt, spanHitsAt,
+    plateClear, joined, holdsOf, legHitsAt, spanHitsAt, packerDef, packerH, headerHeights,
   } = ctx;
   /**
    * The shortest leg with a chord a coupler can close on: a base that stands a riser of its own,
@@ -838,12 +885,12 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     return could.size;
   };
 
-  /** How far a mix of sticks runs past what we own, so a layout can prefer what we hold. */
+  /** What a mix of sticks past what we own costs to buy, so a layout can prefer what we hold, then what is cheap. */
   const owned = (len: number): number => ownedCount(stickOf(len)) ?? Infinity;
   const overuseOf = (sticks: readonly number[]): number => {
     const counts = new Map<number, number>();
     for (const l of sticks) counts.set(l, (counts.get(l) ?? 0) + 1);
-    return sum([...counts].map(([l, n]) => Math.max(0, n - owned(l))));
+    return sum([...counts].map(([l, n]) => Math.max(0, n - owned(l)) * buyPrice(stickOf(l).id)));
   };
 
   /** Every mix of up to {@link MAX_SPAN_STICKS} sticks, by the length they splice to, fewest sticks first. */
@@ -1164,16 +1211,17 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
    * shim at all: there the spans only brace the legs, which is still a frame.
    */
   const stacks: LegStack[] = stickStacks([...stickLens, ...buyDefs.map(d => d.dims[0])], MAX_LEG_STICKS).filter(sticks => sticks.length)
-    .flatMap(sticks => [0, 1].map(spacers => ({ sticks, spacers, rise: sum(sticks) + spacers * blockH })));
-  const heights = new Set<number>(onFace.map(m => s * m.pos[1]));
+    .flatMap(sticks => [0, 1].flatMap(spacers => (packerH > EPS ? [0, 1] : [0])
+      .map(packer => ({ sticks, spacers, packer, rise: packer * packerH + sum(sticks) + spacers * blockH }))));
+  const heights = new Set<number>(headerHeights);
   const options = new Map<string, { stack: LegStack; shim: number }>();
   const addOption = (stack: LegStack, shim: number): void => {
-    const key = `${stack.sticks.join(',')}|${stack.spacers}|${shim.toFixed(6)}`;
+    const key = `${stack.packer}|${stack.sticks.join(',')}|${stack.spacers}|${shim.toFixed(6)}`;
     if (!options.has(key)) options.set(key, { stack, shim });
   };
   for (const stack of stacks) {
-    // A stick to buy earns its place by bolting a header; a brace stands on sticks we have.
-    if (stack.sticks.every(l => stickLens.includes(l))) addOption(stack, 0);
+    // A stick to buy, or a packer, earns its place by bolting a header; a brace stands on sticks we have.
+    if (!stack.packer && stack.sticks.every(l => stickLens.includes(l))) addOption(stack, 0);
     for (const c of [chordR, section - chordR]) {
       for (const hh of heights) {
         const shim = baseH + stack.rise + c - base.plateThick - hh;
@@ -1203,8 +1251,12 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   /** Stacks a tower could stand at one spot, with the couplers each takes: the same spots recur across heights. */
   const towerMemo = new Map<string, { sticks: number[]; hits: number }[]>();
 
-  /** Lay out a whole rig at `shim`: the frames in `layouts` on `stack` (none without one), then towers. */
-  const build = (shim: number, stack: LegStack | null, layouts: readonly FrameLayout[]) => {
+  /**
+   * Lay out a whole rig at `shim`: the frames in `layouts` on `stack` (none without one), then towers.
+   * With `skip`, the first column under each header span that nothing holds gets no tower: a span
+   * may go one column without, and the tower is not bought.
+   */
+  const build = (shim: number, stack: LegStack | null, layouts: readonly FrameLayout[], skip = false) => {
     const bottomY = plateTop + shim;
     /** Each leg with its plate's footprint on the floor, which no other plate may overlap. */
     const legs: (RigLeg & { foot: Footprint })[] = [];
@@ -1223,11 +1275,12 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     const take = (pieces: readonly RigPiece[]): void => {
       for (const p of pieces) taken.set(p.catalogId, (taken.get(p.catalogId) ?? 0) + 1);
     };
+    /** What `sticks` cost to buy past the stock left. */
     const short = (sticks: readonly number[]): number => {
       const counts = new Map<string, number>();
       for (const len of sticks) { const id = stickOf(len).id; counts.set(id, (counts.get(id) ?? 0) + 1); }
       let lack = 0;
-      for (const [id, n] of counts) lack += Math.max(0, n - Math.max(0, available(id) - (taken.get(id) ?? 0)));
+      for (const [id, n] of counts) lack += Math.max(0, n - Math.max(0, available(id) - (taken.get(id) ?? 0))) * buyPrice(id);
       return lack;
     };
 
@@ -1241,12 +1294,16 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
       for (const c of holdsOf(col, side)) supported.add(c);
     };
 
-    /** A leg's pieces bottom up, and the chords on it a jaw can close on (not the blocks'). */
-    const legAt = (run: Run, u: number, sticks: readonly number[], blocks: number) => {
+    /** A leg's pieces bottom up, and the chords on it a jaw can close on (not the blocks', nor a packer's). */
+    const legAt = (run: Run, u: number, sticks: readonly number[], blocks: number, packer = 0) => {
       const axis = at(run, u, supportY, depth);
       const pieces = [place(baseDef, baseDef.geometry, baseDef.dims, axis, run.yaw)];
       const chords: ChordSpan[] = base.riserLen > EPS ? [{ footY: supportY + base.plateThick, len: base.riserLen }] : [];
       let y = supportY + baseH;
+      if (packer && packerDef) {
+        pieces.push(place(packerDef, packerDef.geometry, packerDef.dims, axis.clone().setY(y), run.yaw));
+        y += packerH;
+      }
       for (const len of sticks) {
         pieces.push(place(stickOf(len), 'truss-vertical', [section, len, section], axis.clone().setY(y), run.yaw));
         chords.push({ footY: y, len });
@@ -1276,7 +1333,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
         if (f.legsU.some(u => legs.some(g => overlaps(g.foot, footAt(run, at(run, u, supportY, depth)))))) { dropped++; continue; }
         placed.push(f);
         for (const u of f.legsU) {
-          const leg = legAt(run, u, stack.sticks, stack.spacers + 1);
+          const leg = legAt(run, u, stack.sticks, stack.spacers + 1, stack.packer);
           legs.push({ kind: 'frame', axis: [leg.axis.x, leg.axis.z], rotY: run.yaw * DEG, topY: leg.topY, pieces: leg.pieces, foot: footAt(run, leg.axis) });
           take(leg.pieces);
           const { hits, welds } = legHits(run, u, leg.chords);
@@ -1334,10 +1391,26 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     // fold. Then the stack that
     // leaves us least short, takes the most couplers, and is fewest and shortest sticks; then the
     // spot nearest the middle of the columns it holds.
+    /** Columns between two legs of a frame whose header meets a row of holes, under its span, by span: `${frame}|${gap}`. */
+    const underSpan = new Map<number, string>();
+    const headed = blockY !== null
+      && [...heights].some(hh => [blockY + chordR, blockY + section - chordR].some(cy => Math.abs(bottomY + hh - cy) < EPS));
+    if (headed) placed.forEach((f, fi) => {
+      const run = runs[f.run];
+      for (let j = 0; j + 1 < f.legsU.length; j++) {
+        for (let c = run.start; c <= run.end; c++) {
+          const mid = s * (c - run.start) * step;
+          if (mid > f.legsU[j] + section / 2 + EPS && mid < f.legsU[j + 1] - section / 2 - EPS) underSpan.set(c, `${fi}|${j}`);
+        }
+      }
+    });
+    const spared = new Set<string>();
     for (let ri = 0; ri < runs.length; ri++) {
       const run = runs[ri];
       for (let c = run.start; c <= run.end; c++) {
         if (supported.has(c)) continue;
+        const gap = underSpan.get(c);
+        if (skip && gap !== undefined && !spared.has(gap)) { spared.add(gap); continue; }
         let pick: { score: number[]; u: number; foot: Footprint; sticks: number[] } | null = null;
         for (let k = Math.max(run.start, c - 1); k <= Math.min(run.end, c + 1); k++) {
           const top = bottomY + hiddenRise(k);
@@ -1395,28 +1468,44 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     }
 
     const frames = stack ? placed.length : 0;
-    const bought = legs.reduce((a, g) => a + g.pieces.filter(p => buyIds.has(p.catalogId)).length, 0);
-    const pieceCount = legs.reduce((a, g) => a + g.pieces.length, 0) + spans.length + clamps.length;
+    let buyUsd = 0;
+    for (const p of [...legs.flatMap(g => g.pieces), ...spans, ...clamps.map(c => c.piece)]) if (p.ghost) buyUsd += buyPrice(p.catalogId);
+    buyUsd = Math.round(buyUsd * 100) / 100;
+    // One column under each span may go unheld: the first such, per span.
+    const forgiven: number[] = [];
+    const counted = new Set<string>();
+    for (const [c, gap] of [...underSpan].sort((a, z) => a[0] - z[0])) {
+      if (supported.has(c) || counted.has(gap) || !bands[c].length) continue;
+      counted.add(gap);
+      forgiven.push(c);
+    }
+    const truss = legs.reduce((a, g) => a + g.pieces.length, 0) + spans.length;
     return {
       shim, bottomY, legs, spans, clamps: clamps.map(c => c.piece), held, supported, weld, headerY, long, frames, ghosts, dropped,
-      // A rig that holds nothing is no rig. Of the rest, the most columns held; then the fewest
-      // sticks to buy, so one is bought only to hold more; then legs tied together by spans over
-      // loose towers -- but never at the cost of a column left hanging; then the fewest ghosts and
-      // the fewest legs; then the most columns with couplers of their own.
-      score: [supported.size ? 1 : 0, supported.size, -bought, frames ? 1 : 0, -ghosts, -legs.length, held.size,
-        headerY ?? -1e9, clamps.length, -pieceCount, -shim],
+      buyUsd, forgiven,
+      // A rig that holds nothing is no rig. Of the rest, the most columns held, counting one column
+      // under each span as held whether or not it is; then the least to buy, so money goes only to
+      // holding more; then the most columns truly held; then legs tied together by spans over loose
+      // towers; then the fewest truss pieces and legs; then the most columns with couplers of their own.
+      score: [supported.size ? 1 : 0, supported.size + forgiven.length, -buyUsd, supported.size, frames ? 1 : 0,
+        -truss, -legs.length, held.size, headerY ?? -1e9, clamps.length, -shim],
     };
   };
 
   let best = build(0, null, []);
+  /** The best rig that leaves no column it could hold unheld: what a forgiven column saves against. */
+  let full = best;
+  const offer = (got: typeof best, skip: boolean): void => {
+    if (rank(got.score, best.score) < 0) best = got;
+    if (!skip && rank(got.score, full.score) < 0) full = got;
+  };
   for (const o of options.values()) {
     const layouts = framesFor(o.stack, o.shim);
     if (!layouts.length) continue;
-    const got = build(o.shim, o.stack, layouts);
-    if (rank(got.score, best.score) < 0) best = got;
-    if (got.dropped) {
-      const other = build(o.shim, o.stack, [...layouts].reverse());
-      if (rank(other.score, best.score) < 0) best = other;
+    for (const skip of [false, true]) {
+      const got = build(o.shim, o.stack, layouts, skip);
+      offer(got, skip);
+      if (got.dropped) offer(build(o.shim, o.stack, [...layouts].reverse(), skip), skip);
     }
   }
 
@@ -1462,15 +1551,18 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     columns: bands.filter(b => b.length).length,
     ghosts: best.ghosts,
     shortfall,
+    buyUsd: best.buyUsd,
+    forgiven: best.forgiven,
+    savedUsd: best.forgiven.length ? Math.max(0, Math.round((full.buyUsd - best.buyUsd) * 100) / 100) : 0,
     skipped: { offFace, weld: best.weld },
     warnings,
   };
 
   if (Math.abs(liftIn) > 1e-6) {
     warnings.push(`The wall ${liftIn > 0 ? 'rises' : 'comes down'} ${Math.abs(liftIn).toFixed(2)} in to sit on the ${base.plateThick.toFixed(2)} in base plates${
-      plan.shimIn > 1e-6 ? `, on a ${plan.shimIn.toFixed(2)} in shim so the header chord meets a row of holes` : ''}.`);
+      plan.shimIn > 1e-6 ? `, on a ${inches(plan.shimIn)} in shim so the header chord meets a row of holes` : ''}.`);
   } else if (plan.shimIn > 1e-6) {
-    warnings.push(`The wall sits on a ${plan.shimIn.toFixed(2)} in shim on the base plates, so the header chord meets a row of holes.`);
+    warnings.push(`The wall sits on a ${inches(plan.shimIn)} in shim on the base plates, so the header chord meets a row of holes.`);
   }
   if (best.weld) {
     warnings.push(`${best.weld} ${best.weld === 1 ? 'hole sits' : 'holes sit'} level with a brace weld, where a coupler cannot close.`);
@@ -1492,7 +1584,9 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     warnings.push(`${carried} ${carried === 1 ? 'column has' : 'columns have'} no coupler of ${carried === 1 ? 'its' : 'their'} own: `
       + `${carried === 1 ? 'it is' : 'each is'} held by a coupled column beside it.`);
   }
-  const loose = plan.columns - plan.supported;
+  const spared = forgivenNote(plan.forgiven, plan.savedUsd);
+  if (spared) warnings.push(spared);
+  const loose = plan.columns - plan.supported - plan.forgiven.length;
   if (loose > 0) {
     warnings.push(`${loose} ${loose === 1 ? 'column is' : 'columns are'} out of reach of every coupler, and nothing holds ${loose === 1 ? 'it' : 'them'}.`);
     const byFold = layout.filter((_, c) => bands[c].length && !best.supported.has(c) && foldBlocked.has(c)).length;
@@ -1503,12 +1597,39 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   }
   for (const f of shortfall) {
     const k = f.need - f.have;
-    warnings.push(buyIds.has(f.catalogId)
-      ? `${f.name}: ${k} to buy, drawn as ${k === 1 ? 'a ghost' : 'ghosts'}. We hold none, and our own sticks put no header on a row of holes here.`
-      : `${f.name}: ${f.need} needed, ${f.have} available - ${k} drawn as ${k === 1 ? 'a ghost' : 'ghosts'}.`);
+    warnings.push(f.catalogId === PACKER_ID
+      ? `${f.name}: ${k} to make, drawn as ${k === 1 ? 'a ghost' : 'ghosts'}. It lifts each frame leg so the header chord meets a row of holes.`
+      : buyIds.has(f.catalogId)
+        ? `${f.name}: ${k} to buy, drawn as ${k === 1 ? 'a ghost' : 'ghosts'}. We hold none, and our own sticks put no header on a row of holes here.`
+        : `${f.name}: ${f.need} needed, ${f.have} available - ${k} drawn as ${k === 1 ? 'a ghost' : 'ghosts'}.`);
   }
+  const cost = costNote(plan.buyUsd, shortfall);
+  if (cost) warnings.push(cost);
 
   return plan;
+}
+
+/** A shim in inches: to the hundredth, or the thousandth where that would read 0.00. */
+export const inches = (x: number): string => (x < 0.005 ? x.toFixed(3) : x.toFixed(2));
+
+/** Dollars, to the cent. */
+export const usd = (x: number): string => `$${x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** What the parts to buy come to, with any price that is only an estimate named; null with nothing to buy. */
+export function costNote(buyUsd: number, shortfall: readonly { catalogId: string }[]): string | null {
+  if (buyUsd <= 0) return null;
+  const est = shortfall.map(f => equipmentDef(f.catalogId))
+    .filter((d): d is EquipmentDef => !!d && /estimate/i.test(d.specs?.find(r => r.label === 'Unit price')?.value ?? ''));
+  return `The parts to buy come to ${usd(buyUsd)} at our order prices${est.length ? ` (${est.map(d => d.name).join(', ')} at a retailer's listed price, an estimate)` : ''}.`;
+}
+
+/** Why the columns under a span left unheld are, and what that saves; null with none. */
+export function forgivenNote(cols: readonly number[], savedUsd: number): string | null {
+  if (!cols.length) return null;
+  const n = cols.length;
+  const which = cols.map(c => c + 1).join(', ');
+  return `Column${n === 1 ? '' : 's'} ${which} under ${n === 1 ? 'a header span is' : 'the header spans are'} left without a coupler or a tower `
+    + `(one column a span may go without)${savedUsd > 0 ? `: that saves ${usd(savedUsd)} to buy` : ', since nothing could reach it'}.`;
 }
 
 /**

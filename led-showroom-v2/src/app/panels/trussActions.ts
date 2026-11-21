@@ -5,7 +5,7 @@
 import type { Engine } from '@/engine/Engine';
 import type { GroupEntity, LedWallEntity } from '@/engine/document/types';
 import { cmdPatchDocument } from '@/engine/commands/entity';
-import { rigEntityIds } from '@/engine/ledwall/trussRig';
+import { rigEntityIds, usd } from '@/engine/ledwall/trussRig';
 import { autoTrussRig } from '@/engine/ledwall/trussBuilder';
 import { requestConfirm } from '@/app/shell/ConfirmDialog';
 
@@ -23,6 +23,9 @@ export interface AutoTrussReport {
   held: [number, number];
   supported: [number, number];
   columns: number;
+  /** Dollars to buy, as planned and as put up; then what the plan's unheld columns saved. */
+  buy: [number, number];
+  saved: number;
   /** Gaps F closed, planned sticks put up as planned, planned pieces that would not go up. */
   filled: number;
   kept: number;
@@ -77,7 +80,7 @@ function planAndApply(engine: Engine, wall: LedWallEntity): void {
   if ('fail' in got) {
     report({
       wallId: wall.id, ms, fail: got.fail, planned: [0, 0, 0], built: [0, 0, 0], shim: [0, 0], held: [0, 0], supported: [0, 0],
-      columns: 0, filled: 0, kept: 0, refused: [],
+      columns: 0, buy: [0, 0], saved: 0, filled: 0, kept: 0, refused: [],
     });
     engine.toast('error', got.fail);
     return;
@@ -92,6 +95,7 @@ function planAndApply(engine: Engine, wall: LedWallEntity): void {
     held: [plan.held, c.held.size],
     supported: [plan.supported, c.supported.size],
     columns: summary.columns,
+    buy: [plan.buyUsd, summary.buyUsd], saved: plan.savedUsd,
     filled: auto.filled, kept: auto.kept,
     refused: auto.refused.map(r => `${r.piece.catalogId} @ ${r.piece.position.map(v => v.toFixed(2)).join(', ')}: ${r.why.join(' ')}`),
   });
@@ -107,7 +111,8 @@ function planAndApply(engine: Engine, wall: LedWallEntity): void {
     got.spans ? n(got.spans, 'span stick', 'span sticks') : '',
     n(c.clamps.length, 'half coupler', 'half couplers'),
   ].filter(Boolean);
-  const head = `${parts.join(', ')} - ${c.supported.size} of ${n(summary.columns, 'column', 'columns')} held, ${c.held.size} by couplers of their own`;
+  const head = `${parts.join(', ')} - ${c.supported.size} of ${n(summary.columns, 'column', 'columns')} held, ${c.held.size} by couplers of their own`
+    + (summary.buyUsd > 0 ? `, ${usd(summary.buyUsd)} to buy` : ', nothing to buy');
   engine.toast(summary.ghosts || auto.refused.length ? 'info' : 'success', [head, ...got.notes].join(' - '));
 }
 

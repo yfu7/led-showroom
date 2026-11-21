@@ -33,8 +33,8 @@ import type { Document, EquipmentEntity, EquipmentGeometry, GroupEntity, LedWall
 import type { Vec3 } from '../math';
 import type { MountPoint } from './layout';
 import {
-  BUY_STICK_IDS, CLAMP_ID, RIG_GROUP_NAME, SHIM_MAX_IN, SPAN_TABLE_IN, STICK_IDS,
-  clampPiece, planTrussRig, rigContext, rigEntityIds,
+  BUY_STICK_IDS, CLAMP_ID, PACKER_ID, RIG_GROUP_NAME, SHIM_MAX_IN, SPAN_TABLE_IN, STICK_IDS,
+  buyPrice, clampPiece, costNote, forgivenNote, inches, planTrussRig, rigContext, rigEntityIds,
   type ChordSpan, type RigContext, type RigLeg, type RigPiece, type Run, type TrussRigPlan,
 } from './trussRig';
 
@@ -48,7 +48,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 /** Most sticks a gap is filled with. */
 const FILL_MAX_STICKS = 8;
 
-export type BuildKind = 'base' | 'stick' | 'block';
+export type BuildKind = 'base' | 'packer' | 'stick' | 'block';
 
 /** One piece of a hand-built rig, in world space. */
 export interface BuildPiece {
@@ -56,9 +56,9 @@ export interface BuildPiece {
   id?: string;
   catalogId: string;
   kind: BuildKind;
-  /** A stick's length; a base's or a block's height. */
+  /** A stick's length; a base's, a packer's or a block's height. */
   len: number;
-  /** A stick stood on end. Bases and blocks are always upright. */
+  /** A stick stood on end. Bases, packers and blocks are always upright. */
   vertical: boolean;
   /** Bottom centre, world inches. */
   position: Vec3;
@@ -84,6 +84,8 @@ export interface PaletteItem {
   elsewhere: number;
   /** One we hold none of: every one is drawn as a ghost, to buy. */
   buy: boolean;
+  /** What one more past the stock costs to buy, US dollars. */
+  price: number;
 }
 
 /** A wall to build behind, measured, with the rig it has now. */
@@ -128,8 +130,10 @@ const isStickId = (id: string): boolean =>
 
 /** A rig part as a piece, from where it stands in the world; null for anything but a plate, stick or block. */
 function partAsPiece(catalogId: string, geometry: EquipmentGeometry, dims: Vec3, pos: THREE.Vector3, quat: THREE.Quaternion): BuildPiece | null {
-  const kind: BuildKind | null = geometry === 'truss-base' ? 'base' : geometry === 'truss-block' ? 'block'
-    : geometry === 'truss' || geometry === 'truss-vertical' ? 'stick' : null;
+  // A packer by its id: its geometry is a plain box, and stood on end it would read as a stick.
+  const kind: BuildKind | null = catalogId === PACKER_ID ? 'packer'
+    : geometry === 'truss-base' ? 'base' : geometry === 'truss-block' ? 'block'
+      : geometry === 'truss' || geometry === 'truss-vertical' ? 'stick' : null;
   if (!kind) return null;
   const vertical = kind !== 'stick' || geometry === 'truss-vertical';
   return {
@@ -168,6 +172,7 @@ export function openBuilder(doc: Document, wall: LedWallEntity): Builder | { fai
       catalogId: def.id, kind, len, name: def.name, label,
       owned: owned ?? Infinity, elsewhere: elsewhere.get(def.id) ?? 0,
       buy: (BUY_STICK_IDS as readonly string[]).includes(def.id),
+      price: buyPrice(def.id),
     };
   };
   const sticks = [...STICK_IDS, ...BUY_STICK_IDS]
@@ -178,6 +183,7 @@ export function openBuilder(doc: Document, wall: LedWallEntity): Builder | { fai
     ...sticks.map(d => item(d, 'stick', d.dims[0], `${+(d.dims[0] / 12).toFixed(2)} ft`)),
     item(ctx.blockDef, 'block', ctx.blockH, 'Block'),
     item(ctx.baseDef, 'base', ctx.baseH, 'Base'),
+    ...(ctx.packerDef ? [item(ctx.packerDef, 'packer', ctx.packerH, 'Packer')] : []),
   ];
 
   return {
@@ -199,6 +205,7 @@ function sizeOf(b: Builder, p: BuildPiece): Vec3 {
   const { ctx } = b;
   if (p.kind === 'base') return [...ctx.baseDef.dims] as Vec3;
   if (p.kind === 'block') return [...ctx.blockDef.dims] as Vec3;
+  if (p.kind === 'packer') return [ctx.section, p.len, ctx.section];
   return p.vertical ? [ctx.section, p.len, ctx.section] : [p.len, ctx.section, ctx.section];
 }
 
@@ -209,7 +216,7 @@ export function portsOf(b: Builder, p: BuildPiece, i: number): Port[] {
   const { X, Z } = axesOf(p.yaw);
   const port = (point: THREE.Vector3, dir: THREE.Vector3): Port => ({ piece: i, point, dir });
   if (p.kind === 'base') return [port(O.clone().addScaledVector(UP, sy), UP.clone())];
-  if (p.kind === 'stick' && p.vertical) {
+  if (p.kind === 'packer' || (p.kind === 'stick' && p.vertical)) {
     return [port(O.clone(), UP.clone().negate()), port(O.clone().addScaledVector(UP, sy), UP.clone())];
   }
   const C = O.clone().addScaledVector(UP, sy / 2);
@@ -247,9 +254,14 @@ export function attach(b: Builder, pieces: readonly BuildPiece[], port: Port, it
     catalogId: item.catalogId, kind: item.kind, len: item.len, vertical, position: [O.x, O.y, O.z], yaw,
   });
   if (item.kind === 'base') {
-    // A plate goes only under a stick's foot.
-    if (d.y > -0.5 || A.kind !== 'stick') return null;
+    // A plate goes only under a stick's or a packer's foot.
+    if (d.y > -0.5 || (A.kind !== 'stick' && A.kind !== 'packer')) return null;
     return make(p.clone().addScaledVector(UP, -b.ctx.baseH), A.yaw, true);
+  }
+  if (item.kind === 'packer') {
+    // A packer goes only on a plate, under the first stick.
+    if (d.y < 0.5 || A.kind !== 'base') return null;
+    return make(p.clone(), A.yaw, true);
   }
   if (item.kind === 'block') {
     const { X, Z } = axesOf(A.yaw);
@@ -413,7 +425,7 @@ function clampsAt(b: Builder, pieces: readonly BuildPiece[], bottomY: number): {
 export function couple(b: Builder, pieces: readonly BuildPiece[]): Coupling {
   const { ctx } = b;
   const shims = new Set<number>([0]);
-  const heights = new Set(ctx.onFace.map(m => ctx.s * m.pos[1]));
+  const heights = ctx.headerHeights;
   for (const p of pieces) {
     if (p.kind !== 'stick' || p.vertical) continue;
     for (const cy of [p.position[1] + ctx.chordR, p.position[1] + ctx.section - ctx.chordR]) {
@@ -481,6 +493,7 @@ export function check(b: Builder, pieces: readonly BuildPiece[], cand: BuildPiec
 export function pieceName(p: BuildPiece): string {
   if (p.kind === 'base') return 'base plate';
   if (p.kind === 'block') return 'block';
+  if (p.kind === 'packer') return 'packer';
   return `${+(p.len / 12).toFixed(2)} ft stick`;
 }
 
@@ -593,7 +606,7 @@ export function fillGap(b: Builder, pieces: readonly BuildPiece[], port: Port): 
     let k = 0;
     for (const [id, c] of n) {
       const i = sticks.find(s => s.catalogId === id)!;
-      k += Math.max(0, c - Math.max(0, i.owned - i.elsewhere - (used.get(id) ?? 0)));
+      k += Math.max(0, c - Math.max(0, i.owned - i.elsewhere - (used.get(id) ?? 0))) * i.price;
     }
     return k;
   };
@@ -684,6 +697,8 @@ export interface BuildSummary {
   clampGhosts: boolean[];
   ghosts: number;
   shortfall: { catalogId: string; name: string; need: number; have: number }[];
+  /** What the ghosts cost to buy, US dollars (a packer we make costs nothing). */
+  buyUsd: number;
   /** Columns with any cabinets in them. */
   columns: number;
   /** Lengths of straight runs of horizontal sticks spliced end to end past the span table. */
@@ -760,11 +775,16 @@ export function summarize(b: Builder, pieces: readonly BuildPiece[]): BuildSumma
   }
   for (const f of shortfall) {
     const k = f.need - f.have;
-    warnings.push((BUY_STICK_IDS as readonly string[]).includes(f.catalogId)
-      ? `${f.name}: ${k} to buy, drawn as ${k === 1 ? 'a ghost' : 'ghosts'}.`
-      : `${f.name}: ${f.need} needed, ${f.have} available - ${k} drawn as ${k === 1 ? 'a ghost' : 'ghosts'}.`);
+    warnings.push(f.catalogId === PACKER_ID
+      ? `${f.name}: ${k} to make, drawn as ${k === 1 ? 'a ghost' : 'ghosts'}.`
+      : (BUY_STICK_IDS as readonly string[]).includes(f.catalogId)
+        ? `${f.name}: ${k} to buy, drawn as ${k === 1 ? 'a ghost' : 'ghosts'}.`
+        : `${f.name}: ${f.need} needed, ${f.have} available - ${k} drawn as ${k === 1 ? 'a ghost' : 'ghosts'}.`);
   }
-  return { coupling, pieceGhosts, clampGhosts, ghosts, shortfall, columns, long, warnings };
+  const buyUsd = Math.round(shortfall.reduce((a, f) => a + (f.need - f.have) * buyPrice(f.catalogId), 0) * 100) / 100;
+  const cost = costNote(buyUsd, shortfall);
+  if (cost) warnings.push(cost);
+  return { coupling, pieceGhosts, clampGhosts, ghosts, shortfall, buyUsd, columns, long, warnings };
 }
 
 /** The entity a piece is drawn as: the rig's, or, with no `parentId`, a preview's. */
@@ -978,9 +998,9 @@ export function autoTrussRig(doc: Document, wall: LedWallEntity): AutoTruss | { 
   const plate = b.ctx.base.plateThick;
   if (Math.abs(lift) > 1e-6) {
     notes.push(`The wall ${lift > 0 ? 'rises' : 'comes down'} ${Math.abs(lift).toFixed(2)} in to sit on the ${plate.toFixed(2)} in base plates${
-      c.shim > 1e-6 ? `, on a ${c.shim.toFixed(2)} in shim so the header chord meets a row of holes` : ''}.`);
+      c.shim > 1e-6 ? `, on a ${inches(c.shim)} in shim so the header chord meets a row of holes` : ''}.`);
   } else if (c.shim > 1e-6) {
-    notes.push(`The wall sits on a ${c.shim.toFixed(2)} in shim on the base plates, so the header chord meets a row of holes.`);
+    notes.push(`The wall sits on a ${inches(c.shim)} in shim on the base plates, so the header chord meets a row of holes.`);
   }
   if (b.ctx.dropAccessories) notes.push('The floor-stand base plates and back supports come off: they stand where the legs do.');
   const carried = c.supported.size - c.held.size;
@@ -988,7 +1008,11 @@ export function autoTrussRig(doc: Document, wall: LedWallEntity): AutoTruss | { 
     notes.push(`${carried} ${carried === 1 ? 'column has' : 'columns have'} no coupler of ${carried === 1 ? 'its' : 'their'} own: `
       + `${carried === 1 ? 'it is' : 'each is'} held by a coupled column beside it.`);
   }
-  const loose = summary.columns - c.supported.size;
+  // A column the plan leaves unheld under a span, by choice, is not a fault: say what it saves.
+  const spared = plan.forgiven.filter(k => !c.supported.has(k));
+  const sparedNote = forgivenNote(spared, plan.savedUsd);
+  if (sparedNote) notes.push(sparedNote);
+  const loose = summary.columns - c.supported.size - spared.length;
   if (loose > 0) notes.push(`${loose} ${loose === 1 ? 'column is' : 'columns are'} out of reach of every coupler, and nothing holds ${loose === 1 ? 'it' : 'them'}.`);
   // Why, which only the planner can say: the holes a mitre cuts away, and the columns a fold keeps
   // every piece from. The builder couples the same columns, so its loose ones are the plan's.

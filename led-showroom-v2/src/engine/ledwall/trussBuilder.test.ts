@@ -133,9 +133,10 @@ describe('truss builder', () => {
     expect(sum.coupling.welds).toBe(plan.skipped.weld);
     expect(sum.coupling.bared.size).toBe(0);
 
-    // The same stock: the 3 ft sticks to buy and the couplers past ours are ghosts.
+    // The same stock: the packers to make and the couplers past ours are ghosts.
     expect(sum.ghosts).toBe(plan.ghosts);
-    expect(pieces.filter((p, i) => sum.pieceGhosts[i]).map(p => p.catalogId)).toEqual(['gp-truss-3ft', 'gp-truss-3ft', 'gp-truss-3ft']);
+    expect(pieces.filter((p, i) => sum.pieceGhosts[i]).map(p => p.catalogId)).toEqual(['gp-leg-packer', 'gp-leg-packer', 'gp-leg-packer']);
+    expect(sum.buyUsd).toBeCloseTo(plan.buyUsd, 6);
     expect(sum.shortfall).toEqual(plan.shortfall);
     expect(sum.long).toHaveLength(2);
   });
@@ -181,6 +182,9 @@ describe('truss builder', () => {
     const again = open(next, moved);
     expect(again.hand).toBe(true);
     expect(again.pieces).toHaveLength(pieces.length);
+    // The packers to make come back as packers, still on their plates under each leg's first stick.
+    expect(again.pieces.filter(p => p.kind === 'packer')).toHaveLength(3);
+    expect(again.pieces.filter(p => p.kind === 'packer').every(p => p.position[1] > 0)).toBe(true);
     again.pieces.forEach((p, i) => {
       expect(p.catalogId).toBe(pieces[i].catalogId);
       expect(p.vertical).toBe(pieces[i].vertical);
@@ -333,7 +337,9 @@ describe('truss builder', () => {
       pieces = [...pieces, ...got.add];
       fills.push(got.add.map(p => Math.round(p.len / 12)).sort((a, z) => a - z));
     }
-    expect(fills).toEqual([[4, 8, 8, 8], [5, 5, 5, 5, 5, 5]]);
+    // Each 9 ft leg takes a 5 ft and a 4 ft, which leaves three 5 ft and nine 4 ft: the 30 ft closes
+    // from them, with none to buy.
+    expect(fills).toEqual([[4, 8, 8, 8], [4, 4, 4, 4, 4, 5, 5]]);
     for (const i of b.palette.filter(p => p.kind === 'stick' && !p.buy)) expect([i.catalogId, stockLeft(i, pieces) >= 0]).toEqual([i.catalogId, true]);
     const sum = summarize(b, pieces);
     expect(sum.coupling.supported.size).toBe(plan.supported);
@@ -386,6 +392,7 @@ describe('Auto truss through the builder', () => {
     expect(c.clamps.map(x => keyOf(x.piece)).sort()).toEqual(plan.clamps.map(keyOf).sort());
     expect([c.held.size, c.supported.size, got.summary.columns]).toEqual([plan.held, plan.supported, plan.columns]);
     expect(got.summary.ghosts).toBe(plan.ghosts);
+    expect(got.summary.buyUsd).toBeCloseTo(plan.buyUsd, 6);
     return { doc, plan, got };
   }
 
@@ -444,9 +451,11 @@ describe('Auto truss through the builder', () => {
     expect(c.clamps.map(x => keyOf(x.piece)).sort()).toEqual(plan.clamps.map(keyOf).sort());
     expect(c.shim).toBeCloseTo(plan.shimIn, 9);
     expect([c.held.size, c.supported.size]).toEqual([plan.held, plan.supported]);
-    // More, shorter sticks from stock where the plan reaches past it: fewer ghosts, never more.
-    expect([plan.spans.length, got.spans]).toEqual([7, 9]);
+    // More, shorter sticks from stock where the plan reaches past it: fewer ghosts, never more, and
+    // never more to spend.
+    expect([plan.spans.length, got.spans]).toEqual([7, 10]);
     expect([plan.ghosts, got.summary.ghosts]).toEqual([14, 12]);
+    expect(got.summary.buyUsd).toBeLessThanOrEqual(plan.buyUsd + 1e-6);
   });
 
   it('says why a mitre or a fold leaves holes and columns out, as the plan does', () => {

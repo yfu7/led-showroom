@@ -200,6 +200,7 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
     specs: [
       { label: 'Part no.', value: 'GP0001 - DT-GP8-BLK' },
       { label: 'Owned', value: '3 (Sales Order #735958)' },
+      { label: 'Unit price', value: '$948.68 (Sales Order #735958, 5/20/2026)' },
       GP_SYSTEM, GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
     ],
   },
@@ -210,6 +211,7 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
     specs: [
       { label: 'Part no.', value: 'GP0053 - DT-GP5-BLK' },
       { label: 'Owned', value: '6 (Sales Order #735958)' },
+      { label: 'Unit price', value: '$682.28 (Sales Order #735958, 5/20/2026)' },
       GP_SYSTEM, GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
     ],
   },
@@ -220,6 +222,7 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
     specs: [
       { label: 'Part no.', value: 'GP0079 - DT-GP4-BLK' },
       { label: 'Owned', value: '12 (Sales Orders #735958 and #736643, 6 on each)' },
+      { label: 'Unit price', value: '$599.40 (Sales Orders #735958 and #736643)' },
       GP_SYSTEM, GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
     ],
   },
@@ -230,6 +233,7 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
     specs: [
       { label: 'Part no.', value: 'GP0118 - DT-GP3-BLK (from retailer listings; not on any order)' },
       { label: 'Owned', value: '0 (on none of our orders; a DT-GP2 2 ft stick does the same job in a leg)' },
+      { label: 'Unit price', value: '$478.00 (estimate: a retailer listing for the DT-GP3-BLK, not a quote or an order)' },
       GP_SYSTEM, GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
     ],
   },
@@ -240,6 +244,7 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
     specs: [
       { label: 'Part no.', value: 'GP0352 - DT-6WB-BLK' },
       { label: 'Owned', value: '6 (Sales Order #735958)' },
+      { label: 'Unit price', value: '$695.60 (Sales Order #735958, 5/20/2026)' },
       GP_SYSTEM, GP_SECTION, NOMINAL, GP_CONN, GP_ENGR,
     ],
   },
@@ -250,8 +255,20 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
     specs: [
       { label: 'Part no.', value: 'BP0300 - DT-GP-Base36-BLK' },
       { label: 'Owned', value: '6 (Sales Order #735958)' },
+      { label: 'Unit price', value: '$1,468.16 (Sales Order #735958, 5/20/2026)' },
       { label: 'Plate', value: '36 x 36 in, 1.5 in thick (as we measure the plates we hold)' },
       { label: 'On the order', value: 'Bills six of this part against a quantity of 0, and lists six GP0287 DT-GP BASE/30BLK (30 in raised GP base) beside it at no charge' },
+      GP_SYSTEM, GP_SECTION, GP_CONN,
+    ],
+  },
+  {
+    id: 'gp-leg-packer', name: 'DT-GP leg packer 3.52 in', category: 'structure', geometry: 'box', trussSystem: 'DT-GP',
+    dims: [11.16, 3.52, 11.16], color: '#2a2c31',
+    description: 'A section-square spacer, 3.52 in thick, bolted between a base plate and the first stick of a leg. It lifts the header past where whole sticks put it: on a 4 ft and a 5 ft leg, onto the second row of holes of a walk-through arch\'s lintel. Not stock: made to order.',
+    specs: [
+      { label: 'Part no.', value: 'None - a part we make' },
+      { label: 'Owned', value: '0 (to make: drawn as a ghost until made)' },
+      { label: 'Unit price', value: 'None - made, not bought, so it costs nothing to buy' },
       GP_SYSTEM, GP_SECTION, GP_CONN,
     ],
   },
@@ -263,6 +280,7 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
     specs: [
       { label: 'Part no.', value: '8002' },
       { label: 'Owned', value: '38 (Invoice INV-1131, Truss Concepts, 10/13/2026)' },
+      { label: 'Unit price', value: '$18.75 (Invoice INV-1131: $20.83 less 10%)' },
       { label: 'Fits tube', value: '48 - 51 mm (1.9 - 2.0 in)' },
       { label: 'Fits our truss', value: 'DT-GP chord is 50 mm, inside the jaw range - read off the two specs, not stated by either document' },
       { label: 'Load', value: '200 kg (440 lb)' },
@@ -404,6 +422,13 @@ export function equipmentDef(id: string): EquipmentDef | undefined {
  * list (which flags the same shortfall on every line), because a shortfall is one idea and the two
  * screens must not disagree about it.
  */
+/** What one costs to buy, in US dollars, from its "Unit price" row; undefined where the row gives none. */
+export function unitPrice(def: EquipmentDef | undefined): number | undefined {
+  const row = def?.specs?.find(s => s.label === 'Unit price')?.value;
+  const m = row ? /^\s*\$([\d,]+(?:\.\d+)?)/.exec(row) : null;
+  return m ? Number(m[1].replace(/,/g, '')) : undefined;
+}
+
 export function ownedCount(def: EquipmentDef | undefined): number | undefined {
   const row = def?.specs?.find(s => s.label === 'Owned')?.value;
   const m = row ? /^\s*(\d+)/.exec(row) : null;

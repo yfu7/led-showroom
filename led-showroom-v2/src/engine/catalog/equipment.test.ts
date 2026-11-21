@@ -14,6 +14,7 @@ const HELD: [id: string, system: TrussSystem, owned: number][] = [
   ['gp-truss-3ft', 'DT-GP', 0],
   ['gp-corner-6way', 'DT-GP', 6],
   ['gp-base-36', 'DT-GP', 6],
+  ['gp-leg-packer', 'DT-GP', 0],
   ['f34-straight-1500', 'F34', 2],
   ['f34-straight-1250', 'F34', 6],
   ['f34-corner-2way', 'F34', 4],
@@ -30,7 +31,7 @@ describe('the truss inventory', () => {
     expect(ownedCount(equipmentDef(id))).toBe(owned);
   });
 
-  it('is every truss part on the paperwork, the coupler, and the 3 ft stick to buy', () => {
+  it('is every truss part on the paperwork, the coupler, the 3 ft stick to buy and the packer to make', () => {
     expect(TRUSS_INVENTORY.map(d => d.id).sort()).toEqual([...HELD.map(([id]) => id), 'clamp-8002'].sort());
   });
 

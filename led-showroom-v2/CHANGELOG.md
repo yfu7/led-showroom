@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Auto truss buys as little as it can, and lifts arch headers on a packer
+
+Auto truss now picks the rig that costs least to buy. Pieces we own cost nothing; the rest are
+priced from our orders (SO #735958 and #736643, and INV-1131 for the couplers at $18.75 after the
+discount). The 3 ft stick is on none of them, so it is priced at a retailer's listed $478, and the
+note says that one is an estimate. Holding every column still comes first; the cost decides between
+rigs that hold as many, then the fewest pieces. Under a header span one column may go without a
+coupler or a tower where that saves money, and the note says which column and what it saved. The
+toast says what the parts to buy come to, and God Mode shows the plan's cost
+against the rig put up.
+
+An arch's header no longer couples to the lintel's lowest row of holes, where its couplers showed
+under the lintel over the doorways. To reach the next row up, each frame leg stands a 5 ft and a 4 ft
+on a 3.52 in packer: a plate we make, drawn as a ghost "to make" until it is, and placed in Build
+truss on a base plate. On the 30 x 7 arch that replaces three 3 ft sticks to buy with three packers,
+and the wall sits on a 0.001 in shim. A lintel one row deep has no other row its header can meet
+hidden, so there the frame now holds fewer columns.
+
 ### Dimension labels scale with zoom; the turntable turns slower
 
 Dimension and measure labels are now a fixed size in the room (12 in tall for a wall's dimensions)
