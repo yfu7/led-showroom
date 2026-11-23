@@ -171,11 +171,11 @@ export function wallViews(engine: Engine): WallView[] {
 export async function exportViewer(engine: Engine): Promise<ViewerExportResult> {
   const t0 = performance.now();
   const warnings: string[] = [];
-  const empty = engine.doc.entities.length === 0;
   const [{ default: runtime }, glb] = await Promise.all([
     import('virtual:viewer-runtime'),
-    // An empty scene has nothing for the GLB: the page then shows the bare room.
-    empty ? null : exportGltf(engine, { binary: true, selectionOnly: false }),
+    // Nothing visible to export (empty, all hidden, scans only): the page shows the bare room.
+    exportGltf(engine, { binary: true, selectionOnly: false })
+      .catch((err: unknown) => { if ((err as Error)?.message === 'Nothing to export') return null; throw err; }),
   ]);
   const glbBytes = glb ? new Uint8Array(await glb.arrayBuffer()) : new Uint8Array(0);
 
