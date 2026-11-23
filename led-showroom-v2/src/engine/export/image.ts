@@ -9,6 +9,7 @@
  * are canvas textures, so they show their current frame.
  */
 import type { Engine } from '../Engine';
+import { realGhosts } from './realGhosts';
 import {
   autoCropRect, canvasToBlob, createWebsiteOverlays, downloadBlob, entityScreenBBox,
   loadBackdropPhoto, paintBackdrop, rasterizeIframes, rectsEqual, timestampName, type Rect,
@@ -61,12 +62,14 @@ export async function captureView(engine: Engine, opts: SaveImageOptions = {}): 
 
   const selectionVisible = engine.selectionHelper.group.visible;
   const overlays = createWebsiteOverlays(engine, rasters);
+  const ghostsBack = realGhosts(engine);
   let gl: HTMLCanvasElement;
   try {
     engine.selectionHelper.group.visible = false;
     engine.env.update(engine.camera.camera);
     gl = engine.renderer.renderToCanvas(engine.scene.scene, engine.camera.camera, W, H, includeGrid);
   } finally {
+    ghostsBack();
     overlays.dispose();
     engine.selectionHelper.group.visible = selectionVisible;
     engine.invalidate();

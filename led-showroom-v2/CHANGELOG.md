@@ -38,6 +38,13 @@ Under the hood, the page's script (three.js inside, about 640 KB) is built on it
 plugin and loads only when a viewer is saved. It travels in the page as base64 and runs from there,
 since minified three can hold text that would end a plain script element early.
 
+### Ghosts go out as the real parts
+
+Anything that leaves the app for a client (Save image, video, the 3D viewer page, GLB/glTF) draws
+ghost trusses, the parts a rig needs and we do not hold, as the real parts: solid, casting
+shadows. The app still draws them see-through, and the build list and Truss panel still count
+them to buy. The CAD sheet already drew every part solid.
+
 ### Header toggle: cheapest or hide couplers
 
 The Truss section has a Header switch for Auto truss: Cheapest, as before, or Hide couplers.

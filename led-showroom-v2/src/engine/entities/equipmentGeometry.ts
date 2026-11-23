@@ -79,7 +79,8 @@ function makePalette(entity: EquipmentEntity): Palette {
   };
   const all = [p.body, p.accent, p.glass, p.metal, p.dark, p.alloy];
   // See-through, and never hiding what stands behind it: a ghost is a gap in the stock, not a part.
-  if (entity.ghost) for (const m of all) { m.transparent = true; m.opacity = GHOST_OPACITY; m.depthWrite = false; }
+  // Tagged so a client-facing export (`realGhosts`) can lend it the real look for one take.
+  if (entity.ghost) for (const m of all) { m.transparent = true; m.opacity = GHOST_OPACITY; m.depthWrite = false; m.userData.ghost = true; }
   return { ...p, all };
 }
 
@@ -631,7 +632,7 @@ export function buildEquipment(entity: EquipmentEntity): EquipmentBuild {
   const parts = new Parts(pal);
   const builder = BUILDERS[entity.geometry] ?? buildBox;
   const screen = builder(parts, w, h, d) ?? undefined;
-  if (entity.ghost) for (const m of parts.meshes) m.castShadow = false;
+  if (entity.ghost) for (const m of parts.meshes) { m.userData.realCastShadow = m.castShadow; m.castShadow = false; }
   parts.group.name = `equipment-model:${entity.geometry}`;
   const materials: THREE.Material[] = [...pal.all];
   if (screen) materials.push(screen.material as THREE.Material);

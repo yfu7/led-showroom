@@ -35,6 +35,7 @@ import {
   paintBackdrop, rasterizeIframes, timestampName, type Rect, type WebsiteOverlays,
 } from './composite';
 import { exportSize } from './image';
+import { realGhosts } from './realGhosts';
 
 export interface RecordVideoOptions {
   /** Auto-stop after this many seconds (max 600). Default: until `stop()` (turntable: one full turn). */
@@ -257,7 +258,9 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
   const prevAutoRotate = controls.autoRotate, prevAutoSpeed = controls.autoRotateSpeed;
   const prevSelectionVisible = engine.selectionHelper.group.visible;
 
+  let ghostsBack: (() => void) | null = null;
   const restoreScene = () => {
+    if (ghostsBack) { ghostsBack(); ghostsBack = null; }
     if (offFrame) { offFrame(); offFrame = null; }
     if (offResize) { offResize(); offResize = null; }
     if (release) { release(); release = null; }
@@ -345,6 +348,8 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
     // A turntable is framed before the crop is: the frame is what the take is of. It keeps the full
     // frame, since a crop fitted to the build at the first angle would clip it at the others.
     if (opts.turntable) engine.frameTurntable();
+    // The take goes to the client: ghosts show as the real parts until the scene is restored.
+    ghostsBack = realGhosts(engine);
 
     // Crop locked for the whole take so the encoder size is constant (v1: no crop when a venue photo is staged).
     let r: Rect = { x: 0, y: 0, w: fullW, h: fullH };

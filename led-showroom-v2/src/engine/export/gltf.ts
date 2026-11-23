@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import type { Engine } from '../Engine';
 import type { Document } from '../document/types';
+import { realGhosts } from './realGhosts';
 
 export interface GltfExportOptions {
   /** .glb (binary) instead of .gltf (JSON). */
@@ -165,8 +166,14 @@ export async function exportGltf(engine: Engine, opts: GltfExportOptions): Promi
   }
   engine.scene.world.updateWorldMatrix(true, true);
   const frozen: FrozenTextures = new Set();
-  const root = buildExportRoot(roots, slug(engine.doc.name), frozen);
-  if (!root.children.length) throw new Error('Nothing to export');
+  // The file leaves the app (and the viewer page is built from it): ghosts go as the real parts.
+  // The export shares the scene's materials, so they stay real until the exporter has read them.
+  const ghostsBack = realGhosts(engine);
+  let root: THREE.Group;
+  try {
+    root = buildExportRoot(roots, slug(engine.doc.name), frozen);
+  } catch (err) { ghostsBack(); throw err; }
+  if (!root.children.length) { ghostsBack(); throw new Error('Nothing to export'); }
 
   const exporter = new GLTFExporter();
   let result: ArrayBuffer | { [key: string]: unknown };
@@ -179,6 +186,7 @@ export async function exportGltf(engine: Engine, opts: GltfExportOptions): Promi
       maxTextureSize: Math.min(4096, engine.renderer.maxTextureSize || 4096),
     });
   } finally {
+    ghostsBack();
     for (const t of frozen) t.dispose(); // frozen video frames are ours; geometry/materials stay shared with the scene
   }
 
