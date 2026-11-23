@@ -66,9 +66,15 @@ export const autoTrussHeader = {
  */
 export function setAutoTrussHeader(engine: Engine, wall: LedWallEntity | null, mode: HeaderMode): void {
   if (mode === header) return;
+  const was = header;
+  setHeader(mode);
+  // A re-plan that fails, or is cancelled, leaves the old rig: the switch goes back with it.
+  if (wall && rigEntityIds(engine.doc, wall.id).size) autoTruss(engine, wall, () => setHeader(was));
+}
+
+function setHeader(mode: HeaderMode): void {
   header = mode;
   for (const fn of headerListeners) fn();
-  if (wall && rigEntityIds(engine.doc, wall.id).size) autoTruss(engine, wall);
 }
 
 /** What the Auto truss action is called on `wall`: it replaces a rig the wall has. */
@@ -85,9 +91,9 @@ export const autoTrussLabel = (engine: Engine, wall: LedWallEntity): string =>
  * computed once rather than inside the command: a redo that planned again would mint fresh ids
  * and strand anything holding the old ones.
  */
-export function autoTruss(engine: Engine, wall: LedWallEntity): void {
+export function autoTruss(engine: Engine, wall: LedWallEntity, onKept?: () => void): void {
   const rig = engine.doc.entities.find((e): e is GroupEntity => e.type === 'group' && e.rigFor === wall.id);
-  if (!rig?.rigHand) { planAndApply(engine, wall); return; }
+  if (!rig?.rigHand) { if (!planAndApply(engine, wall)) onKept?.(); return; }
   // A rig put up by hand is work Auto truss would throw away: ask first.
   requestConfirm({
     title: 'Replace the rig built by hand?',
@@ -95,12 +101,14 @@ export function autoTruss(engine: Engine, wall: LedWallEntity): void {
     confirm: 'Replace with Auto truss',
     onConfirm: () => {
       const live = engine.entity<LedWallEntity>(wall.id);
-      if (live) planAndApply(engine, live);
+      if (!live || !planAndApply(engine, live)) onKept?.();
     },
+    onCancel: onKept,
   });
 }
 
-function planAndApply(engine: Engine, wall: LedWallEntity): void {
+/** Plan and put up the rig; false where nothing went up and the wall keeps what it had. */
+function planAndApply(engine: Engine, wall: LedWallEntity): boolean {
   const t0 = performance.now();
   const got = autoTrussRig(engine.doc, wall, { header });
   const ms = performance.now() - t0;
@@ -110,7 +118,7 @@ function planAndApply(engine: Engine, wall: LedWallEntity): void {
       columns: 0, buy: [0, 0], saved: 0, filled: 0, kept: 0, refused: [],
     });
     engine.toast('error', got.fail);
-    return;
+    return false;
   }
   const { plan, auto, summary } = got;
   const c = summary.coupling;
@@ -142,6 +150,7 @@ function planAndApply(engine: Engine, wall: LedWallEntity): void {
   const head = `${parts.join(', ')} - ${c.supported.size} of ${n(summary.columns, 'column', 'columns')} held, ${c.held.size} by couplers of their own`
     + (summary.buyUsd > 0 ? `, ${usd(summary.buyUsd)} to buy` : ', nothing to buy');
   engine.toast(summary.ghosts || auto.refused.length ? 'info' : 'success', [head, ...got.notes].join(' - '));
+  return true;
 }
 
 /** Take the rig off a wall. The wall stays where the rig left it. */

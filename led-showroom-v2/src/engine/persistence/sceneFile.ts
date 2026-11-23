@@ -340,6 +340,7 @@ function migrateTyped(raw: Record<string, unknown>, e: Record<string, unknown>):
       const rigFor = optStr(raw.rigFor);
       if (rigFor !== undefined) e.rigFor = rigFor; else delete e.rigFor;
       if (raw.rigHand === true) e.rigHand = true; else delete e.rigHand;
+      if (raw.rigHeader === 'hide') e.rigHeader = 'hide'; else delete e.rigHeader;
       return e;
     }
     default:

@@ -373,6 +373,17 @@ describe('migrateDocument', () => {
       expect('rigHand' in junk).toBe(false);
       expect('rigHand' in auto).toBe(false);
     });
+    it('group: a rig planned to hide its header couplers stays so', () => {
+      // Re-coupling reads the mark: lose it and the wall may move onto holes that show.
+      const [hide, junk, cheap] = ents([
+        { type: 'group', name: 'Truss rig', rigFor: 'wall-7', rigHeader: 'hide' },
+        { type: 'group', name: 'Truss rig', rigFor: 'wall-7', rigHeader: 'cheapest' },
+        { type: 'group', name: 'Truss rig', rigFor: 'wall-7' },
+      ]) as GroupEntity[];
+      expect(hide.rigHeader).toBe('hide');
+      expect('rigHeader' in junk).toBe(false);
+      expect('rigHeader' in cheap).toBe(false);
+    });
   });
 });
 

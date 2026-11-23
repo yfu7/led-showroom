@@ -392,11 +392,30 @@ describe('Auto truss through the builder', () => {
   }
 
   it('puts up the arch that hides its couplers as planned: five blocks a leg, the wall on the plates', () => {
-    const { plan, got } = same(arch(), { header: 'hide' });
+    const wall = arch();
+    const { plan, got } = same(wall, { header: 'hide' });
     expect(got.summary.coupling.shim).toBe(0);
     expect(got.summary.coupling.bared.size).toBe(0);
+    expect(got.summary.coupling.clamps.filter(c => c.low)).toEqual([]);
     expect(got.auto.pieces.filter(p => p.catalogId === 'gp-corner-6way')).toHaveLength(15);
     expect(plan.headerDropIn).toBeGreaterThan(0);
+    // The planner's word on the block stack and the drop reaches the person who asked.
+    expect(got.notes).toContain('Each frame leg stacks 4 spare blocks under its top one to put the header on hidden holes: have the stack checked before it carries the wall.');
+    expect(got.notes.some(n => /under the row of holes it couples to/.test(n))).toBe(true);
+
+    // The rig keeps its mode: opened again in Build truss, it couples the same, couplers hidden.
+    const group = got.next.entities.find((e): e is GroupEntity => e.type === 'group' && e.rigFor === wall.id)!;
+    expect(group.rigHeader).toBe('hide');
+    const again = open(got.next, wall);
+    expect(again.header).toBe('hide');
+    const c = summarize(again, again.pieces).coupling;
+    expect(c.shim).toBe(got.summary.coupling.shim);
+    expect(c.clamps.map(x => keyOf(x.piece)).sort()).toEqual(got.summary.coupling.clamps.map(x => keyOf(x.piece)).sort());
+
+    // Cheapest marks nothing, and couples the bottom row as before.
+    const cheap = same(wall);
+    expect(cheap.got.next.entities.some(e => e.type === 'group' && 'rigHeader' in e)).toBe(false);
+    expect(cheap.got.summary.coupling.clamps.some(x => x.low)).toBe(true);
   });
 
   it('puts up the 30 x 7 arch as planned, as a rig Auto truss replaces again without asking', () => {

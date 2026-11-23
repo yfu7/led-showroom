@@ -35,7 +35,7 @@ import type { MountPoint } from './layout';
 import {
   BUY_STICK_IDS, CLAMP_ID, RIG_GROUP_NAME, SHIM_MAX_IN, SPAN_TABLE_IN, STICK_IDS,
   buyPrice, clampPiece, costNote, forgivenNote, inches, planTrussRig, rigContext, rigEntityIds,
-  type ChordSpan, type RigContext, type RigLeg, type RigPiece, type Run, type TrussRigOptions, type TrussRigPlan,
+  type ChordSpan, type HeaderMode, type RigContext, type RigLeg, type RigPiece, type Run, type TrussRigOptions, type TrussRigPlan,
 } from './trussRig';
 
 const EPS = 1e-4;
@@ -96,6 +96,8 @@ export interface Builder {
   group: GroupEntity | null;
   /** That rig was put up by hand, not by Auto truss. */
   hand: boolean;
+  /** How the rig weighs its header: with 'hide', coupling keeps couplers out of a lintel's lowest holes first. */
+  header: HeaderMode;
   /** Its pieces, couplers aside, in the order they went up. */
   pieces: BuildPiece[];
   palette: PaletteItem[];
@@ -109,7 +111,11 @@ export interface Builder {
 export type Verdict = string[];
 
 /** A coupler the rig takes, with what it holds. */
-export interface BuildClamp { piece: RigPiece; col: number; side: number; header: boolean; by: number }
+export interface BuildClamp {
+  piece: RigPiece; col: number; side: number; header: boolean; by: number;
+  /** A header coupler in a lintel's lowest holes, where it shows under the lintel. */
+  low: boolean;
+}
 
 /** The rig coupled to the wall: at what shim, which couplers, which columns they hold. */
 export interface Coupling {
@@ -143,7 +149,7 @@ function partAsPiece(catalogId: string, geometry: EquipmentGeometry, dims: Vec3,
 }
 
 /** Open the builder on `wall`: its measures, its rig, and the stock to build with. */
-export function openBuilder(doc: Document, wall: LedWallEntity): Builder | { fail: string } {
+export function openBuilder(doc: Document, wall: LedWallEntity, header?: HeaderMode): Builder | { fail: string } {
   const ctx = rigContext(doc, wall);
   if (ctx.fail !== undefined) return { fail: ctx.fail };
   const byId = ctx.byId;
@@ -184,7 +190,8 @@ export function openBuilder(doc: Document, wall: LedWallEntity): Builder | { fai
   ];
 
   return {
-    ctx, wall, group, hand: group?.rigHand === true, pieces, palette, elsewhere, currentBottom: ctx.currentBottom,
+    ctx, wall, group, hand: group?.rigHand === true, header: header ?? (group?.rigHeader === 'hide' ? 'hide' : 'cheapest'),
+    pieces, palette, elsewhere, currentBottom: ctx.currentBottom,
   };
 }
 
@@ -380,7 +387,7 @@ function clampsAt(b: Builder, pieces: readonly BuildPiece[], bottomY: number): {
   const add = (run: Run, i: number, m: MountPoint, y: number, col: number, side: number, chord: THREE.Vector3, header: boolean): void => {
     if (seen.has(m)) return;
     seen.add(m);
-    clamps.push({ piece: clampPiece(ctx.clampDef, ctx.toWorld(m.pos).setY(y), chord, run.N), col, side, header, by: i });
+    clamps.push({ piece: clampPiece(ctx.clampDef, ctx.toWorld(m.pos).setY(y), chord, run.N), col, side, header, by: i, low: header && ctx.lintelLow.has(m) });
   };
   pieces.forEach((p, i) => {
     const chords: ChordSpan[] = [];
@@ -437,7 +444,9 @@ export function couple(b: Builder, pieces: readonly BuildPiece[]): Coupling {
       held.add(c.col);
       for (const k of ctx.holdsOf(c.col, c.side)) supported.add(k);
     }
-    const score = [-bare.size, supported.size, held.size, clamps.length, -shim];
+    // As the planner ranks: with 'hide', the fewest header couplers bare under a lintel straight after the columns held.
+    const low = b.header === 'hide' ? [-clamps.filter(c => c.low).length] : [];
+    const score = [-bare.size, supported.size, ...low, held.size, clamps.length, -shim];
     if (!best || rankDesc(score, best.score) < 0) best = { score, c: { shim, bottomY, clamps, held, supported, welds, bared: bare } };
   }
   return best!.c;
@@ -805,6 +814,7 @@ export function applyBuild(doc: Document, b: Builder, pieces: readonly BuildPiec
   const fresh = createGroup(RIG_GROUP_NAME);
   const group: GroupEntity = {
     ...fresh, id: b.group?.id ?? fresh.id, name: b.group?.name ?? RIG_GROUP_NAME, rigFor: wall.id, ...(hand ? { rigHand: true } : {}),
+    ...(b.header === 'hide' ? { rigHeader: 'hide' as const } : {}),
   };
   const parts = [
     ...pieces.map((p, i) => pieceEntity(b, p, sum.pieceGhosts[i], group.id)),
@@ -971,11 +981,13 @@ export interface AutoTruss {
  */
 const MITRE = /cut away by a mitre/;
 const FOLD = /beside a fold/;
+/** The planner's word on the header itself: a stack of spare blocks to check, couplers it cannot hide, the drop. */
+const HEADER_NOTE = /spare blocks under its top one|under a lintel: no leg|under the row of holes it couples to/;
 
 export function autoTrussRig(doc: Document, wall: LedWallEntity, opts: TrussRigOptions = {}): AutoTruss | { fail: string } {
   const plan = planTrussRig(doc, wall, opts);
   if (!plan.legs.length) return { fail: plan.warnings[0] ?? 'There is nothing on this wall to bolt a coupler into.' };
-  const b = openBuilder(doc, wall);
+  const b = openBuilder(doc, wall, opts.header ?? 'cheapest');
   if ('fail' in b) return b;
   const auto = autoBuild(b, plan);
   if (!auto.pieces.length) return { fail: auto.refused[0]?.why[0] ?? 'No piece of the plan would go up.' };
@@ -1006,7 +1018,7 @@ export function autoTrussRig(doc: Document, wall: LedWallEntity, opts: TrussRigO
   // every piece from. The builder couples the same columns, so its loose ones are the plan's.
   // The fold line follows the loose one: its "It" / "They" is those columns.
   if (loose > 0) notes.push(...plan.warnings.filter(w => FOLD.test(w)));
-  notes.push(...plan.warnings.filter(w => MITRE.test(w)));
+  notes.push(...plan.warnings.filter(w => MITRE.test(w) || HEADER_NOTE.test(w)));
   if (auto.refused.length) {
     const n = auto.refused.length;
     const [first] = auto.refused;

@@ -231,6 +231,8 @@ export interface GroupEntity extends EntityBase {
    * before it replaces one, since it would throw the hand work away.
    */
   rigHand?: boolean;
+  /** Auto truss planned the rig to hide its header couplers ('hide'); absent, cheapest. Re-coupling keeps to it. */
+  rigHeader?: 'hide';
 }
 
 export type Entity = LedWallEntity | StageEntity | EquipmentEntity | ModelEntity | SplatEntity | RoomEntity | DimensionEntity | GroupEntity;

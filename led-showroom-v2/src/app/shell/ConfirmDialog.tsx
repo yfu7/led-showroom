@@ -14,6 +14,8 @@ export interface ConfirmRequest {
   confirm: string;
   danger?: boolean;
   onConfirm(): void;
+  /** Runs on a no: the dialog closed any way but the confirm button. */
+  onCancel?(): void;
 }
 
 const listeners = new Set<(r: ConfirmRequest) => void>();
@@ -34,6 +36,11 @@ export function ConfirmDialog() {
   }, []);
 
   const close = () => setReq(null);
+  const no = () => {
+    const r = req;
+    close();
+    r?.onCancel?.();
+  };
   const yes = () => {
     const r = req;
     close();
@@ -41,10 +48,10 @@ export function ConfirmDialog() {
   };
 
   return (
-    <Modal open={!!req} title={req?.title} onClose={close} width="min(420px, 92vw)">
+    <Modal open={!!req} title={req?.title} onClose={no} width="min(420px, 92vw)">
       <div className="hint" style={{ fontSize: 'var(--fs-sm)' }}>{req?.body}</div>
       <div className="row" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
-        <Button variant="ghost" onClick={close}>Cancel</Button>
+        <Button variant="ghost" onClick={no}>Cancel</Button>
         <Button variant={req?.danger ? 'danger' : 'primary'} onClick={yes}>{req?.confirm}</Button>
       </div>
     </Modal>

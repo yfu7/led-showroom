@@ -18,6 +18,11 @@ four spare blocks in Hide couplers, and the plan warns to have that stack checke
 top row of holes can't be reached hidden: the nearest leg, 9 ft under three blocks, would stand
 8.82 in above the 7-row wall.
 
+The rig remembers its mode. A Hide couplers rig opened again in Build truss still couples with
+nothing showing under the lintel. Auto truss's message now carries the planner's notes on the block
+stack and the drop. If a re-plan fails, or you cancel replacing a hand-built rig, the switch goes
+back to the mode the rig was built in.
+
 ### The 2 ft DT-GP2, a stick to buy
 
 The catalog has the DT-GP2 2 ft stick in black (Global Truss GP0222), with none owned and priced
