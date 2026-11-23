@@ -89,13 +89,19 @@ const toM = (v: THREE.Vector3): V3 => [v.x * INCH_TO_METRE, v.y * INCH_TO_METRE,
 const boxM = (b: THREE.Box3): Box => ({ min: toM(b.min), max: toM(b.max) });
 const hex = (c: THREE.Color): string => `#${c.getHexString()}`;
 
-/** The lights as the app has them now, directions from the scene's middle. */
-function lightsOf(engine: Engine, mid: THREE.Vector3): ViewerLight[] {
+/**
+ * The way a directional light shines, as three.js lights it: from its position towards its target.
+ * The app leaves the fill and rim targets at the origin, so the scene's middle must not stand in.
+ */
+export function lightDir(l: THREE.DirectionalLight): V3 {
+  const d = l.position.clone().sub(l.target.position).normalize();
+  return [d.x, d.y, d.z];
+}
+
+/** The lights as the app has them now. */
+function lightsOf(engine: Engine): ViewerLight[] {
   const env = engine.env;
-  const dir = (l: THREE.DirectionalLight): V3 => {
-    const d = l.position.clone().sub(l === env.key ? env.key.target.position : mid).normalize();
-    return [d.x, d.y, d.z];
-  };
+  const dir = lightDir;
   return [
     { kind: 'hemi', color: hex(env.hemi.color), ground: hex(env.hemi.groundColor), intensity: env.hemi.intensity },
     { kind: 'ambient', color: hex(env.ambient.color), intensity: env.ambient.intensity },
@@ -165,16 +171,17 @@ export function wallViews(engine: Engine): WallView[] {
 export async function exportViewer(engine: Engine): Promise<ViewerExportResult> {
   const t0 = performance.now();
   const warnings: string[] = [];
+  const empty = engine.doc.entities.length === 0;
   const [{ default: runtime }, glb] = await Promise.all([
     import('virtual:viewer-runtime'),
-    exportGltf(engine, { binary: true, selectionOnly: false }),
+    // An empty scene has nothing for the GLB: the page then shows the bare room.
+    empty ? null : exportGltf(engine, { binary: true, selectionOnly: false }),
   ]);
-  const glbBytes = new Uint8Array(await glb.arrayBuffer());
+  const glbBytes = glb ? new Uint8Array(await glb.arrayBuffer()) : new Uint8Array(0);
 
   engine.scene.world.updateWorldMatrix(true, true);
   const sceneBox = engine.scene.bounds();
   if (sceneBox.isEmpty()) sceneBox.set(new THREE.Vector3(-60, 0, -10), new THREE.Vector3(60, 96, 10));
-  const mid = sceneBox.getCenter(new THREE.Vector3());
   const env = engine.doc.environment;
   const backdrop = await backdropOf(engine, warnings);
   const cam = engine.camera.camera;
@@ -193,7 +200,7 @@ export async function exportViewer(engine: Engine): Promise<ViewerExportResult> 
     appVersion: __APP_VERSION__,
     fovDeg: engine.camera.fov,
     shadows: env.lighting.shadows,
-    lights: lightsOf(engine, mid),
+    lights: lightsOf(engine),
     floor: {
       visible: engine.env.floor.visible,
       color: hex(engine.env.floor.material.color),

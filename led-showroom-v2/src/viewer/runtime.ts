@@ -198,6 +198,18 @@ function main(): void {
       const f = new THREE.Vector3().subVectors(orbit.target, camera.position);
       yaw = Math.atan2(-f.x, -f.z);
       pitch = 0;
+      // From a far stand, step in along the line of sight to the edge of the walkable floor, so
+      // the walker keeps the view it had instead of jumping sideways onto the clamp.
+      let t = 0;
+      for (const a of ['x', 'z'] as const) {
+        const p = camera.position[a], d = orbit.target[a] - p;
+        if (p < walkMin[a] && d > 0) t = Math.max(t, (walkMin[a] - p) / d);
+        if (p > walkMax[a] && d < 0) t = Math.max(t, (walkMax[a] - p) / d);
+      }
+      camera.position.x += f.x * Math.min(1, t);
+      camera.position.z += f.z * Math.min(1, t);
+      camera.position.x = Math.max(walkMin.x, Math.min(walkMax.x, camera.position.x));
+      camera.position.z = Math.max(walkMin.z, Math.min(walkMax.z, camera.position.z));
       camera.position.y = VIEWER_EYE_HEIGHT_M;
       stick.style.display = coarse ? 'block' : 'none';
       hint.textContent = coarse
@@ -214,6 +226,8 @@ function main(): void {
       const d = Math.max(1, camera.position.distanceTo(mid));
       orbit.target.copy(camera.position).addScaledVector(f, d);
       if (orbit.target.y < 0) orbit.target.y = 0;
+      // Orbit may not look up from under its target: a target above the eye lifts the camera.
+      if (orbit.target.y > camera.position.y) orbit.target.y = camera.position.y;
       orbit.enabled = true;
       orbit.update();
     }
@@ -269,7 +283,7 @@ function main(): void {
   window.addEventListener('keydown', e => {
     if (e.target instanceof HTMLInputElement) return;
     keys.add(e.code);
-    if (e.code === 'KeyF' && !e.ctrlKey && !e.metaKey && !e.altKey) setMode(mode === 'walk' ? 'orbit' : 'walk');
+    if (e.code === 'KeyF' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) setMode(mode === 'walk' ? 'orbit' : 'walk');
   });
   window.addEventListener('keyup', e => keys.delete(e.code));
   window.addEventListener('blur', () => keys.clear());
@@ -366,6 +380,8 @@ function main(): void {
 
   const t0 = performance.now();
   const bytes = decodeBase64(glbEl.textContent || '');
+  // An empty scene travels with no model: show the bare room.
+  if (!bytes.length) { loadMs = 0; msg.remove(); requestAnimationFrame(frame); return; }
   new GLTFLoader().parse(bytes.buffer as ArrayBuffer, '', gltf => {
     gltf.scene.traverse(o => {
       const m = o as THREE.Mesh;

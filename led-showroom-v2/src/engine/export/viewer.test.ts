@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { buildExportRoot, INCH_TO_METRE } from './gltf';
-import { buildViewerHtml, bytesToBase64, scriptSafeJson, suggestViewerFilename, utf8ToBase64 } from './viewer';
+import { buildViewerHtml, bytesToBase64, lightDir, scriptSafeJson, suggestViewerFilename, utf8ToBase64 } from './viewer';
 import type { ViewerConfig } from '@/viewer/config';
 
 const config = (over: Partial<ViewerConfig> = {}): ViewerConfig => ({
@@ -61,6 +61,21 @@ describe('viewer page', () => {
     expect(fromBase64(utf8ToBase64('ünï ✓  '))).toBe('ünï ✓  ');
     expect(JSON.parse(scriptSafeJson({ s: 'a b</x>' }))).toEqual({ s: 'a b</x>' });
     expect(scriptSafeJson({ s: '</x>' })).not.toContain('<');
+  });
+
+  it('aims each light from its position to its own target, not the scene middle', () => {
+    const fill = new THREE.DirectionalLight();
+    fill.position.set(-3, 4, 0); // target left at the origin, as the app leaves fill and rim
+    expect(lightDir(fill).map(v => +v.toFixed(6))).toEqual([-0.6, 0.8, 0]);
+    const key = new THREE.DirectionalLight();
+    key.position.set(10, 10, 5);
+    key.target.position.set(10, 6, 2);
+    expect(lightDir(key).map(v => +v.toFixed(6))).toEqual([0, 0.8, 0.6]);
+  });
+
+  it('carries an empty model when the scene is empty', () => {
+    const html = buildViewerHtml({ config: config({ glbBytes: 0 }), glbBase64: bytesToBase64(new Uint8Array(0)), runtime: 'void 0' });
+    expect(bytesOf(scriptText(html, 'viewer-glb')).length).toBe(0);
   });
 
   it('names the file after the scene', () => {
