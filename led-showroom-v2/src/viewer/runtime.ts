@@ -207,7 +207,11 @@ function main(): void {
     if (n) {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(s.segs.slice(0, n), 3));
-      const lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: s.line, depthTest: false, transparent: true }));
+      const look = { color: s.line, depthTest: false, transparent: true, opacity: s.opacity ?? 1 };
+      // Dashes of 2 in, as the app draws a tape's breakdown.
+      const mat = s.dashed ? new THREE.LineDashedMaterial({ ...look, dashSize: 2 * 0.0254, gapSize: 2 * 0.0254 }) : new THREE.LineBasicMaterial(look);
+      const lines = new THREE.LineSegments(g, mat);
+      if (s.dashed) lines.computeLineDistances();
       lines.renderOrder = 999;
       lines.frustumCulled = false;
       dimGroup.add(lines);

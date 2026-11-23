@@ -458,7 +458,7 @@ function drawTitleBlock(ctx: CanvasRenderingContext2D, layout: SheetLayout, fiel
       ctx.font = font(0.07 * dpi, 600);
       ctx.textBaseline = 'top';
       ctx.textAlign = 'left'; ctx.fillText('0', px, by + bh + 0.03 * dpi);
-      ctx.textAlign = 'center'; ctx.fillText(`${bar.feet} ft`, px + bar.px, by + bh + 0.03 * dpi);
+      ctx.textAlign = 'center'; ctx.fillText(bar.label, px + bar.px, by + bh + 0.03 * dpi);
       ctx.restore();
     }
     x += w;

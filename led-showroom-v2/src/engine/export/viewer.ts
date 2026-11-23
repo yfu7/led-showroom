@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import type { Engine } from '../Engine';
 import type { DimensionEntity, LedWallEntity } from '../document/types';
 import { LedWallRenderer } from '../entities/LedWallRenderer';
-import { dimensionLabelPosition, dimensionLabelText, MEASURE_COLOR, MEASURE_LABEL_HEIGHT_IN } from '../entities/DimensionRenderer';
+import { axisBreakdownPoints, dimensionLabelPosition, dimensionLabelText, MEASURE_COLOR, MEASURE_LABEL_HEIGHT_IN } from '../entities/DimensionRenderer';
 import { DIMENSION_LINE_COLOR, DIMENSION_TEXT_COLOR, type DimensionPieces } from '../ledwall/dimensions';
 import { exportGltf, INCH_TO_METRE } from './gltf';
 import { downloadBlob } from './composite';
@@ -174,10 +174,13 @@ export function wallViews(engine: Engine): WallView[] {
 const mm10 = (inches: number): number => Math.round(inches * INCH_TO_METRE * 1e4) / 1e4;
 
 /** Pieces in world inches as a page's set in metres; null when there is nothing to show. */
-export function dimSetOf(kind: ViewerDimSet['kind'], line: string, text: string, p: DimensionPieces): ViewerDimSet | null {
+export function dimSetOf(
+  kind: ViewerDimSet['kind'], line: string, text: string, p: DimensionPieces,
+  style: Pick<ViewerDimSet, 'dashed' | 'opacity'> = {},
+): ViewerDimSet | null {
   if (!p.segs.length && !p.labels.length) return null;
   return {
-    kind, line, text,
+    kind, line, text, ...style,
     segs: p.segs.map(mm10),
     labels: p.labels.map(l => ({ text: l.text, p: [mm10(l.p[0]), mm10(l.p[1]), mm10(l.p[2])], h: mm10(l.h) })),
   };
@@ -196,6 +199,7 @@ const shown = (o: THREE.Object3D | undefined): boolean => {
  */
 export function dimsOf(engine: Engine): ViewerDimSet[] {
   const walls: DimensionPieces = { segs: [], labels: [] }, tape: DimensionPieces = { segs: [], labels: [] };
+  const breaks: DimensionPieces = { segs: [], labels: [] };
   const unit = engine.doc.settings.units;
   engine.scene.world.updateWorldMatrix(true, true);
   for (const e of engine.doc.entities) {
@@ -209,12 +213,16 @@ export function dimsOf(engine: Engine): ViewerDimSet[] {
       const { a, b, label } = e as DimensionEntity;
       tape.segs.push(a[0], a[1], a[2], b[0], b[1], b[2]);
       tape.labels.push({ text: dimensionLabelText(a, b, unit, label), p: dimensionLabelPosition(a, b), h: MEASURE_LABEL_HEIGHT_IN });
+      // The faint dashed dx / dy / dz legs, which the app shows for a tape off the axes.
+      const pts = axisBreakdownPoints(a, b);
+      if (pts.length > 2) for (let i = 0; i + 1 < pts.length; i++) breaks.segs.push(...pts[i], ...pts[i + 1]);
     }
   }
   const css = (n: number): string => `#${n.toString(16).padStart(6, '0')}`;
   return [
     dimSetOf('wall', css(DIMENSION_LINE_COLOR), DIMENSION_TEXT_COLOR, walls),
     dimSetOf('measure', css(MEASURE_COLOR), DIMENSION_TEXT_COLOR, tape),
+    dimSetOf('measure', css(MEASURE_COLOR), DIMENSION_TEXT_COLOR, breaks, { dashed: true, opacity: 0.3 }),
   ].filter((s): s is ViewerDimSet => !!s);
 }
 

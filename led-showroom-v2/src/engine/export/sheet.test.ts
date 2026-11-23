@@ -153,6 +153,15 @@ describe('scaleBar', () => {
   it('falls back to the smallest step rather than a zero-length bar', () => {
     // At 1:1024 even one foot is under two pixels, so nothing fits the space given: a one-foot bar
     // that slightly overruns still reads, a zero-length one does not.
-    expect(scaleBar(150 / 1024, 1).feet).toBe(1);
+    expect(scaleBar(150 / 1024, 0.1).feet).toBe(1); // not even an inch fits
+  });
+
+  it('drops to inches when a foot overruns the space, as at 1:8 in a narrow scale cell', () => {
+    const pxPerIn = 150 / 8;                 // 1:8 at 150 dpi: one foot is 225 px
+    const b = scaleBar(pxPerIn, 72);         // the SCALE cell's room on ANSI A
+    expect(b.px).toBeLessThanOrEqual(72);
+    expect(b.label).toBe('3 in');
+    expect(b.feet).toBe(0.25);
+    expect(scaleBar(150 / 48, 400).label).toMatch(/ ft$/);
   });
 });

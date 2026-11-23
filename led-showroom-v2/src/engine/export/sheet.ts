@@ -223,12 +223,19 @@ export function sheetLayout(extents: Extents, opts: SheetOptions = {}): SheetLay
 export const viewOf = (layout: SheetLayout, key: ViewKey): Viewport | undefined => layout.views.find(v => v.key === key);
 
 /**
- * A scale bar whose length is a round number of feet: the longest of `[1,2,5,10,20,50,100]` ft
- * that fits `maxPx` at the sheet scale, with the tick spacing to draw it.
+ * A scale bar whose length is a round number: the longest of 1 to 200 ft that fits `maxPx` at the
+ * sheet scale, or of 1, 2, 3 or 6 in when not even a foot fits (a fine scale in a narrow cell).
+ * When nothing fits, one foot: a bar that overruns a little still reads, a zero-length one does not.
  */
-export function scaleBar(pxPerIn: number, maxPx: number): { feet: number; px: number; ticks: number } {
-  const steps = [1, 2, 5, 10, 20, 50, 100, 200];
-  let feet = steps[0];
-  for (const s of steps) if (s * 12 * pxPerIn <= maxPx) feet = s;
-  return { feet, px: feet * 12 * pxPerIn, ticks: feet <= 2 ? feet * 2 : 4 };
+export function scaleBar(pxPerIn: number, maxPx: number): { feet: number; px: number; ticks: number; label: string } {
+  const feetSteps = [1, 2, 5, 10, 20, 50, 100, 200];
+  const inchSteps = [6, 3, 2, 1];
+  let feet = 0;
+  for (const s of feetSteps) if (s * 12 * pxPerIn <= maxPx) feet = s;
+  if (!feet) {
+    const inches = inchSteps.find(s => s * pxPerIn <= maxPx);
+    if (inches) return { feet: inches / 12, px: inches * pxPerIn, ticks: inches === 1 ? 2 : inches, label: `${inches} in` };
+    feet = 1;
+  }
+  return { feet, px: feet * 12 * pxPerIn, ticks: feet <= 2 ? feet * 2 : 4, label: `${feet} ft` };
 }

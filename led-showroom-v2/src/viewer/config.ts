@@ -50,4 +50,7 @@ export interface ViewerDimSet {
   segs: number[];
   /** `h`: the label's base height, before it is held readable from afar. */
   labels: { text: string; p: V3; h: number }[];
+  /** Drawn dashed (a tape's dx / dy / dz breakdown), and how solid. Default solid, opacity 1. */
+  dashed?: boolean;
+  opacity?: number;
 }

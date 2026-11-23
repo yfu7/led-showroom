@@ -35,7 +35,7 @@ import {
   paintBackdrop, rasterizeIframes, timestampName, type Rect, type WebsiteOverlays,
 } from './composite';
 import { exportSize } from './image';
-import { realGhosts } from './realGhosts';
+import { realGhosts, setGhostLook } from './realGhosts';
 
 export interface RecordVideoOptions {
   /** Auto-stop after this many seconds (max 600). Default: until `stop()` (turntable: one full turn). */
@@ -275,6 +275,8 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
   /** Render the scene (no gizmo layer) and return the canvas holding the full frame. */
   const renderFrame = (): HTMLCanvasElement => {
     const cam = camera();
+    // A ghost edited (so rebuilt) mid-take comes back see-through: set it real again.
+    if (ghostsBack) setGhostLook(engine, true);
     engine.env.update(cam);
     // The live buffer is only a valid source while it still has the locked frame size; after a
     // resize / DPR change fall through to an offscreen render at fullW × fullH so the crop stays valid.

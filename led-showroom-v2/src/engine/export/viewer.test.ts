@@ -125,6 +125,8 @@ describe('viewer dimensions', () => {
     expect(s.segs).toEqual([0, 0, 0, 2.54, 1.2192, -0.0085]);
     expect(s.labels).toEqual([{ text: '100"', p: [1.27, -0.1016, 0.0292], h: 0.1524 }]);
     expect(s.kind).toBe('wall');
+    const d = dimSetOf('measure', '#eab308', '#00ccff', { segs: [0, 0, 0, 1, 0, 0], labels: [] }, { dashed: true, opacity: 0.3 })!;
+    expect([d.dashed, d.opacity]).toEqual([true, 0.3]);
   });
 
   it('lets the page carry label text safely', () => {

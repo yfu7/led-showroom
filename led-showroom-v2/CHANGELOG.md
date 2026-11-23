@@ -14,7 +14,8 @@ so it can be emailed. It is view only:
   numbered), plus Reset back to where the page opened. Each stand fits the window it is opened in.
 - **Dimensions** (or M) shows the measurements as the app draws them, over the model: every wall's
   dimensions, whether or not they were switched on in the app, and the tape measurements placed in
-  it, in the display unit. Off when the page opens; the button is left out when there are none.
+  it with their dashed dx / dy / dz legs (the end markers stay in the app), in the display unit.
+  Off when the page opens; the button is left out when there are none.
 
 The room carries over: lighting, floor, shadows and the backdrop. A staged venue photo is embedded;
 if its host will not hand it over, the toast says so and the plain backdrop is used. Each wall shows
@@ -43,7 +44,12 @@ since minified three can hold text that would end a plain script element early.
 Anything that leaves the app for a client (Save image, video, the 3D viewer page, GLB/glTF) draws
 ghost trusses, the parts a rig needs and we do not hold, as the real parts: solid, casting
 shadows. The app still draws them see-through, and the build list and Truss panel still count
-them to buy. The CAD sheet already drew every part solid.
+them to buy. The CAD sheet already drew every part solid. A video take and a GLB export may
+overlap: the ghosts stay real until the last of them ends, and a ghost edited mid-take is set real
+again on the next frame.
+
+The CAD sheet's graphic scale drops to inches (1, 2, 3 or 6 in) when a foot would overrun its cell,
+as at 1:8 on ANSI A; before, the bar ran past the title block.
 
 ### Header toggle: cheapest or hide couplers
 
