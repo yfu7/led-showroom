@@ -88,7 +88,26 @@ export const RIG_GROUP_NAME = 'Truss rig';
  */
 export const SHIM_MAX_IN = 0.25;
 
+/**
+ * Most a header chord may sit under the row of holes it couples to, in inches: inside the margin of
+ * error, so the coupler takes it up and the wall stays on the plates. Over a walk-through arch's
+ * five-row doorways, a 5 ft stick under five blocks puts the header's top chord 0.14 in under the
+ * lintel's upper row's low holes, where the couplers are hidden.
+ */
+export const HEADER_DROP_MAX_IN = 0.16;
+/**
+ * Most spare blocks a leg stacks under its top one when the header is to hide its couplers: four
+ * land the arch's header on the lintel's hidden holes. Cheapest stops at one.
+ */
+export const HIDE_MAX_SPACERS = 4;
+/** How Auto truss weighs a header: cheapest, or with no coupler bare under a lintel whatever it costs. */
+export type HeaderMode = 'cheapest' | 'hide';
+export interface TrussRigOptions { header?: HeaderMode }
+
 const EPS = 1e-4;
+/** Whether a hole at `holeY` couples to a chord at `chordY`: level with it, or at most the drop over it. */
+const meets = (holeY: number, chordY: number): boolean =>
+  holeY - chordY > -EPS && holeY - chordY < HEADER_DROP_MAX_IN + EPS;
 /** Steps a frame is slid along its run in, hunting for the best fit against the hole lines. */
 const SLIDE_STEP_IN = 0.25;
 /** Longest stack of sticks a leg is tried with. Four 8 ft sticks is 32 ft, past any wall here. */
@@ -152,6 +171,8 @@ export interface TrussRigPlan {
   bottomY: number;
   /** Packing between the plates' top and the wall's bottom. */
   shimIn: number;
+  /** Most a header chord sits under the row of holes it couples to, up to `HEADER_DROP_MAX_IN`. */
+  headerDropIn: number;
   /** True when the floor-stand kit has to come off: its back supports stand where the rig does. */
   dropAccessories: boolean;
   /** Columns with at least one coupler, out of `columns`. */
@@ -776,7 +797,7 @@ export function rigContext(doc: Document, wall: LedWallEntity) {
         if (along <= 0 || along >= len) continue;
         for (const m of l.mounts) {
           const y = bottomY + s * m.pos[1];
-          const chordY = chordYs.find(cy => Math.abs(cy - y) < EPS);
+          const chordY = chordYs.find(cy => meets(y, cy));
           if (chordY === undefined) continue;
           if (!clearOfBraceNodes(along, len, section, jawHalf)) welds++;
           else if (clampClear(l, m, true)) hits.push({ l, m, y, col: l.col, side: l.side, chordY });
@@ -807,11 +828,12 @@ export type RigContext = Extract<ReturnType<typeof rigContext>, { fail?: undefin
  * is hardware standing on the floor rather than part of the wall: it keeps its own real size
  * whatever the wall is nested in or scaled to.
  */
-export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
+export function planTrussRig(doc: Document, wall: LedWallEntity, opts: TrussRigOptions = {}): TrussRigPlan {
+  const hide = opts.header === 'hide';
   const warnings: string[] = [];
   const empty = (bottomY = 0): TrussRigPlan => ({
     wallId: wall.id, legs: [], spans: [], clamps: [], frames: 0, headerY: null,
-    liftIn: 0, liftLocalIn: 0, bottomY, shimIn: 0, dropAccessories: false,
+    liftIn: 0, liftLocalIn: 0, bottomY, shimIn: 0, headerDropIn: 0, dropAccessories: false,
     held: 0, supported: 0, columns: 0, ghosts: 0, shortfall: [], buyUsd: 0, forgiven: [], savedUsd: 0,
     skipped: { offFace: 0, weld: 0 }, warnings,
   });
@@ -1192,7 +1214,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     const bottomY = plateTop + shim;
     const blockY = supportY + baseH + stack.rise;
     const chordYs = [blockY + chordR, blockY + section - chordR];
-    const header = [...heights].some(hh => chordYs.some(cy => Math.abs(bottomY + hh - cy) < EPS));
+    const header = [...heights].some(hh => chordYs.some(cy => meets(bottomY + hh, cy)));
     const cover = (c: number): boolean =>
       bands[c].some(([lo, hi]) => bottomY + lo <= blockY + EPS && blockY + blockH <= bottomY + hi + EPS);
     const legOK = (c: number): boolean => cover(c) && blockY + blockH <= bottomY + hiddenRise(c) + EPS;
@@ -1230,12 +1252,15 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   };
 
   /**
-   * How tall. Every leg of one stick or more, with a spare block under its top one or not, at the
-   * shim that puts one of its header chords on a row of holes (within the quarter inch), and at no
-   * shim at all: there the spans only brace the legs, which is still a frame.
+   * How tall. Every leg of one stick or more, with a spare block under its top one or not -- up to
+   * `HIDE_MAX_SPACERS` when the header is to hide its couplers -- at the shim that puts one of its
+   * header chords on a row of holes (within the quarter inch over it, or the drop under it, on no
+   * shim), and at no shim at all: there the spans only brace the legs, which is still a frame. A
+   * second spare block only earns its place by bolting a header.
    */
+  const spacerCounts = Array.from({ length: (hide ? HIDE_MAX_SPACERS : 1) + 1 }, (_, i) => i);
   const stacks: LegStack[] = stickStacks([...stickLens, ...buyDefs.map(d => d.dims[0])], MAX_LEG_STICKS).filter(sticks => sticks.length)
-    .flatMap(sticks => [0, 1].map(spacers => ({ sticks, spacers, rise: sum(sticks) + spacers * blockH })));
+    .flatMap(sticks => spacerCounts.map(spacers => ({ sticks, spacers, rise: sum(sticks) + spacers * blockH })));
   const heights = new Set<number>(headerHeights);
   const options = new Map<string, { stack: LegStack; shim: number }>();
   const addOption = (stack: LegStack, shim: number): void => {
@@ -1244,11 +1269,11 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
   };
   for (const stack of stacks) {
     // A stick to buy earns its place by bolting a header; a brace stands on sticks we have.
-    if (stack.sticks.every(l => stickLens.includes(l))) addOption(stack, 0);
+    if (stack.spacers < 2 && stack.sticks.every(l => stickLens.includes(l))) addOption(stack, 0);
     for (const c of [chordR, section - chordR]) {
       for (const hh of heights) {
         const shim = baseH + stack.rise + c - base.plateThick - hh;
-        if (shim < -EPS || shim > SHIM_MAX_IN + EPS) continue;
+        if (shim < -HEADER_DROP_MAX_IN - EPS || shim > SHIM_MAX_IN + EPS) continue;
         addOption(stack, Math.min(Math.max(shim, 0), SHIM_MAX_IN));
       }
     }
@@ -1277,6 +1302,8 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     let headerY: number | null = null;
     /** Header couplers in a lintel's lowest holes, where they show under it. */
     let lowClamps = 0;
+    /** Most a header chord sits under the holes it couples to. */
+    let drop = 0;
 
     // Stock as the rig takes it, so each later choice -- a span's sticks, a tower's -- goes to what is left.
     const taken = new Map<string, number>();
@@ -1382,6 +1409,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
           weld += welds;
           for (const h of hits) {
             if (lintelLow.has(h.m)) lowClamps++;
+            drop = Math.max(drop, h.y - h.chordY);
             addClamp(run, h.m, h.y, h.col, h.side, run.U, true);
             headerY = Math.max(headerY ?? -Infinity, h.chordY);
           }
@@ -1400,7 +1428,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     /** Columns between two legs of a frame whose header meets a row of holes, under its span, by span: `${frame}|${gap}`. */
     const underSpan = new Map<number, string>();
     const headed = blockY !== null
-      && [...heights].some(hh => [blockY + chordR, blockY + section - chordR].some(cy => Math.abs(bottomY + hh - cy) < EPS));
+      && [...heights].some(hh => [blockY + chordR, blockY + section - chordR].some(cy => meets(bottomY + hh, cy)));
     if (headed) placed.forEach((f, fi) => {
       const run = runs[f.run];
       for (let j = 0; j + 1 < f.legsU.length; j++) {
@@ -1488,14 +1516,15 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     const truss = legs.reduce((a, g) => a + g.pieces.length, 0) + spans.length;
     return {
       shim, bottomY, legs, spans, clamps: clamps.map(c => c.piece), held, supported, weld, headerY, long, frames, ghosts, dropped,
-      buyUsd, forgiven,
+      buyUsd, forgiven, drop, lowClamps, spacers: stack && legs.length ? stack.spacers : 0,
       // A rig that holds nothing is no rig. Of the rest, the most columns held, counting one column
       // under each span as held whether or not it is; then the least to buy, so money goes only to
-      // holding more; then the fewest header couplers bare under a lintel; then the most columns truly
-      // held; then legs tied together by spans over loose towers; then the fewest truss pieces and
-      // legs; then the most columns with couplers of their own.
-      score: [supported.size ? 1 : 0, supported.size + forgiven.length, -buyUsd, -lowClamps, supported.size, frames ? 1 : 0,
-        -truss, -legs.length, held.size, headerY ?? -1e9, clamps.length, -shim],
+      // holding more, and the fewest header couplers bare under a lintel -- the other way round
+      // when the header is to hide them, whatever that costs; then the most columns truly held;
+      // then legs tied together by spans over loose towers; then the fewest truss pieces and legs;
+      // then the most columns with couplers of their own; then the header nearest its holes.
+      score: [supported.size ? 1 : 0, supported.size + forgiven.length, ...(hide ? [-lowClamps, -buyUsd] : [-buyUsd, -lowClamps]),
+        supported.size, frames ? 1 : 0, -truss, -legs.length, held.size, headerY ?? -1e9, clamps.length, -drop, -shim],
     };
   };
 
@@ -1552,6 +1581,7 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
     liftLocalIn: liftIn / (pScale.y || 1),
     bottomY: best.bottomY,
     shimIn: best.shim,
+    headerDropIn: Math.round(best.drop * 1e6) / 1e6,
     dropAccessories,
     held: best.held.size,
     supported: best.supported.size,
@@ -1570,6 +1600,16 @@ export function planTrussRig(doc: Document, wall: LedWallEntity): TrussRigPlan {
       plan.shimIn > 1e-6 ? `, on a ${inches(plan.shimIn)} in shim so the header chord meets a row of holes` : ''}.`);
   } else if (plan.shimIn > 1e-6) {
     warnings.push(`The wall sits on a ${inches(plan.shimIn)} in shim on the base plates, so the header chord meets a row of holes.`);
+  }
+  if (best.spacers >= 2) {
+    warnings.push(`Each frame leg stacks ${best.spacers} spare blocks under its top one to put the header on hidden holes: have the stack checked before it carries the wall.`);
+  }
+  if (hide && best.lowClamps) {
+    warnings.push(`${best.lowClamps} header ${best.lowClamps === 1 ? 'coupler shows' : 'couplers show'} under a lintel: no leg puts the header on holes it hides.`);
+  }
+  if (plan.headerDropIn > 1e-6) {
+    warnings.push(`The header chord sits ${inches(plan.headerDropIn)} in under the row of holes it couples to, inside the ${
+      inches(HEADER_DROP_MAX_IN)} in allowed: the couplers take it up.`);
   }
   if (best.weld) {
     warnings.push(`${best.weld} ${best.weld === 1 ? 'hole sits' : 'holes sit'} level with a brace weld, where a coupler cannot close.`);

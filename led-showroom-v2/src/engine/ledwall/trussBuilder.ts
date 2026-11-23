@@ -35,7 +35,7 @@ import type { MountPoint } from './layout';
 import {
   BUY_STICK_IDS, CLAMP_ID, RIG_GROUP_NAME, SHIM_MAX_IN, SPAN_TABLE_IN, STICK_IDS,
   buyPrice, clampPiece, costNote, forgivenNote, inches, planTrussRig, rigContext, rigEntityIds,
-  type ChordSpan, type RigContext, type RigLeg, type RigPiece, type Run, type TrussRigPlan,
+  type ChordSpan, type RigContext, type RigLeg, type RigPiece, type Run, type TrussRigOptions, type TrussRigPlan,
 } from './trussRig';
 
 const EPS = 1e-4;
@@ -972,8 +972,8 @@ export interface AutoTruss {
 const MITRE = /cut away by a mitre/;
 const FOLD = /beside a fold/;
 
-export function autoTrussRig(doc: Document, wall: LedWallEntity): AutoTruss | { fail: string } {
-  const plan = planTrussRig(doc, wall);
+export function autoTrussRig(doc: Document, wall: LedWallEntity, opts: TrussRigOptions = {}): AutoTruss | { fail: string } {
+  const plan = planTrussRig(doc, wall, opts);
   if (!plan.legs.length) return { fail: plan.warnings[0] ?? 'There is nothing on this wall to bolt a coupler into.' };
   const b = openBuilder(doc, wall);
   if ('fail' in b) return b;

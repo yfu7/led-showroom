@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { worldMatrix } from '../behaviours';
 import { createDocument, createLedWall } from '../document/defaults';
 import type { Document, Entity, GroupEntity, LedWallEntity } from '../document/types';
-import { applyTrussRig, planTrussRig, rigEntityIds, type RigPiece, type TrussRigPlan } from './trussRig';
+import { applyTrussRig, planTrussRig, rigEntityIds, type RigPiece, type TrussRigOptions, type TrussRigPlan } from './trussRig';
 import {
   applyBuild, attach, autoTrussRig, baseAt, check, fillGap, gapFrom, openBuilder, openPorts, portsOf, removePiece, stockLeft, summarize,
   type BuildPiece, type Builder, type Port,
@@ -373,10 +373,10 @@ describe('truss builder', () => {
 
 describe('Auto truss through the builder', () => {
   /** Auto truss on `wall`, against the plan it puts up: every piece goes up, coupled as planned. */
-  function same(wall: LedWallEntity) {
+  function same(wall: LedWallEntity, opts: TrussRigOptions = {}) {
     const doc = docWith(wall);
-    const plan = planTrussRig(doc, wall);
-    const got = autoTrussRig(doc, wall);
+    const plan = planTrussRig(doc, wall, opts);
+    const got = autoTrussRig(doc, wall, opts);
     if ('fail' in got) throw new Error(got.fail);
     const c = got.summary.coupling;
     expect(got.auto.refused).toEqual([]);
@@ -390,6 +390,14 @@ describe('Auto truss through the builder', () => {
     expect(got.summary.buyUsd).toBeCloseTo(plan.buyUsd, 6);
     return { doc, plan, got };
   }
+
+  it('puts up the arch that hides its couplers as planned: five blocks a leg, the wall on the plates', () => {
+    const { plan, got } = same(arch(), { header: 'hide' });
+    expect(got.summary.coupling.shim).toBe(0);
+    expect(got.summary.coupling.bared.size).toBe(0);
+    expect(got.auto.pieces.filter(p => p.catalogId === 'gp-corner-6way')).toHaveLength(15);
+    expect(plan.headerDropIn).toBeGreaterThan(0);
+  });
 
   it('puts up the 30 x 7 arch as planned, as a rig Auto truss replaces again without asking', () => {
     const { plan, got } = same(arch());

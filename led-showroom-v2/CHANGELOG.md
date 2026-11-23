@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Header toggle: cheapest or hide couplers
+
+The Truss section has a Header switch for Auto truss: Cheapest, as before, or Hide couplers.
+Hide couplers puts no header coupler in a lintel's lowest holes, where it shows under the lintel,
+whatever that costs. Flipping it plans a wall's Auto truss rig again in the new mode, and one undo
+takes it back. On the 30 x 7 arch, each leg becomes a 5 ft under five blocks. The header couples to
+the upper lintel row's low holes, the wall sits on the plates with no shim, and the parts to buy are
+nine blocks and the couplers past ours, $6,485.40. Cheapest keeps the bottom row at $1,221 in
+sticks.
+
+A header chord may now sit up to 0.16 in under the holes it couples to, with the coupler taking
+up the gap; before, it could only sit level or below a quarter-inch shim. A leg may stack up to
+four spare blocks in Hide couplers, and the plan warns to have that stack checked. The lintel's
+top row of holes can't be reached hidden: the nearest leg, 9 ft under three blocks, would stand
+8.82 in above the 7-row wall.
+
 ### The 2 ft DT-GP2, a stick to buy
 
 The catalog has the DT-GP2 2 ft stick in black (Global Truss GP0222), with none owned and priced

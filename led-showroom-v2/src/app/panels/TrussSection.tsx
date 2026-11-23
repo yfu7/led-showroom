@@ -8,13 +8,14 @@ import { useSyncExternalStore, type MouseEvent } from 'react';
 import { Check, Construction, Hammer, MoveHorizontal } from 'lucide-react';
 import { useEngine, useStore } from '@/app/store';
 import { Button } from '@/app/components/Button';
+import { Segmented } from '@/app/components/Segmented';
 import { Section } from '@/app/components/Section';
 import { GodOnly, Raw } from '@/app/shell/GodMode';
 import type { LedWallEntity } from '@/engine/document/types';
 import { pieceName, stockLeft } from '@/engine/ledwall/trussBuilder';
-import { usd } from '@/engine/ledwall/trussRig';
+import { usd, type HeaderMode } from '@/engine/ledwall/trussRig';
 import { EMPTY_TRUSS_STATE, type TrussBuildTool } from '@/engine/tools/TrussBuildTool';
-import { autoTruss, autoTrussLabel, autoTrussReport } from '@/app/panels/trussActions';
+import { autoTruss, autoTrussHeader, autoTrussLabel, autoTrussReport, setAutoTrussHeader } from '@/app/panels/trussActions';
 
 interface Props { wall: LedWallEntity }
 
@@ -26,11 +27,29 @@ const f3 = (v: number): string => v.toFixed(3);
 const xyz = (v: readonly number[]): string => v.map(f3).join(', ');
 const AUTO_TIP = 'Plan the whole rig from the DT-GP stock and put it up piece by piece, to go on with by hand';
 
+const HEADER_OPTIONS = [
+  { value: 'cheapest' as const, label: 'Cheapest', title: 'The header on the holes that cost least to reach: its couplers may show under a lintel' },
+  { value: 'hide' as const, label: 'Hide couplers', title: 'The header on holes a lintel hides, whatever the legs cost: more spare blocks, to buy if need be' },
+];
+
+/** Which header Auto truss plans, for every wall; flipping it plans a wall's Auto truss rig again. */
+function HeaderToggle({ wall }: Props) {
+  const engine = useEngine();
+  const mode = useSyncExternalStore(autoTrussHeader.subscribe, autoTrussHeader.get);
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+      <span className="muted" style={{ fontSize: 11 }}>Header</span>
+      <Segmented<HeaderMode> block value={mode} options={HEADER_OPTIONS} onChange={m => setAutoTrussHeader(engine, wall, m)} />
+    </div>
+  );
+}
+
 export function TrussSection({ wall }: Props) {
   const engine = useEngine();
   const tool = useStore(s => s.tool);
   return (
     <Section title="Truss" id="wall-truss">
+      {tool !== 'truss' && <HeaderToggle wall={wall} />}
       {tool === 'truss' ? <TrussBuilder wall={wall} /> : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
           <Button block size="sm" icon={<Construction size={14} strokeWidth={1.5} />} tip={AUTO_TIP} onClick={() => autoTruss(engine, wall)}>
@@ -54,6 +73,7 @@ function AutoTrussRaw({ wall }: Props) {
   if (r.fail) return <Raw label="auto truss" value={`failed in ${r.ms.toFixed(0)} ms: ${r.fail}`} />;
   return <>
     <Raw label="auto legs / spans / clamps" value={`plan ${r.planned.join(' / ')} → up ${r.built.join(' / ')} (${r.ms.toFixed(0)} ms)`} />
+    <Raw label="header mode / drop" value={`${r.header} / ${f3(r.drop)} in under its holes`} />
     <Raw label="auto shim / held / supported" value={`plan ${f3(r.shim[0])} / ${r.held[0]} / ${r.supported[0]} → up ${f3(r.shim[1])} / ${r.held[1]} / ${r.supported[1]} of ${r.columns}`} />
     <Raw label="auto buy $" value={`plan ${usd(r.buy[0])} → up ${usd(r.buy[1])}${r.saved > 0 ? ` (unheld columns save ${usd(r.saved)})` : ''}`} />
     <Raw label="auto F-filled / kept / refused" value={`${r.filled} / ${r.kept} / ${r.refused.length}`} />
