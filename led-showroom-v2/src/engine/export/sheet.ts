@@ -1,5 +1,5 @@
 /**
- * Drawing-sheet layout: the pure maths behind "Generate render".
+ * Drawing-sheet layout: the pure maths behind "Generate CAD".
  *
  * A drawing is not four screenshots. Three things make it read as one:
  *

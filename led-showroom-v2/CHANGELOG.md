@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Generate render: a 3D viewer anyone can open; the drawing sheet is now Generate CAD
+
+Generate render now saves one .html file. It opens in any browser, offline, with nothing to install,
+so it can be emailed. It is view only:
+
+- **Orbit** round the build: drag, scroll or pinch to zoom, right-drag to pan.
+- **Walk** the floor at eye height (66 in). On a computer, click to look with the mouse and walk with
+  W A S D or the arrows (Shift hurries, F switches mode). On a phone, use the thumb stick and drag to look.
+- **Stands**: Overview, Front, Top and one square on to each wall (walls that share a name are
+  numbered), plus Reset back to where the page opened. Each stand fits the window it is opened in.
+
+The room carries over: lighting, floor, shadows and the backdrop. A staged venue photo is embedded;
+if its host will not hand it over, the toast says so and the plain backdrop is used. Each wall shows
+the frame it is showing at export. Live websites and venue scans stay in the app, and the toast says
+when the scene had any.
+
+A PIN-gated diagnostics panel in the page shows fps, draw calls, triangles, the camera, the GLB size
+and load time. It shows nothing private, since the file travels.
+
+The drawing sheet (line art, third-angle views, dimensions, title block) is unchanged and now sits
+under its own entry, **Generate CAD**, in the Export panel and the File menu.
+
+Under the hood, the page's script (three.js inside, about 640 KB) is built on its own by a Vite
+plugin and loads only when a viewer is saved. It travels in the page as base64 and runs from there,
+since minified three can hold text that would end a plain script element early.
+
 ### Header toggle: cheapest or hide couplers
 
 The Truss section has a Header switch for Auto truss: Cheapest, as before, or Hide couplers.

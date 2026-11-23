@@ -26,6 +26,7 @@ import { generateDrawing, type DrawingStats } from '@/engine/export/drawing';
 import { buildLineArt } from '@/engine/export/lineArt';
 import { PAPERS, VIEW_LABELS, sheetLayout, type Extents, type PaperId, type ViewKey } from '@/engine/export/sheet';
 import { downloadBlob } from '@/engine/export/composite';
+import { exportViewer, type ViewerExportResult } from '@/engine/export/viewer';
 import { Raw } from '@/app/shell/GodMode';
 
 /* ───────── dialog frame ───────── */
@@ -294,7 +295,47 @@ export function ExportGltfDialog({ onClose }: { onClose(): void }) {
   );
 }
 
-/* ───────── Generate render (CAD drawing sheet) ───────── */
+/* ───────── Generate render (3D viewer page) ───────── */
+
+/**
+ * One .html file anyone can open and walk round, read only: the scene as it stands, each wall on
+ * the frame it is showing now.
+ */
+export function GenerateViewerDialog({ onClose }: { onClose(): void }) {
+  const engine = useEngine();
+  const count = useStore(s => s.doc?.entities.length ?? 0);
+  const god = useStore(s => s.godMode);
+  const [busy, setBusy] = useState(false);
+  const [stats, setStats] = useState<ViewerExportResult | null>(null);
+
+  const run = async () => {
+    setBusy(true);
+    try {
+      const r = await exportViewer(engine);
+      setStats(r);
+      engine.toast(r.warnings.length ? 'info' : 'success', [`Viewer saved as ${r.filename}`, ...r.warnings].join(' - '));
+      if (!god) onClose();
+    } catch (err) {
+      engine.toast('error', `Generate render failed: ${(err as Error).message}`);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog title="Generate render" onClose={onClose} footer={<>
+      <Button variant="ghost" onClick={onClose}>Cancel</Button>
+      <Button variant="primary" onClick={run} disabled={busy}>{busy ? 'Packing…' : 'Save viewer (.html)'}</Button>
+    </>}>
+      <div className="hint">
+        {count === 0
+          ? 'The scene is empty: the viewer will show the bare floor.'
+          : 'One .html file that opens in any browser, offline, with nothing to install: orbit round the build, walk the floor at eye height, or jump to each wall. View only. Each wall shows the frame it is showing now; live websites and venue scans stay in the app.'}
+      </div>
+      <ViewerDiagnostics stats={stats} />
+    </Dialog>
+  );
+}
+
+/* ───────── Generate CAD (drawing sheet) ───────── */
 
 type Sheet = 'quad' | 'single';
 const SINGLE_VIEWS: ViewKey[] = ['front', 'top', 'right', 'iso'];
@@ -329,12 +370,12 @@ export function GenerateDrawingDialog({ onClose }: { onClose(): void }) {
       else engine.toast('success', `Drawing saved at 1 : ${r.layout.scaleDenom}`);
       if (!god) onClose();
     } catch (err) {
-      engine.toast('error', `Generate render failed: ${(err as Error).message}`);
+      engine.toast('error', `Generate CAD failed: ${(err as Error).message}`);
     } finally { setBusy(false); }
   };
 
   return (
-    <Dialog title="Generate render" onClose={onClose} footer={<>
+    <Dialog title="Generate CAD" onClose={onClose} footer={<>
       <Button variant="ghost" onClick={onClose}>Cancel</Button>
       <Button variant="primary" onClick={run} disabled={busy}>{busy ? 'Drawing…' : 'Generate PNG'}</Button>
     </>}>
@@ -363,6 +404,27 @@ export function GenerateDrawingDialog({ onClose }: { onClose(): void }) {
       </div>
       <DrawingDiagnostics paper={paper} dpi={Number(dpi)} sheet={sheet} view={view} stats={stats} />
     </Dialog>
+  );
+}
+
+/** Admin view only: what the last viewer export carried and what it cost. */
+function ViewerDiagnostics({ stats }: { stats: ViewerExportResult | null }) {
+  const god = useStore(s => s.godMode);
+  if (!god) return null;
+  const kb = (n: number) => `${Math.round(n / 1024).toLocaleString()} KB`;
+  return (
+    <Section title="Diagnostics">
+      {stats
+        ? <>
+            <Raw label="file" value={stats.filename} />
+            <Raw label="html / glb / runtime" value={`${kb(stats.htmlBytes)} / ${kb(stats.glbBytes)} / ${kb(stats.runtimeBytes)}`} />
+            <Raw label="presets" value={stats.presets.join(', ')} />
+            <Raw label="venue photo" value={stats.photo ? 'embedded' : 'none'} />
+            <Raw label="warnings" value={stats.warnings.length ? stats.warnings.join(' | ') : 'none'} />
+            <Raw label="total ms" value={stats.ms} />
+          </>
+        : <div className="hint">Save once for file sizes, presets and timing.</div>}
+    </Section>
   );
 }
 
