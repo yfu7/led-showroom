@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### A fuller drawing sheet; Record video turns the whole build
+
+The drawing sheet has a schedule column beside the views. It lists each wall under a tag (W1, W2...)
+with its panel and pitch, array and panel count, size and pixels, and weight where the panel spec
+gives one, then a total. Equipment is counted by catalog part, with parts to buy counted apart.
+Notes give the units, how the cabinets hang (from the panel spec's mount holes), that DT-GP and F34
+truss do not connect when both are drawn, and what "to buy" means. The Front and Top views carry the
+wall tags; the Front view chains the walls' edges across its top and marks the height of each wall
+top, and of each wall bottom off the floor. The Top view has a FRONT arrow, the title strip a sheet
+number and paper size, and the border zone references (1, 2... across, A, B... down).
+
+Record video now opens on a 30 s turntable. It frames the whole build, whatever is selected and
+leaving out the room, so the build fills most of the frame at the widest point of the turn. The
+take is full frame, so the turn is never cropped to the first angle. An orthographic view switches
+to perspective for the take.
+
 ### Auto truss buys as little as it can
 
 Auto truss now picks the rig that costs least to buy. Pieces we own cost nothing; the rest are

@@ -416,6 +416,20 @@ export class Engine extends Emitter<EngineEvents> implements DocHost {
   boundsOf(ids?: Iterable<string>): THREE.Box3 { return this.scene.bounds(ids); }
   /** Automatic framing replaces a hand-set viewpoint, so the user-view guard is cleared (v1: reset clears it). */
   frameAll(animate = true): void { this.clearUserView(); this.camera.frame(this.scene.bounds(), animate); this.env.fitShadows(this.scene.bounds()); }
+  /**
+   * The build: walls, stages, equipment and models. Not the room, a splat or a dimension, which
+   * would otherwise set the size of a "frame the build" and leave the build small in it. Everything
+   * visible when there is no build.
+   */
+  buildBounds(): THREE.Box3 {
+    const ids = this.doc.entities
+      .filter(e => e.type === 'led-wall' || e.type === 'stage' || e.type === 'equipment' || e.type === 'model')
+      .map(e => e.id);
+    const b = ids.length ? this.scene.bounds(ids) : new THREE.Box3();
+    return b.isEmpty() ? this.scene.bounds() : b;
+  }
+  /** Stand the camera for a turntable of the whole build, filling most of the frame through the turn. */
+  frameTurntable(): void { this.camera.frameTurntable(this.buildBounds()); }
   frameSelection(animate = true): void { if (this.selection.length) this.camera.frame(this.scene.bounds(this.selection), animate); else this.frameAll(animate); }
   focusSelection(): void { if (this.selection.length) this.camera.focus(this.scene.bounds(this.selection)); }
   setView(preset: ViewPreset): void {

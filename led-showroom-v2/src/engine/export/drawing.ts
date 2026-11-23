@@ -28,10 +28,11 @@ import type { Document } from '../document/types';
 import { formatArea, formatDims, formatLength, type Unit } from '../units';
 import { filledCount, wallDims } from '../ledwall/layout';
 import { buildLineArt } from './lineArt';
+import { chainEdges, levels, sheetSchedule, wallTags, zoneCounts, type ScheduleSection } from './sheetDetail';
 import { canvasToBlob, downloadBlob, timestampName } from './composite';
 import {
-  PAPERS, scaleBar, sheetLayout,
-  type Extents, type PaperId, type SheetLayout, type ViewKey, type Viewport,
+  PAPERS, scaleBar, sheetLayout, viewOf,
+  type Extents, type PaperId, type Rect, type SheetLayout, type ViewKey, type Viewport,
 } from './sheet';
 
 export interface DrawingOptions {
@@ -127,6 +128,7 @@ export function titleFields(
     { label: 'OVERALL  W × H × D', value: opts.empty ? '—' : formatDims([extents.w, extents.h, extents.d], unit), weight: 2 },
     { label: 'LED', value: panels ? `${panels} panels  ·  ${formatArea(areaSqIn, unit)}` : '—', weight: 1.6 },
     { label: 'RESOLUTION', value: res, weight: 1.5 },
+    { label: 'SHEET', value: opts.paper ? `1 of 1  ·  ${opts.paper}` : '1 of 1', weight: 1.5 },
     { label: 'SCALE', value: opts.empty ? '—' : opts.toScale ? `1 : ${opts.scaleDenom}` : 'NTS', weight: 1.2 },
   ];
 }
@@ -248,6 +250,7 @@ function dimension(
 
   ctx.font = font(0.1 * dpi, 600);
   ctx.textAlign = 'center';
+  if (!text) { ctx.restore(); return; }
   if (axis === 'h') {
     ctx.textBaseline = 'bottom';
     const m = ctx.measureText(text).width;
@@ -275,6 +278,199 @@ function viewDims(extents: Extents, key: ViewKey): { across: number; down: numbe
     case 'top': return { across: extents.w, down: extents.d };
     case 'right': return { across: extents.d, down: extents.h };
     case 'iso': return null;
+  }
+}
+
+/** `text` broken into lines no wider than `maxW` at the current font; a word too long for a line stands alone. */
+function wrap(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
+  const out: string[] = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    const next = line ? `${line} ${word}` : word;
+    if (line && ctx.measureText(next).width > maxW) { out.push(line); line = word; } else line = next;
+  }
+  if (line) out.push(line);
+  return out;
+}
+
+/**
+ * The schedule column: a black band for each section's title and its rows under it, wrapped to the
+ * column. The type shrinks to fit, down to a floor; past that the rows that do not fit are counted.
+ */
+function drawSchedule(ctx: CanvasRenderingContext2D, r: Rect, sections: ScheduleSection[], dpi: number): void {
+  strokeRect(ctx, r, Math.max(1, 0.008 * dpi));
+  const padX = 0.1 * dpi, indent = 0.14 * dpi, bottom = r.y + r.h - 0.08 * dpi;
+  const lay = (size: number) => {
+    ctx.font = font(size, 500);
+    return sections.map(s => s.rows.map(row => wrap(ctx, row.text, r.w - padX * 2 - (row.indent ? indent : 0))));
+  };
+  let size = 0.1 * dpi;
+  let wrapped = lay(size);
+  const height = (sz: number, w: string[][][]) =>
+    w.reduce((h, rows) => h + sz * 2.1 + rows.reduce((n, lines) => n + lines.length, 0) * sz * 1.32, 0) + 0.08 * dpi;
+  while (size > 0.058 * dpi && height(size, wrapped) > r.h) { size -= 0.004 * dpi; wrapped = lay(size); }
+  const lineH = size * 1.32, headH = size * 1.55;
+
+  ctx.save();
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  let y = r.y + 0.08 * dpi;
+  let cut = 0;
+  sections.forEach((s, si) => {
+    if (cut || y + headH + lineH > bottom) { cut += s.rows.length; return; }
+    ctx.fillStyle = INK;
+    ctx.fillRect(r.x + 0.04 * dpi, y, r.w - 0.08 * dpi, headH);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = font(size * 0.95, 700);
+    ctx.fillText(s.title, r.x + padX, y + headH / 2);
+    y += headH + size * 0.35;
+    s.rows.forEach((row, ri) => {
+      const lines = wrapped[si][ri];
+      if (cut || y + lines.length * lineH > bottom - lineH) { cut++; return; }
+      ctx.fillStyle = row.strong ? INK : '#333333';
+      ctx.font = font(size, row.strong ? 700 : 500);
+      for (const l of lines) { ctx.fillText(l, r.x + padX + (row.indent ? indent : 0), y + lineH / 2); y += lineH; }
+    });
+    y += size * 0.2;
+  });
+  if (cut) {
+    ctx.fillStyle = '#b00020';
+    ctx.font = font(size, 600);
+    ctx.fillText(`... ${cut} more not shown`, r.x + padX, bottom - lineH / 2);
+  }
+  ctx.restore();
+}
+
+/** Zone references round the border: numbers along the top and bottom, letters down the sides. */
+function drawZones(ctx: CanvasRenderingContext2D, layout: SheetLayout): void {
+  const { border: b, dpi } = layout;
+  const { cols, rows } = zoneCounts(b.w / dpi, b.h / dpi);
+  const m = b.x;                                    // the paper margin, which the zones sit in
+  const tick = Math.min(m * 0.5, 0.12 * dpi);
+  ctx.save();
+  ctx.strokeStyle = INK; ctx.fillStyle = INK;
+  ctx.lineWidth = Math.max(1, 0.008 * dpi);
+  ctx.font = font(Math.min(0.08 * dpi, m * 0.4), 600);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.beginPath();
+  for (let c = 1; c < cols; c++) {
+    const x = b.x + (b.w * c) / cols;
+    ctx.moveTo(x, b.y); ctx.lineTo(x, b.y - tick);
+    ctx.moveTo(x, b.y + b.h); ctx.lineTo(x, b.y + b.h + tick);
+  }
+  for (let r = 1; r < rows; r++) {
+    const y = b.y + (b.h * r) / rows;
+    ctx.moveTo(b.x, y); ctx.lineTo(b.x - tick, y);
+    ctx.moveTo(b.x + b.w, y); ctx.lineTo(b.x + b.w + tick, y);
+  }
+  ctx.stroke();
+  for (let c = 0; c < cols; c++) {
+    const x = b.x + (b.w * (c + 0.5)) / cols;
+    ctx.fillText(String(c + 1), x, b.y - m / 2);
+    ctx.fillText(String(c + 1), x, b.y + b.h + m / 2);
+  }
+  for (let r = 0; r < rows; r++) {
+    const y = b.y + (b.h * (r + 0.5)) / rows;
+    const letter = String.fromCharCode(65 + (r % 26));
+    ctx.fillText(letter, b.x - m / 2, y);
+    ctx.fillText(letter, b.x + b.w + m / 2, y);
+  }
+  ctx.restore();
+}
+
+/** A tag balloon: the wall's tag in a circle, nudged down off any tag already placed. */
+function balloon(ctx: CanvasRenderingContext2D, x: number, y: number, tag: string, dpi: number, placed: { x: number; y: number }[]): void {
+  const r = 0.085 * dpi;
+  while (placed.some(p => Math.hypot(p.x - x, p.y - y) < r * 2.2)) y += r * 2.4;
+  placed.push({ x, y });
+  ctx.save();
+  ctx.fillStyle = '#ffffff'; ctx.strokeStyle = INK;
+  ctx.lineWidth = Math.max(1, 0.01 * dpi);
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = INK;
+  ctx.font = font(r * 0.95, 700);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(tag, x, y + r * 0.05);
+  ctx.restore();
+}
+
+/** A level mark: a short line at height `y` ending at `x`, a datum triangle on it, the height to its left. */
+function levelMark(ctx: CanvasRenderingContext2D, x: number, y: number, text: string, dpi: number, minX: number): void {
+  const len = 0.2 * dpi, t = 0.045 * dpi;
+  ctx.save();
+  ctx.strokeStyle = INK; ctx.fillStyle = INK;
+  ctx.lineWidth = Math.max(1, 0.007 * dpi);
+  ctx.beginPath(); ctx.moveTo(x - len, y); ctx.lineTo(x, y); ctx.stroke();
+  const tx = x - len * 0.45;
+  ctx.beginPath(); ctx.moveTo(tx, y); ctx.lineTo(tx - t * 0.7, y - t); ctx.lineTo(tx + t * 0.7, y - t); ctx.closePath(); ctx.fill();
+  ctx.font = font(0.075 * dpi, 600);
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  const w = ctx.measureText(text).width;
+  const right = Math.max(minX + w + 3, x - len - 0.03 * dpi);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(right - w - 2, y - 0.05 * dpi, w + 4, 0.1 * dpi);
+  ctx.fillStyle = INK;
+  ctx.fillText(text, right, y);
+  ctx.restore();
+}
+
+/**
+ * Each wall on the to-scale views: its tag on the Front and Top views, a chain of its edges across
+ * the top of the Front view where there is more than the overall width to say, and the heights of
+ * its top and (off the floor) bottom. A flat projection: sheet px = cell centre + (world - bounds
+ * centre) x pxPerIn, y flipped on the Front view, +Z down the page on the Top view.
+ */
+function drawWallDetail(
+  ctx: CanvasRenderingContext2D, layout: SheetLayout, bounds: THREE.Box3, unit: Unit,
+  walls: { tag: string; b: THREE.Box3 }[],
+): void {
+  const dpi = layout.dpi, k = layout.pxPerIn;
+  const c = bounds.getCenter(new THREE.Vector3());
+  const front = viewOf(layout, 'front'), top = viewOf(layout, 'top');
+  if (front?.toScale && walls.length) {
+    const fx = (x: number) => front.cx + (x - c.x) * k;
+    const fy = (y: number) => front.cy - (y - c.y) * k;
+    const edges = chainEdges(walls.map(w => [w.b.min.x, w.b.max.x] as const));
+    const says = edges.length > 2 || Math.abs(edges[0] - bounds.min.x) > 0.5 || Math.abs(edges[edges.length - 1] - bounds.max.x) > 0.5;
+    if (says) {
+      const at = Math.max(front.y + 0.16 * dpi, fy(bounds.max.y) - 0.2 * dpi);
+      ctx.font = font(0.1 * dpi, 600);
+      for (let i = 0; i + 1 < edges.length; i++) {
+        const a = fx(edges[i]), b = fx(edges[i + 1]);
+        const text = formatLength(edges[i + 1] - edges[i], unit);
+        ctx.font = font(0.1 * dpi, 600);
+        dimension(ctx, 'h', a, b, at, ctx.measureText(text).width + 8 < b - a ? text : '', dpi);
+      }
+    }
+    // The floor is y = 0: a wall standing on it has no bottom height worth printing.
+    for (const y of levels(walls.flatMap(w => [w.b.min.y, w.b.max.y]).filter(y => y > 0.5))) {
+      levelMark(ctx, fx(bounds.min.x) - 0.05 * dpi, fy(y), `+${formatLength(y, unit)}`, dpi, front.x + 0.06 * dpi);
+    }
+    const placed: { x: number; y: number }[] = [];
+    for (const w of walls) {
+      const m = w.b.getCenter(new THREE.Vector3());
+      balloon(ctx, fx(m.x), fy(m.y), w.tag, dpi, placed);
+    }
+  }
+  if (top?.toScale) {
+    if (walls.length) {
+      const placed: { x: number; y: number }[] = [];
+      for (const w of walls) {
+        const m = w.b.getCenter(new THREE.Vector3());
+        balloon(ctx, top.cx + (m.x - c.x) * k, top.cy + (m.z - c.z) * k, w.tag, dpi, placed);
+      }
+    }
+    // Which way the build faces: +Z, down the page on the Top view.
+    const x0 = top.x + 0.2 * dpi, y1 = top.y + top.h - 0.12 * dpi, y0 = y1 - 0.22 * dpi;
+    ctx.save();
+    ctx.strokeStyle = INK; ctx.fillStyle = INK;
+    ctx.lineWidth = Math.max(1, 0.01 * dpi);
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0, y1 - 0.06 * dpi); ctx.stroke();
+    arrow(ctx, x0, y1, 0, 1, 0.07 * dpi);
+    ctx.font = font(0.08 * dpi, 700);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText('FRONT', x0 + 0.07 * dpi, (y0 + y1) / 2);
+    ctx.restore();
   }
 }
 
@@ -401,6 +597,18 @@ export async function generateDrawing(engine: Engine, opts: DrawingOptions = {})
       ctx.fillText(tag, v.x + v.w / 2, v.y + v.h - 0.07 * dpi);
     }
 
+    // Walls: tags, a chain of their edges, their heights. Then the schedule the tags point into,
+    // and the zone references round the border.
+    const tags = wallTags(engine.doc);
+    if (!empty) {
+      const walls = tags.map(t => ({ tag: t.tag, b: engine.boundsOf([t.wall.id]) })).filter(w => !w.b.isEmpty());
+      drawWallDetail(ctx, layout, art.bounds, unit, walls);
+    }
+    if (layout.schedule) {
+      drawSchedule(ctx, layout.schedule, sheetSchedule(engine.doc, unit, { isoNts: layout.views.some(v => v.key === 'iso') }), dpi);
+    }
+    drawZones(ctx, layout);
+
     // Projection note, top-right of the drawing area.
     ctx.fillStyle = INK_LIGHT;
     ctx.font = font(0.08 * dpi, 600);
@@ -408,7 +616,7 @@ export async function generateDrawing(engine: Engine, opts: DrawingOptions = {})
     ctx.textBaseline = 'top';
     ctx.fillText(
       layout.views.length > 1 ? 'THIRD ANGLE PROJECTION' : 'ORTHOGRAPHIC PROJECTION',
-      layout.border.x + layout.border.w - 0.12 * dpi, layout.border.y + 0.08 * dpi,
+      layout.drawingArea.x + layout.drawingArea.w - 0.12 * dpi, layout.border.y + 0.08 * dpi,
     );
     if (layout.overflow) {
       ctx.fillStyle = '#b00020';

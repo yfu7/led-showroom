@@ -55,6 +55,21 @@ describe('sheetLayout', () => {
     }
   });
 
+  it('keeps a schedule column right of the views, clear of them and of the title block', () => {
+    for (const paper of Object.keys(PAPERS) as (keyof typeof PAPERS)[]) {
+      const l = sheetLayout(WALL, { paper });
+      const s = l.schedule!;
+      expect(s.x + s.w).toBe(l.border.x + l.border.w);
+      expect(overlaps(s, l.titleBlock)).toBe(false);
+      for (const v of l.views) expect(overlaps(v, s)).toBe(false);
+      expect(s.w).toBeGreaterThanOrEqual(2.4 * l.dpi - 1);
+      expect(s.w).toBeLessThanOrEqual(3.4 * l.dpi + 1);
+    }
+    const bare = sheetLayout(WALL, { schedule: false });
+    expect(bare.schedule).toBeNull();
+    expect(bare.drawingArea.w).toBe(bare.border.w);
+  });
+
   it('fills the sheet with one view when asked for a 1-up', () => {
     const l = sheetLayout(WALL, { views: 'front' });
     expect(l.views.map(v => v.key)).toEqual(['front']);

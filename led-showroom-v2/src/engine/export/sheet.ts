@@ -78,6 +78,8 @@ export interface SheetLayout {
   titleBlock: Rect;
   /** The area the views are laid out in. */
   drawingArea: Rect;
+  /** The schedule column right of the views (walls, equipment, notes); null when left off. */
+  schedule: Rect | null;
   views: Viewport[];
   /** Height of the label strip reserved at the bottom of every cell. */
   labelH: number;
@@ -101,6 +103,8 @@ export interface SheetOptions {
   marginIn?: number;
   /** Clear space kept around a view inside its cell, inches. */
   padIn?: number;
+  /** A schedule column right of the views. Default true. */
+  schedule?: boolean;
 }
 
 /** Fraction of a cell a view may occupy before the next coarser scale is tried. */
@@ -156,7 +160,12 @@ export function sheetLayout(extents: Extents, opts: SheetOptions = {}): SheetLay
   const stripH = Math.round(Math.min(0.92, paper.hIn * 0.12) * dpi);
   const titleBlock = rect(border.x, border.y + border.h - stripH, border.w, stripH);
   const gap = Math.round(0.12 * dpi);
-  const drawingArea = rect(border.x, border.y, border.w, border.h - stripH - gap);
+  // The schedule takes a column at the right, about a fifth of the border: wide enough for a
+  // wall's panel, array and size on a line each, narrow enough to leave the views most of the paper.
+  const areaH = border.h - stripH - gap;
+  const schedW = opts.schedule === false ? 0 : Math.round(Math.min(3.4 * dpi, Math.max(2.4 * dpi, border.w * 0.22)));
+  const schedule = schedW ? rect(border.x + border.w - schedW, border.y, schedW, areaH) : null;
+  const drawingArea = rect(border.x, border.y, border.w - (schedW ? schedW + gap : 0), areaH);
 
   const single = opts.views && opts.views !== 'quad' ? (opts.views as ViewKey) : null;
   const keys: ViewKey[] = single ? [single] : ['top', 'iso', 'front', 'right'];
@@ -200,7 +209,7 @@ export function sheetLayout(extents: Extents, opts: SheetOptions = {}): SheetLay
     };
   });
 
-  return { paper, dpi, wPx, hPx, border, titleBlock, drawingArea, views, labelH, scaleDenom, pxPerIn, overflow };
+  return { paper, dpi, wPx, hPx, border, titleBlock, drawingArea, schedule, views, labelH, scaleDenom, pxPerIn, overflow };
 }
 
 /** Look a view up by key. */

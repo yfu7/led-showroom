@@ -130,10 +130,10 @@ type Phase = 'setup' | 'recording' | 'saving';
 
 export function RecordVideoDialog({ onClose }: { onClose(): void }) {
   const engine = useEngine();
-  const [duration, setDuration] = useState<Duration>('10');
+  const [duration, setDuration] = useState<Duration>('30');
   const [fps, setFps] = useState<Fps>('30');
   const [recScale, setRecScale] = useState<RecScale>('1');
-  const [turntable, setTurntable] = useState(false);
+  const [turntable, setTurntable] = useState(true);
   const [crop, setCrop] = useState<Crop>('auto');
   const [live, setLive] = useState(engine.settings.liveWebsiteInRecordings);
   /** undefined while probing; the MP4 codec's label, or null for WebM. */
@@ -212,10 +212,10 @@ export function RecordVideoDialog({ onClose }: { onClose(): void }) {
       <Prop label="Resolution" title="Supersample the take relative to the viewport">
         <Segmented<RecScale> value={recScale} onChange={setRecScale} options={[{ value: '1', label: '1×' }, { value: '1.5', label: '1.5×' }, { value: '2', label: '2×' }]} />
       </Prop>
-      <Prop label="Crop">
+      {!turntable && <Prop label="Crop">
         <Segmented<Crop> value={crop} onChange={setCrop} options={[{ value: 'auto', label: 'Auto' }, { value: 'none', label: 'Full frame' }]} />
-      </Prop>
-      <ToggleRow label="Turntable" checked={turntable} onChange={setTurntable} hint={`Frame the build and orbit it slowly, one turn per ${TURNTABLE_TURN_SEC} s — Manual records a full 360° (frames the selection instead, if there is one)`} />
+      </Prop>}
+      <ToggleRow label="Turntable" checked={turntable} onChange={setTurntable} hint={`Frame the whole build to fill the screen and orbit it, one turn per ${TURNTABLE_TURN_SEC} s, full frame — Manual records a full 360°`} />
       <ToggleRow label="Live websites" checked={live} onChange={setLive} hint="Re-rasterise website content each frame (slower; best on a discrete GPU)" />
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <span className="hint">Container</span>

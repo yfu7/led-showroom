@@ -41,7 +41,10 @@ export interface RecordVideoOptions {
   bitrate?: number;        // default 8e6
   /** Frame size relative to the viewport CSS size. Default 1 (the live canvas at device pixel ratio). */
   scale?: number;
-  /** Orbit the camera around its target during the take (one full turn per `durationSec`, default 12 s). */
+  /**
+   * Frame the whole build and orbit it: one full turn per `durationSec`, never quicker than one per
+   * `TURNTABLE_TURN_SEC`. The take is full frame: the build fills most of it through the turn.
+   */
   turntable?: boolean;
   crop?: 'auto' | 'none';
   /** Re-rasterise website iframes during the take (expensive; default off). */
@@ -308,9 +311,13 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
     const [p, rasters] = await Promise.all([loadBackdropPhoto(photoUrl), rasterizeIframes(engine)]);
     photo = p;
 
+    // A turntable is framed before the crop is: the frame is what the take is of. It keeps the full
+    // frame, since a crop fitted to the build at the first angle would clip it at the others.
+    if (opts.turntable) engine.frameTurntable();
+
     // Crop locked for the whole take so the encoder size is constant (v1: no crop when a venue photo is staged).
     let r: Rect = { x: 0, y: 0, w: fullW, h: fullH };
-    if ((opts.crop ?? 'auto') === 'auto' && !photoUrl) {
+    if ((opts.crop ?? 'auto') === 'auto' && !photoUrl && !opts.turntable) {
       const padScale = fullW / Math.max(1, renderer.width);
       r = autoCropRect(entityScreenBBox(engine, undefined, { w: fullW, h: fullH }), fullW, fullH, Math.round(40 * padScale));
     }
@@ -369,19 +376,12 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
     engine.selectionHelper.group.visible = false;
     if (opts.turntable) {
       /*
-       * Frame first, so the turn is around the BUILD.
-       *
-       * OrbitControls spins about `controls.target`, and that is left wherever the last pan, focus
-       * or double-click put it. A turntable from there sweeps the room while the build drifts
-       * across the frame, or out of it. Framing puts the target on the build and the camera at a
-       * distance that fits it, which is what "a 360 of the build" means.
-       *
-       * With something selected it frames THAT instead (frameSelection falls back to everything
-       * when nothing is selected) - a turn around one wall rather than the whole floor. The camera
-       * is left where the take put it rather than restored: that is the view the video is of, and
-       * it is the same state the Frame control gives, so there is nothing surprising to undo.
+       * Framed above, before the crop, so the turn is around the BUILD: OrbitControls spins about
+       * `controls.target`, which is otherwise wherever the last pan, focus or double-click left it.
+       * The whole build, whatever is selected, at a distance where it fills most of the frame at
+       * the widest point of the turn. The camera is left where the take put it rather than
+       * restored: that is the view the video is of.
        */
-      engine.frameSelection(false);
       controls.autoRotate = true;
       controls.autoRotateSpeed = 60 / Math.max(1, turnSec); // OrbitControls: one turn per 60/speed s
     }

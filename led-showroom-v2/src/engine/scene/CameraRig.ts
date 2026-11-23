@@ -10,6 +10,7 @@ import { Emitter } from '../events';
 import { clamp, type Vec3 } from '../math';
 import type { ViewState } from '../document/types';
 import { CONTEXT_DRAG_PX } from '../tools/Tool';
+import { turntableFit } from './turntable';
 
 export type ViewPreset = 'home' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'iso' | 'three-quarter' | 'eye-level';
 export type Projection = 'perspective' | 'orthographic';
@@ -242,6 +243,20 @@ export class CameraRig extends Emitter<CameraRigEvents> {
       this.ortho.zoom = 1;
       this.updateOrthoFrustum();
     }
+  }
+
+  /**
+   * Stand for a turntable around `bounds`: the build fills most of the frame at the widest point of
+   * the turn (see `turntableFit`). A turntable is a perspective shot, so an orthographic view
+   * switches to perspective first.
+   */
+  frameTurntable(bounds: THREE.Box3): void {
+    if (bounds.isEmpty()) return;
+    if (this.projection === 'orthographic') this.setProjection('perspective');
+    const dir = new THREE.Vector3().subVectors(this.camera.position, this.controls.target);
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0.35, 1);
+    const fit = turntableFit(bounds, dir.normalize(), this.persp.fov, this.aspect);
+    this.moveTo(fit.position, fit.target, false);
   }
 
   /** Re-target on `bounds` centre without changing distance (F key). */
