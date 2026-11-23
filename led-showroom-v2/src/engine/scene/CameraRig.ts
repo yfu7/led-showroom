@@ -259,6 +259,18 @@ export class CameraRig extends Emitter<CameraRigEvents> {
     this.moveTo(fit.position, fit.target, false);
   }
 
+  /**
+   * Turn the camera about the vertical through its target, one full turn per `turnSec` of wall
+   * clock: the angle is set from the time, not stepped by the frame's dt, which the render loop
+   * clamps to 0.1 s and would leave a slow take short of a full turn. `null` stops it.
+   */
+  setSpin(turnSec: number | null): void {
+    this.spin = turnSec && turnSec > 0
+      ? { t0: performance.now(), turnSec, offset: this.camera.position.clone().sub(this.controls.target) }
+      : null;
+  }
+  private spin: { t0: number; turnSec: number; offset: THREE.Vector3 } | null = null;
+
   /** Re-target on `bounds` centre without changing distance (F key). */
   focus(bounds: THREE.Box3, animate = true): void {
     if (bounds.isEmpty()) return;
@@ -405,6 +417,13 @@ export class CameraRig extends Emitter<CameraRigEvents> {
   /** Called once per frame. */
   update(dt: number): boolean {
     let changed = false;
+    if (this.spin) {
+      const s = this.spin;
+      const angle = (2 * Math.PI * (performance.now() - s.t0)) / 1000 / s.turnSec;
+      this.camera.position.copy(this.controls.target).add(s.offset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle));
+      this.camera.lookAt(this.controls.target);
+      changed = true;
+    }
     if (this.tween) {
       const tw = this.tween;
       tw.t = Math.min(1, tw.t + dt / tw.dur);

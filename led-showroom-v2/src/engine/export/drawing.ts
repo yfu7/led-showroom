@@ -300,10 +300,11 @@ function wrap(ctx: CanvasRenderingContext2D, text: string, maxW: number): string
 function drawSchedule(ctx: CanvasRenderingContext2D, r: Rect, sections: ScheduleSection[], dpi: number): void {
   strokeRect(ctx, r, Math.max(1, 0.008 * dpi));
   const padX = 0.1 * dpi, indent = 0.14 * dpi, bottom = r.y + r.h - 0.08 * dpi;
-  const lay = (size: number) => {
-    ctx.font = font(size, 500);
-    return sections.map(s => s.rows.map(row => wrap(ctx, row.text, r.w - padX * 2 - (row.indent ? indent : 0))));
-  };
+  // Measured at the weight each row is drawn in: a bold heading is wider than the same text at 500.
+  const lay = (size: number) => sections.map(s => s.rows.map(row => {
+    ctx.font = font(size, row.strong ? 700 : 500);
+    return wrap(ctx, row.text, r.w - padX * 2 - (row.indent ? indent : 0));
+  }));
   let size = 0.1 * dpi;
   let wrapped = lay(size);
   const height = (sz: number, w: string[][][]) =>
@@ -406,11 +407,15 @@ function levelMark(ctx: CanvasRenderingContext2D, x: number, y: number, text: st
   ctx.font = font(0.075 * dpi, 600);
   ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
   const w = ctx.measureText(text).width;
-  const right = Math.max(minX + w + 3, x - len - 0.03 * dpi);
+  // Left of the mark where there is room; otherwise over its line, ending at the mark's end, so the
+  // figure never covers the line and datum it labels nor reaches the model right of them.
+  const roomLeft = x - len - 0.03 * dpi - w >= minX;
+  const right = roomLeft ? x - len - 0.03 * dpi : x;
+  const cy = roomLeft ? y : y - t - 0.05 * dpi;
   ctx.fillStyle = '#ffffff';
-  ctx.fillRect(right - w - 2, y - 0.05 * dpi, w + 4, 0.1 * dpi);
+  ctx.fillRect(right - w - 2, cy - 0.05 * dpi, w + 4, 0.1 * dpi);
   ctx.fillStyle = INK;
-  ctx.fillText(text, right, y);
+  ctx.fillText(text, right, cy);
   ctx.restore();
 }
 

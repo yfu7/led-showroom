@@ -237,6 +237,7 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
     if (overlays) { overlays.dispose(); overlays = null; }
     controls.autoRotate = prevAutoRotate;
     controls.autoRotateSpeed = prevAutoSpeed;
+    engine.camera.setSpin(null);
     engine.selectionHelper.group.visible = prevSelectionVisible;
     engine.invalidate();
   };
@@ -380,10 +381,13 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
        * `controls.target`, which is otherwise wherever the last pan, focus or double-click left it.
        * The whole build, whatever is selected, at a distance where it fills most of the frame at
        * the widest point of the turn. The camera is left where the take put it rather than
-       * restored: that is the view the video is of.
+       * restored: that is the view the video is of. The turn runs on wall clock (`setSpin`), so a
+       * slow take still makes its full turn in its time; OrbitControls' auto-rotate steps by the
+       * render loop's clamped dt and would fall short below 10 fps.
        */
-      controls.autoRotate = true;
-      controls.autoRotateSpeed = 60 / Math.max(1, turnSec); // OrbitControls: one turn per 60/speed s
+      controls.autoRotate = false;
+      engine.camera.setSpin(turnSec);
+      engine.renderNow();   // the first frame is of the framed build, not the view before it
     }
     release = engine.holdContinuous();
     // A viewport resize mid-take is handled by renderFrame (offscreen render at the locked size);
