@@ -1,19 +1,54 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CODEC_CANDIDATES, NOT_SUPPORTED, PROBE_TIMEOUT_MS, pickWorkingCodec, probeEncoder } from './video';
+import {
+  CODEC_CANDIDATES, H264_MAX_AREA, H264_MAX_SIDE, NOT_SUPPORTED, PROBE_TIMEOUT_MS, RECORDER_MIMES,
+  h264Size, pickWorkingCodec, probeEncoder, recorderMime,
+} from './video';
 
-const [H264, VP9] = CODEC_CANDIDATES;
+const H264 = CODEC_CANDIDATES[0];
+const VP9 = CODEC_CANDIDATES.find(c => c.label === 'VP9')!;
 
 describe('picking a codec that records', () => {
+  it('tries H.264 first, at both levels, before VP9', () => {
+    expect(CODEC_CANDIDATES.slice(0, 2).map(c => c.mux)).toEqual(['avc', 'avc']);
+    expect(CODEC_CANDIDATES.indexOf(VP9)).toBe(2);
+  });
+
   it('takes the first that puts a frame in a file, and says why each before it would not', async () => {
-    const got = await pickWorkingCodec(CODEC_CANDIDATES, async cc => (cc === H264 ? 'the encoder returned no frames' : null));
+    const got = await pickWorkingCodec(CODEC_CANDIDATES, async cc => (cc.mux === 'avc' ? 'the encoder returned no frames' : null));
     expect(got.cc).toBe(VP9);
-    expect(got.failed).toEqual(['H.264: the encoder returned no frames']);
+    expect(got.failed).toEqual(['H.264: the encoder returned no frames', 'H.264 (level 5.2): the encoder returned no frames']);
   });
 
   it('counts a probe that throws as one that would not do, and comes to none when none does', async () => {
     const got = await pickWorkingCodec(CODEC_CANDIDATES, async () => { throw new Error('boom'); });
     expect(got.cc).toBeNull();
     expect(got.failed).toEqual(CODEC_CANDIDATES.map(c => `${c.label}: boom`));
+  });
+});
+
+describe('keeping a take an H.264 MP4', () => {
+  it('leaves a frame within H.264 alone', () => {
+    expect(h264Size(1920, 1080)).toEqual({ w: 1920, h: 1080 });
+    expect(h264Size(3840, 2160)).toEqual({ w: 3840, h: 2160 });
+  });
+
+  it('scales a larger frame down to fit, keeping its shape, in even pixels', () => {
+    for (const [w, h] of [[5760, 3240], [7680, 4320], [6000, 1200], [1200, 6000], [4097, 2305]]) {
+      const got = h264Size(w, h);
+      expect(got.w % 2).toBe(0);
+      expect(got.h % 2).toBe(0);
+      expect(Math.max(got.w, got.h)).toBeLessThanOrEqual(H264_MAX_SIDE);
+      expect(got.w * got.h).toBeLessThanOrEqual(H264_MAX_AREA);
+      expect(Math.abs((got.w / got.h) / (w / h) - 1)).toBeLessThan(0.005);   // within the even-pixel rounding
+    }
+  });
+
+  it('records MP4 through MediaRecorder where the browser has it, and WebM only where it does not', () => {
+    expect(RECORDER_MIMES[0].startsWith('video/mp4')).toBe(true);
+    expect(recorderMime(() => true)).toBe(RECORDER_MIMES[0]);
+    expect(recorderMime(m => m === 'video/mp4')).toBe('video/mp4');
+    expect(recorderMime(m => m.startsWith('video/webm'))).toBe('video/webm;codecs=vp9');
+    expect(recorderMime(() => { throw new Error('no'); })).toBeNull();
   });
 });
 

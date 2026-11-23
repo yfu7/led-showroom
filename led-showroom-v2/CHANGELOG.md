@@ -20,10 +20,15 @@ wall tags; the Front view chains the walls' edges across its top and marks the h
 top, and of each wall bottom off the floor. The Top view has a FRONT arrow, the title strip a sheet
 number and paper size, and the border zone references (1, 2... across, A, B... down).
 
-Record video now opens on a 30 s turntable. It frames the whole build, whatever is selected and
+Record video now opens on a turntable: one full 360° turn of 60 s, 6° a second (45, 60, 90 or 120
+s to choose), and the take ends with the turn. It frames the whole build, whatever is selected and
 leaving out the room, so the build fills most of the frame at the widest point of the turn. The
 take is full frame, so the turn is never cropped to the first angle. An orthographic view switches
 to perspective for the take.
+
+Takes come out as H.264 MP4. A frame past what H.264 takes (4096 px wide, 4096 x 2304 in all) is
+scaled down to fit rather than recorded as VP9, and where the browser has no WebCodecs encoder,
+MediaRecorder records MP4 where it can. WebM is left for a browser with no MP4 recorder at all.
 
 ### Auto truss buys as little as it can
 

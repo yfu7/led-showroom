@@ -125,6 +125,8 @@ export function SaveImageDialog({ onClose }: { onClose(): void }) {
 /* ───────── Record video ───────── */
 
 type Duration = '5' | '10' | '15' | '30' | 'manual';
+/** A turntable's full turn, in seconds: the take is one turn. */
+type TurnTime = '45' | '60' | '90' | '120';
 type Fps = '30' | '60';
 type RecScale = '1' | '1.5' | '2';
 type Phase = 'setup' | 'recording' | 'saving';
@@ -132,6 +134,7 @@ type Phase = 'setup' | 'recording' | 'saving';
 export function RecordVideoDialog({ onClose }: { onClose(): void }) {
   const engine = useEngine();
   const [duration, setDuration] = useState<Duration>('30');
+  const [turnTime, setTurnTime] = useState<TurnTime>(String(TURNTABLE_TURN_SEC) as TurnTime);
   const [fps, setFps] = useState<Fps>('30');
   const [recScale, setRecScale] = useState<RecScale>('1');
   const [turntable, setTurntable] = useState(true);
@@ -169,7 +172,8 @@ export function RecordVideoDialog({ onClose }: { onClose(): void }) {
   const start = () => {
     engine.setLiveWebsite(live);
     const r = recordVideo(engine, {
-      durationSec: duration === 'manual' ? undefined : Number(duration),
+      durationSec: turntable || duration === 'manual' ? undefined : Number(duration),
+      turnSec: Number(turnTime),
       fps: Number(fps),
       scale: Number(recScale),
       turntable,
@@ -187,13 +191,13 @@ export function RecordVideoDialog({ onClose }: { onClose(): void }) {
 
   const stop = () => { const r = rec.current; if (r && phase === 'recording') { setPhase('saving'); void r.stop(); } };
 
-  const badge = mp4 === undefined ? '…' : mp4 ? `MP4 · ${mp4}` : 'WebM';
+  const badge = mp4 === undefined ? '…' : mp4 ? `MP4 · ${mp4}` : 'WebM (no MP4 encoder in this browser)';
 
   if (phase !== 'setup') {
     // No Modal here: the app stays live so the take can capture camera moves, drags and slider rides.
-    const note = `${duration === 'manual'
-      ? (turntable ? `Recording one full turn (${TURNTABLE_TURN_SEC} s) — stop early at any time.` : 'Recording until you stop.')
-      : `Recording for ${duration} s${turntable && Number(duration) < TURNTABLE_TURN_SEC ? ` (${Math.round(360 * Number(duration) / TURNTABLE_TURN_SEC)}° of the turn)` : ''} — stop early at any time.`}${turntable ? ' The camera orbits the build.' : ' The scene stays live — orbit, drag and edit while it records.'}`;
+    const note = turntable
+      ? `Recording one full turn (${turnTime} s) — stop early at any time. The camera orbits the build.`
+      : `${duration === 'manual' ? 'Recording until you stop.' : `Recording for ${duration} s — stop early at any time.`} The scene stays live — orbit, drag and edit while it records.`;
     return <RecordingChip elapsed={elapsed} badge={badge} note={note} saving={phase === 'saving'} onStop={stop} />;
   }
 
@@ -202,11 +206,17 @@ export function RecordVideoDialog({ onClose }: { onClose(): void }) {
       <Button variant="ghost" onClick={onClose}>Cancel</Button>
       <Button variant="primary" onClick={start}>Start recording</Button>
     </>}>
-      <Prop label="Duration">
-        <Segmented<Duration> value={duration} onChange={setDuration} options={[
-          { value: '5', label: '5 s' }, { value: '10', label: '10 s' }, { value: '15', label: '15 s' }, { value: '30', label: '30 s' }, { value: 'manual', label: 'Manual' },
-        ]} />
-      </Prop>
+      {turntable
+        ? <Prop label="Turn" title="Seconds for the full 360°: the take is one turn">
+          <Segmented<TurnTime> value={turnTime} onChange={setTurnTime} options={[
+            { value: '45', label: '45 s' }, { value: '60', label: '60 s' }, { value: '90', label: '90 s' }, { value: '120', label: '120 s' },
+          ]} />
+        </Prop>
+        : <Prop label="Duration">
+          <Segmented<Duration> value={duration} onChange={setDuration} options={[
+            { value: '5', label: '5 s' }, { value: '10', label: '10 s' }, { value: '15', label: '15 s' }, { value: '30', label: '30 s' }, { value: 'manual', label: 'Manual' },
+          ]} />
+        </Prop>}
       <Prop label="Frame rate">
         <Segmented<Fps> value={fps} onChange={setFps} options={[{ value: '30', label: '30 fps' }, { value: '60', label: '60 fps' }]} />
       </Prop>
@@ -216,19 +226,19 @@ export function RecordVideoDialog({ onClose }: { onClose(): void }) {
       {!turntable && <Prop label="Crop">
         <Segmented<Crop> value={crop} onChange={setCrop} options={[{ value: 'auto', label: 'Auto' }, { value: 'none', label: 'Full frame' }]} />
       </Prop>}
-      <ToggleRow label="Turntable" checked={turntable} onChange={setTurntable} hint={`Frame the whole build to fill the screen and orbit it, one turn per ${TURNTABLE_TURN_SEC} s, full frame — Manual records a full 360°`} />
+      <ToggleRow label="Turntable" checked={turntable} onChange={setTurntable} hint="Frame the whole build to fill the screen and orbit it once, a full 360°, full frame" />
       <ToggleRow label="Live websites" checked={live} onChange={setLive} hint="Re-rasterise website content each frame (slower; best on a discrete GPU)" />
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <span className="hint">Container</span>
         <span className="label">{badge}</span>
       </div>
-      <TurntableDiagnostics turntable={turntable} duration={duration} />
+      <TurntableDiagnostics turntable={turntable} turnSec={Number(turnTime)} />
     </Dialog>
   );
 }
 
 /** Admin view only: the turntable the take would frame, from the current scene and camera. */
-function TurntableDiagnostics({ turntable, duration }: { turntable: boolean; duration: Duration }) {
+function TurntableDiagnostics({ turntable, turnSec }: { turntable: boolean; turnSec: number }) {
   const god = useStore(s => s.godMode);
   const engine = useEngine();
   if (!god) return null;
@@ -236,7 +246,6 @@ function TurntableDiagnostics({ turntable, duration }: { turntable: boolean; dur
   const fit = engine.camera.turntablePlan(bounds);
   const size = bounds.isEmpty() ? null : bounds.getSize(new Vector3());
   const n = (v: number) => v.toFixed(2);
-  const turnSec = Math.max(TURNTABLE_TURN_SEC, duration === 'manual' ? TURNTABLE_TURN_SEC : Number(duration));
   return (
     <Section title="Diagnostics">
       <Raw label="turntable" value={turntable ? 'on' : 'off'} />
@@ -245,7 +254,7 @@ function TurntableDiagnostics({ turntable, duration }: { turntable: boolean; dur
       <Raw label="fit pitch (deg)" value={fit ? n(fit.pitch) : '-'} />
       <Raw label="fit target" value={fit ? fit.target.toArray().map(n).join(', ') : '-'} />
       <Raw label="fill at widest" value={TURNTABLE_FILL} />
-      <Raw label="turn s / take s" value={`${turnSec} / ${duration}`} />
+      <Raw label="turn s / deg per s" value={`${turnSec} / ${(360 / turnSec).toFixed(2)}`} />
     </Section>
   );
 }

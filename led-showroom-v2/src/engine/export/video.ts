@@ -6,7 +6,9 @@
  * record canvas, then encoded:
  *   • WebCodecs VideoEncoder → mp4-muxer (H.264 → VP9 → VP8 probe order), keyframe every 2 s,
  *     fastStart 'in-memory', firstTimestampBehavior 'offset'; or
- *   • MediaRecorder on `recordCanvas.captureStream(fps)` → WebM when WebCodecs is unavailable.
+ *   • MediaRecorder on `recordCanvas.captureStream(fps)` when WebCodecs cannot: MP4 where the
+ *     browser records one, else WebM.
+ * A frame past H.264's limits is scaled down to them, so the take stays an H.264 MP4.
  *
  * Frame source: at scale 1 the scene is re-rendered into the live WebGL canvas without the gizmo
  * layer and read back (cheap, no reallocation). At other scales `renderToCanvas` renders offscreen
@@ -42,10 +44,12 @@ export interface RecordVideoOptions {
   /** Frame size relative to the viewport CSS size. Default 1 (the live canvas at device pixel ratio). */
   scale?: number;
   /**
-   * Frame the whole build and orbit it: one full turn per `durationSec`, never quicker than one per
-   * `TURNTABLE_TURN_SEC`. The take is full frame: the build fills most of it through the turn.
+   * Frame the whole build and orbit it once: the take is one full turn of `turnSec` unless
+   * `durationSec` cuts it short. The take is full frame: the build fills most of it through the turn.
    */
   turntable?: boolean;
+  /** Seconds for the turntable's full turn. Default `TURNTABLE_TURN_SEC`. */
+  turnSec?: number;
   crop?: 'auto' | 'none';
   /** Re-rasterise website iframes during the take (expensive; default off). */
   liveWebsites?: boolean;
@@ -66,16 +70,37 @@ export interface Recording {
 
 interface CodecCandidate { codec: string; mux: 'avc' | 'vp9'; label: string }
 
-/** Probe order (v1): H.264 High → VP9 → VP8 (muxed as vp09 — non-standard, last resort). */
+/**
+ * Probe order: H.264 High at level 5.0, then 5.2 (which some encoders want for the larger frames),
+ * then VP9 and VP8 (muxed as vp09 — non-standard, last resort). The frame is first brought within
+ * H.264's size (`h264Size`), so the H.264 MP4 every player opens is what a take normally makes.
+ */
 export const CODEC_CANDIDATES: CodecCandidate[] = [
   { codec: 'avc1.640032', mux: 'avc', label: 'H.264' },
+  { codec: 'avc1.640034', mux: 'avc', label: 'H.264 (level 5.2)' },
   { codec: 'vp09.00.10.08', mux: 'vp9', label: 'VP9' },
   { codec: 'vp8', mux: 'vp9', label: 'VP8' },
 ];
 
 export const MAX_RECORD_SEC = 600;
-/** The quickest a turntable turns: one full turn in this many seconds (12 degrees a second). */
-export const TURNTABLE_TURN_SEC = 30;
+/** A turntable's full turn by default: 60 s, 6 degrees a second. */
+export const TURNTABLE_TURN_SEC = 60;
+/** The largest frame H.264 High 5.2 takes here: 4096 px on a side, 4096 x 2304 in all. */
+export const H264_MAX_SIDE = 4096;
+export const H264_MAX_AREA = 4096 * 2304;
+
+/** `w` x `h` scaled down, aspect kept, to fit H.264's frame limits, in even pixels. */
+export function h264Size(w: number, h: number): { w: number; h: number } {
+  const k = Math.min(1, H264_MAX_SIDE / w, H264_MAX_SIDE / h, Math.sqrt(H264_MAX_AREA / (w * h)));
+  return { w: Math.max(2, Math.floor(w * k) & ~1), h: Math.max(2, Math.floor(h * k) & ~1) };
+}
+
+/** MediaRecorder's types, MP4 first: where WebCodecs cannot record, an MP4 still comes out where the browser has one. */
+export const RECORDER_MIMES = ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
+/** The first of `RECORDER_MIMES` the browser records, or null where it records none. */
+export function recorderMime(isSupported: (mime: string) => boolean = m => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)): string | null {
+  return RECORDER_MIMES.find(m => { try { return isSupported(m); } catch { return false; } }) ?? null;
+}
 export const KEYFRAME_INTERVAL_US = 2_000_000;
 export const MAX_ENCODE_QUEUE = 4;
 /** Re-rasterise live websites every N encoded frames. */
@@ -160,13 +185,14 @@ export const PROBE_TIMEOUT_MS = 4000;
  * frame), or null where it would fall back to WebM. The take probes again at its own size.
  */
 export async function previewMp4Codec(): Promise<string | null> {
-  if (!hasWebCodecs() || typeof document === 'undefined') return null;
+  const viaRecorder = (): string | null => (recorderMime()?.startsWith('video/mp4') ? 'MediaRecorder' : null);
+  if (!hasWebCodecs() || typeof document === 'undefined') return viaRecorder();
   const c = document.createElement('canvas');
   c.width = 1280; c.height = 720;
   const g = c.getContext('2d');
   if (g) { g.fillStyle = '#000'; g.fillRect(0, 0, c.width, c.height); }
   const { cc } = await pickWorkingCodec(CODEC_CANDIDATES, x => probeEncoder(x, c, c.width, c.height, 8_000_000, 30));
-  return cc?.label ?? null;
+  return cc?.label ?? viaRecorder();
 }
 
 /** mp4-muxer needs a colour space on the decoder config; Chrome sometimes leaves it null. */
@@ -184,10 +210,9 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
   const bitrate = opts.bitrate ?? 8_000_000;
   const scale = opts.scale ?? 1;
   const includeGrid = opts.includeGrid ?? true;
-  const durationSec = Math.min(MAX_RECORD_SEC, opts.durationSec ?? (opts.turntable ? TURNTABLE_TURN_SEC : MAX_RECORD_SEC));
-  // A take of its own length turns once over that length, but never quicker than the slowest turn:
-  // a short take shows part of the turn rather than whipping round.
-  const turnSec = Math.max(TURNTABLE_TURN_SEC, opts.durationSec ?? TURNTABLE_TURN_SEC);
+  // A turntable take is one full turn, unless a duration cuts it short.
+  const turnSec = Math.max(1, opts.turnSec ?? TURNTABLE_TURN_SEC);
+  const durationSec = Math.min(MAX_RECORD_SEC, opts.durationSec ?? (opts.turntable ? turnSec : MAX_RECORD_SEC));
 
   let recording = false;
   let stopRequested = false;
@@ -205,6 +230,8 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
   // Full frame size the crop is expressed in (live canvas is DPR-scaled).
   let fullW = 0, fullH = 0;
   let crop: Rect = { x: 0, y: 0, w: 2, h: 2 };
+  /** The encoded frame: the crop, scaled down where it is past H.264's limits. */
+  let out = { w: 2, h: 2 };
   let photo: HTMLImageElement | null = null;
   let overlays: WebsiteOverlays | null = null;
   let recordCanvas: HTMLCanvasElement | null = null;
@@ -264,8 +291,11 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
     if (!recordCanvas || !rctx) return null;
     const src = renderFrame();
     const theme = engine.env.theme;
+    // Drawn in crop pixels and scaled to the encoded size.
+    rctx.setTransform(out.w / crop.w, 0, 0, out.h / crop.h, 0, 0);
     paintBackdrop(rctx, photo, engine.doc.environment.backdrop.color, fullW, fullH, crop, { top: theme.backdropTop, bottom: theme.backdropBottom });
     rctx.drawImage(src, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
+    rctx.setTransform(1, 0, 0, 1, 0, 0);
     return recordCanvas;
   };
 
@@ -323,24 +353,29 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
       r = autoCropRect(entityScreenBBox(engine, undefined, { w: fullW, h: fullH }), fullW, fullH, Math.round(40 * padScale));
     }
     crop = evenRect(r);
+    out = h264Size(crop.w, crop.h);
+    if (out.w !== crop.w || out.h !== crop.h) {
+      engine.toast('info', `Recording at ${out.w} x ${out.h}: an H.264 MP4 goes up to ${H264_MAX_SIDE} px wide`);
+    }
 
     recordCanvas = document.createElement('canvas');
-    recordCanvas.width = crop.w; recordCanvas.height = crop.h;
+    recordCanvas.width = out.w; recordCanvas.height = out.h;
     rctx = recordCanvas.getContext('2d');
     if (!rctx) throw new Error('Could not create the record canvas');
 
     const probeFrame = composite();
     const { cc, failed } = hasWebCodecs() && probeFrame
-      ? await pickWorkingCodec(CODEC_CANDIDATES, c => probeEncoder(c, probeFrame, crop.w, crop.h, bitrate, fps))
+      ? await pickWorkingCodec(CODEC_CANDIDATES, c => probeEncoder(c, probeFrame, out.w, out.h, bitrate, fps))
       : { cc: null, failed: [] as string[] };
     // Only a codec the browser offered and then could not record with is worth telling about.
     const broke = failed.filter(f => !f.endsWith(`: ${NOT_SUPPORTED}`));
     if (failed.length) console.info('[record] codecs passed over:', failed);
-    if (broke.length) engine.toast('info', `Recording as ${cc ? `${cc.label} (MP4)` : 'WebM'}: ${broke.join('; ')}`);
+    const fallback = cc ? null : recorderMime();
+    if (broke.length) engine.toast('info', `Recording as ${cc ? `${cc.label} (MP4)` : fallback?.startsWith('video/mp4') ? 'MP4 (MediaRecorder)' : 'WebM'}: ${broke.join('; ')}`);
     if (cc) {
       muxer = new Muxer({
         target: new ArrayBufferTarget(),
-        video: { codec: cc.mux, width: crop.w, height: crop.h },
+        video: { codec: cc.mux, width: out.w, height: out.h },
         fastStart: 'in-memory',
         firstTimestampBehavior: 'offset',
       });
@@ -358,18 +393,18 @@ export function recordVideo(engine: Engine, opts: RecordVideoOptions = {}): Reco
           void stop();
         },
       });
-      encoder.configure({ codec: cc.codec, width: crop.w, height: crop.h, bitrate, framerate: fps });
+      encoder.configure({ codec: cc.codec, width: out.w, height: out.h, bitrate, framerate: fps });
       format = 'mp4';
-      console.info('[record] WebCodecs', cc.label, `${crop.w}×${crop.h}@${fps}`);
+      console.info('[record] WebCodecs', cc.label, `${out.w}×${out.h}@${fps}`);
     } else {
       if (typeof MediaRecorder === 'undefined' || typeof recordCanvas.captureStream !== 'function') throw new Error('Video recording is not supported in this browser');
       mediaStream = recordCanvas.captureStream(fps);
-      mediaMime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+      mediaMime = fallback ?? 'video/webm';
       mediaRecorder = new MediaRecorder(mediaStream, { mimeType: mediaMime, videoBitsPerSecond: bitrate });
       mediaChunks = [];
       mediaRecorder.ondataavailable = e => { if (e.data.size > 0) mediaChunks.push(e.data); };
-      format = 'webm';
-      console.info('[record] MediaRecorder', mediaMime, `${crop.w}×${crop.h}@${fps}`);
+      format = mediaMime.startsWith('video/mp4') ? 'mp4' : 'webm';
+      console.info('[record] MediaRecorder', mediaMime, `${out.w}×${out.h}@${fps}`);
     }
 
     // Scene state for the take
