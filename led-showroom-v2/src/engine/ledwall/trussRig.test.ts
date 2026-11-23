@@ -582,16 +582,17 @@ describe('planTrussRig', () => {
     expect(plan.ghosts).toBe(plan.shortfall[0].need - plan.shortfall[0].have);
   });
 
-  it('frames a walk-through arch over both doorways, on a 3 ft stick to buy in each leg', () => {
+  it('frames a walk-through arch over both doorways, on a 2 ft stick to buy in each leg', () => {
     // Over five-row doorways, the lintel's lowest holes stand 96.00 in up the wall. Of the legs of our
     // own sticks that stand under its top, the nearest is a block on 8 ft of stick, its header's
-    // bottom chord 0.99 in over them: past the quarter-inch shim. A 4 ft and a 3 ft under a spare
-    // block put it 0.15 in under them, inside it. We hold no 3 ft stick, so each leg's is a ghost, to
-    // buy: the frame holds the lintel's 24 columns, which a tower behind each pier cannot reach.
+    // bottom chord 0.99 in over them: past the quarter-inch shim. 7 ft of stick under a spare block
+    // puts it 0.15 in under them, inside it: a 5 ft and a 2 ft ($407 to buy) beat a 4 ft and a 3 ft
+    // ($478). We hold no 2 ft stick, so each leg's is a ghost, to buy: the frame holds the lintel's 24
+    // columns, which a tower behind each pier cannot reach.
     const miss = 96 + R - (5 * PITCH + LOW);
     expect(miss).toBeCloseTo(0.99, 2);
     expect(miss).toBeGreaterThan(SHIM_MAX_IN);
-    const blockY = PLATE + 48 + 36 + SECTION;                // the span's block, on a spare one
+    const blockY = PLATE + 60 + 24 + SECTION;                // the span's block, on a spare one
     const shim = blockY + R - PLATE - (5 * PITCH + LOW);
     expect(shim).toBeCloseTo(0.147, 3);
     expect(shim).toBeLessThanOrEqual(SHIM_MAX_IN);
@@ -624,7 +625,7 @@ describe('planTrussRig', () => {
       if (i > 0) expect(leg.axis[0] - 18).toBeGreaterThanOrEqual(l - 1e-9);
       if (i < 2) expect(leg.axis[0] + 18).toBeLessThanOrEqual(r + 1e-9);
       expect(leg.pieces.map(p => p.catalogId))
-        .toEqual([BASE_ID, 'gp-truss-4ft', 'gp-truss-3ft', 'gp-corner-6way', 'gp-corner-6way']);
+        .toEqual([BASE_ID, 'gp-truss-5ft', 'gp-truss-2ft', 'gp-corner-6way', 'gp-corner-6way']);
       expect(leg.pieces.map(p => p.ghost)).toEqual([false, false, true, false, false]);
       expect(leg.topY).toBeCloseTo(blockY + SECTION, 9);
     });
@@ -655,15 +656,15 @@ describe('planTrussRig', () => {
 
     expect([plan.held, plan.supported, plan.columns]).toEqual([28, 30, 30]);
     expect(plan.warnings).toContain('The wall rises 1.65 in to sit on the 1.50 in base plates, on a 0.15 in shim so the header chord meets a row of holes.');
-    expect(plan.warnings).toContain('DT-GP3 box truss 3 ft: 3 to buy, drawn as ghosts. We hold none, and our own sticks put no header on a row of holes here.');
+    expect(plan.warnings).toContain('DT-GP2 box truss 2 ft: 3 to buy, drawn as ghosts. We hold none, and our own sticks put no header on a row of holes here.');
     expect(plan.warnings).toContain(costNote(plan.buyUsd, plan.shortfall));
     expect(plan.warnings).toContain('2 spans run past 20 ft, where the DT-GP span table stops (the longest is 30 ft): '
       + 'have them checked before they carry the wall.');
-    expect(plan.shortfall.map(f => f.catalogId)).toEqual(['gp-truss-3ft', 'clamp-8002']);
+    expect(plan.shortfall.map(f => f.catalogId)).toEqual(['gp-truss-2ft', 'clamp-8002']);
     expect(plan.shortfall[0]).toMatchObject({ need: 3, have: 0 });
     expect(plan.ghosts).toBe(3 + plan.shortfall[1].need - plan.shortfall[1].have);
-    // Three 3 ft at the listed $478, and the couplers past our 38 at $18.75 each.
-    expect(plan.buyUsd).toBeCloseTo(3 * 478 + (plan.shortfall[1].need - plan.shortfall[1].have) * 18.75, 6);
+    // Three 2 ft at the listed $407, and the couplers past our 38 at $18.75 each.
+    expect(plan.buyUsd).toBeCloseTo(3 * 407 + (plan.shortfall[1].need - plan.shortfall[1].have) * 18.75, 6);
     expect(plan.forgiven).toEqual([]);
 
     // Over the doorways the header's couplers bolt into the lintel's lowest holes, the only row it

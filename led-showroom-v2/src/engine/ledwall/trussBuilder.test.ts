@@ -133,9 +133,9 @@ describe('truss builder', () => {
     expect(sum.coupling.welds).toBe(plan.skipped.weld);
     expect(sum.coupling.bared.size).toBe(0);
 
-    // The same stock: the 3 ft sticks to buy and the couplers past ours are ghosts.
+    // The same stock: the 2 ft sticks to buy and the couplers past ours are ghosts.
     expect(sum.ghosts).toBe(plan.ghosts);
-    expect(pieces.filter((p, i) => sum.pieceGhosts[i]).map(p => p.catalogId)).toEqual(['gp-truss-3ft', 'gp-truss-3ft', 'gp-truss-3ft']);
+    expect(pieces.filter((p, i) => sum.pieceGhosts[i]).map(p => p.catalogId)).toEqual(['gp-truss-2ft', 'gp-truss-2ft', 'gp-truss-2ft']);
     expect(sum.buyUsd).toBeCloseTo(plan.buyUsd, 6);
     expect(sum.shortfall).toEqual(plan.shortfall);
     expect(sum.long).toHaveLength(2);
@@ -315,8 +315,8 @@ describe('truss builder', () => {
 
   it('fills from the sticks on hand before reaching for ones to buy', () => {
     // The order it went in by hand: the 28 ft span first, which can take all three 8 ft, then the
-    // 30 ft. Fewest sticks first, the 30 ft came out 8, 8, 5, 5, 4 with both 8 ft to buy, though six
-    // 5 ft on the rack close it as well.
+    // 30 ft. Fewest sticks first, the 30 ft came out 8, 8, 5, 5, 4 with both 8 ft to buy, though the
+    // rack closes it as well: the legs take three of the six 5 ft, so five 4 ft and two 5 ft.
     const wall = arch();
     const doc = docWith(wall);
     const plan = planTrussRig(doc, wall);
@@ -334,7 +334,7 @@ describe('truss builder', () => {
       pieces = [...pieces, ...got.add];
       fills.push(got.add.map(p => Math.round(p.len / 12)).sort((a, z) => a - z));
     }
-    expect(fills).toEqual([[4, 8, 8, 8], [5, 5, 5, 5, 5, 5]]);
+    expect(fills).toEqual([[4, 8, 8, 8], [4, 4, 4, 4, 4, 5, 5]]);
     for (const i of b.palette.filter(p => p.kind === 'stick' && !p.buy)) expect([i.catalogId, stockLeft(i, pieces) >= 0]).toEqual([i.catalogId, true]);
     const sum = summarize(b, pieces);
     expect(sum.coupling.supported.size).toBe(plan.supported);

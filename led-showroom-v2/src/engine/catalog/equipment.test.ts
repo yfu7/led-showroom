@@ -12,6 +12,7 @@ const HELD: [id: string, system: TrussSystem, owned: number][] = [
   ['gp-truss-5ft', 'DT-GP', 6],
   ['gp-truss-4ft', 'DT-GP', 12],
   ['gp-truss-3ft', 'DT-GP', 0],
+  ['gp-truss-2ft', 'DT-GP', 0],
   ['gp-corner-6way', 'DT-GP', 6],
   ['gp-base-36', 'DT-GP', 6],
   ['f34-straight-1500', 'F34', 2],
@@ -39,6 +40,14 @@ describe('the truss inventory', () => {
     expect(def?.dims).toEqual([36, 11.16, 11.16]);
     expect(ownedCount(def)).toBe(0);
     expect(def?.specs?.find(s => s.label === 'Owned')?.value).toMatch(/^0 /);
+  });
+
+  it('lists the 2 ft DT-GP2, which is on none of the orders, as one to buy at a retailer price', () => {
+    const def = equipmentDef('gp-truss-2ft');
+    expect(def?.dims).toEqual([24, 11.16, 11.16]);
+    expect(ownedCount(def)).toBe(0);
+    expect(def?.specs?.find(s => s.label === 'Part no.')?.value).toMatch(/^GP0131 - DT-GP2-BLK/);
+    expect(def?.specs?.find(s => s.label === 'Unit price')?.value).toMatch(/^\$407\.00 \(estimate/);
   });
 
   it('puts the coupler in neither system', () => {

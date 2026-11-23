@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The 2 ft DT-GP2, a stick to buy
+
+The catalog has the DT-GP2-BLK 2 ft stick (GP0131 in retailer listings), with none owned and priced
+at a retailer's $407, an estimate. Auto truss can put one in a frame's leg where the 3 ft could go:
+a 5 ft and a 2 ft stand as high as a 4 ft and a 3 ft, and cost $71 less to buy. The 30 x 7 arch's
+legs are now a 5 ft and a 2 ft each, three 2 ft to buy, $213 less than three 3 ft.
+
 ### A fuller drawing sheet; Record video turns the whole build
 
 The drawing sheet has a schedule column beside the views. It lists each wall under a tag (W1, W2...)

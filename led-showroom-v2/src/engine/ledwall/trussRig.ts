@@ -66,9 +66,10 @@ export const STICK_IDS = ['gp-truss-8ft', 'gp-truss-5ft', 'gp-truss-4ft'] as con
  * DT-GP sticks we hold none of. Only a frame's leg takes one, and only where it lands the header on
  * a row of holes: a rig that takes one is drawn with it as a ghost, a stick to buy, and is chosen
  * only when it holds more columns than any rig of our own sticks. Over a walk-through arch's
- * five-row doorways, a 4 ft and a 3 ft under a spare block put the header on the lintel's low holes.
+ * five-row doorways, 7 ft of stick under a spare block puts the header on the lintel's low holes: a
+ * 5 ft and a 2 ft, or a 4 ft and a 3 ft. The 2 ft is the cheaper to buy, so cost picks it.
  */
-export const BUY_STICK_IDS = ['gp-truss-3ft'] as const;
+export const BUY_STICK_IDS = ['gp-truss-3ft', 'gp-truss-2ft'] as const;
 export const CLAMP_ID = 'clamp-8002';
 /** What a part with no price is reckoned at, so cost never takes it for free. */
 export const UNPRICED_USD = 10000;

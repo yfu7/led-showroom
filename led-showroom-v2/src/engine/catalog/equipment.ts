@@ -232,8 +232,20 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
     description: '3 ft end-plated DT-GP box truss, black. Not one of ours: the stick to buy so a leg lands the header on the lintel of a walk-through arch.',
     specs: [
       { label: 'Part no.', value: 'GP0118 - DT-GP3-BLK (from retailer listings; not on any order)' },
-      { label: 'Owned', value: '0 (on none of our orders; a DT-GP2 2 ft stick does the same job in a leg)' },
+      { label: 'Owned', value: '0 (on none of our orders; a DT-GP2 2 ft stick beside a 5 ft does the same job in a leg)' },
       { label: 'Unit price', value: '$478.00 (estimate: a retailer listing for the DT-GP3-BLK, not a quote or an order)' },
+      GP_SYSTEM, GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
+    ],
+  },
+  {
+    id: 'gp-truss-2ft', name: 'DT-GP2 box truss 2 ft', category: 'structure', geometry: 'truss', trussSystem: 'DT-GP',
+    dims: [24, 11.16, 11.16], color: '#17181b',
+    description: '2 ft end-plated DT-GP box truss, black. Not one of ours: a stick to buy, so a leg of a 5 ft and a 2 ft lands the header on the lintel of a walk-through arch as a 4 ft and a 3 ft do.',
+    specs: [
+      { label: 'Part no.', value: 'GP0131 - DT-GP2-BLK (from retailer listings; not on any order. Global Truss lists the DT-GP2 as GP0222, colour not stated)' },
+      { label: 'Owned', value: '0 (on none of our orders)' },
+      { label: 'Unit price', value: '$407.00 (estimate: retailer listings for the DT-GP2-BLK, not a quote or an order)' },
+      { label: 'Link', value: 'https://www.globaltruss.com/dt-gp2' },
       GP_SYSTEM, GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
     ],
   },
