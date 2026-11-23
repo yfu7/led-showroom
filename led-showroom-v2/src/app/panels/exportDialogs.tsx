@@ -467,7 +467,7 @@ function DrawingDiagnostics({ paper, dpi, sheet, view, stats }: {
       <Raw label="pxPerIn" value={layout.pxPerIn.toFixed(4)} />
       <Raw label="sheet px" value={`${layout.wPx} x ${layout.hPx}`} />
       <Raw label="titleBlock" value={`${layout.titleBlock.w} x ${layout.titleBlock.h} @ ${layout.titleBlock.x},${layout.titleBlock.y}`} />
-      <Raw label="schedule" value={layout.schedule ? `${layout.schedule.w} x ${layout.schedule.h} @ ${layout.schedule.x},${layout.schedule.y}` : 'none'} />
+      <Raw label="drawingArea" value={`${layout.drawingArea.w} x ${layout.drawingArea.h} @ ${layout.drawingArea.x},${layout.drawingArea.y}`} />
       {layout.views.map(v => (
         <Raw key={v.key} label={v.key}
           value={`fit ${v.fit.w}x${v.fit.h} @ ${v.fit.x},${v.fit.y} | drawn ${n(v.drawnW)}x${n(v.drawnH)} | ${v.toScale ? 'to scale' : 'NTS'}`} />

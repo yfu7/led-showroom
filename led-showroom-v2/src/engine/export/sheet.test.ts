@@ -55,19 +55,36 @@ describe('sheetLayout', () => {
     }
   });
 
-  it('keeps a schedule column right of the views, clear of them and of the title block', () => {
+  it('gives the views the whole width above the title block, with no column beside them', () => {
     for (const paper of Object.keys(PAPERS) as (keyof typeof PAPERS)[]) {
       const l = sheetLayout(WALL, { paper });
-      const s = l.schedule!;
-      expect(s.x + s.w).toBe(l.border.x + l.border.w);
-      expect(overlaps(s, l.titleBlock)).toBe(false);
-      for (const v of l.views) expect(overlaps(v, s)).toBe(false);
-      expect(s.w).toBeGreaterThanOrEqual(2.4 * l.dpi - 1);
-      expect(s.w).toBeLessThanOrEqual(3.4 * l.dpi + 1);
+      expect(l.drawingArea.w).toBe(l.border.w);
+      const cells = l.views.reduce((s, v) => s + v.w * v.h, 0);
+      expect(cells).toBe(l.drawingArea.w * l.drawingArea.h);
+      for (const a of l.views) for (const b of l.views) if (a !== b) expect(overlaps(a, b)).toBe(false);
     }
-    const bare = sheetLayout(WALL, { schedule: false });
-    expect(bare.schedule).toBeNull();
-    expect(bare.drawingArea.w).toBe(bare.border.w);
+  });
+
+  it('moves the cell lines to draw a long, shallow build large, keeping third angle', () => {
+    const run = { w: 778, h: 134, d: 54 };  // a 65 ft run of walls, 11 ft tall
+    const l = sheetLayout(run);
+    const front = viewOf(l, 'front')!, top = viewOf(l, 'top')!, right = viewOf(l, 'right')!;
+    // Four even quarters only fit it at 1:192; widening the Front column fits 1:96.
+    expect(l.scaleDenom).toBe(96);
+    expect(front.w).toBeGreaterThan(right.w);
+    expect(top.cx).toBe(front.cx);
+    expect(right.cy).toBe(front.cy);
+    for (const v of l.views.filter(v => v.toScale)) {
+      expect(v.drawnW).toBeLessThanOrEqual(v.fit.w);
+      expect(v.drawnH).toBeLessThanOrEqual(v.fit.h);
+    }
+  });
+
+  it('keeps the even split when moving the lines buys no finer scale', () => {
+    const l = sheetLayout({ w: 120, h: 120, d: 120 });
+    const front = viewOf(l, 'front')!;
+    expect(front.w).toBe(Math.floor(l.drawingArea.w / 2));
+    expect(front.h).toBe(Math.floor(l.drawingArea.h / 2));
   });
 
   it('fills the sheet with one view when asked for a 1-up', () => {

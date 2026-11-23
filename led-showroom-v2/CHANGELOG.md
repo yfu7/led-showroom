@@ -21,8 +21,15 @@ when the scene had any.
 A PIN-gated diagnostics panel in the page shows fps, draw calls, triangles, the camera, the GLB size
 and load time. It shows nothing private, since the file travels.
 
-The drawing sheet (line art, third-angle views, dimensions, title block) is unchanged and now sits
-under its own entry, **Generate CAD**, in the Export panel and the File menu.
+The drawing sheet now sits under its own entry, **Generate CAD**, in the Export panel and the File
+menu. It is made to hand to the client:
+
+- **No build column.** The schedule of walls, parts and notes on the right is gone, and so are the
+  wall tag balloons that pointed into it. The specs stay in the title strip at the bottom.
+- **The Veloxity logo** opens the title strip, in the brand blue, from the veloxity.us header.
+- **Bigger views.** The views get the whole width, and the lines between the four cells move with
+  the build, keeping third angle (Top over Front, Right beside it). A 778 x 134 x 54 in run of walls
+  went from 1:192 to 1:96. When moving the lines buys no finer scale, the cells stay even.
 
 Under the hood, the page's script (three.js inside, about 640 KB) is built on its own by a Vite
 plugin and loads only when a viewer is saved. It travels in the page as base64 and runs from there,

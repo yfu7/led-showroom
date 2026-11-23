@@ -11,7 +11,8 @@
  *    from the standard set (1:24, 1:48, 1:96…), the largest that still fits every view. The
  *    camera frustums are then derived *from* that ratio rather than zoom-to-fit, so the printed
  *    "1 : 48" and the scale bar are exact rather than approximate.
- *  - **A title strip** across the bottom, so no view can ever collide with it.
+ *  - **A title strip** across the bottom, so no view can ever collide with it. The sheet goes to
+ *    clients, so it carries the build's specs there and nothing of how it is put together.
  *
  * The iso view is a courtesy pictorial: its own fit, labelled NTS.
  *
@@ -78,8 +79,6 @@ export interface SheetLayout {
   titleBlock: Rect;
   /** The area the views are laid out in. */
   drawingArea: Rect;
-  /** The schedule column right of the views (walls, equipment, notes); null when left off. */
-  schedule: Rect | null;
   views: Viewport[];
   /** Height of the label strip reserved at the bottom of every cell. */
   labelH: number;
@@ -103,9 +102,10 @@ export interface SheetOptions {
   marginIn?: number;
   /** Clear space kept around a view inside its cell, inches. */
   padIn?: number;
-  /** A schedule column right of the views. Default true. */
-  schedule?: boolean;
 }
+
+/** Where the quad sheet's column and row lines may sit, as a share of the drawing area. */
+const QUAD_SHARES = [0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75] as const;
 
 /** Fraction of a cell a view may occupy before the next coarser scale is tried. */
 const FILL = 1;
@@ -155,53 +155,60 @@ export function sheetLayout(extents: Extents, opts: SheetOptions = {}): SheetLay
   const pad = Math.round((opts.padIn ?? 0.3) * dpi);
 
   const border = rect(margin, margin, wPx - margin * 2, hPx - margin * 2);
-  // Sized to its contents (label, value, graphic scale) rather than to a fraction of the sheet:
-  // the rest of the paper belongs to the views.
+  // Sized to its contents (logo, label, value, graphic scale) rather than to a fraction of the
+  // sheet: the rest of the paper belongs to the views.
   const stripH = Math.round(Math.min(0.92, paper.hIn * 0.12) * dpi);
   const titleBlock = rect(border.x, border.y + border.h - stripH, border.w, stripH);
   const gap = Math.round(0.12 * dpi);
-  // The schedule takes a column at the right, about a fifth of the border: wide enough for a
-  // wall's panel, array and size on a line each, narrow enough to leave the views most of the paper.
-  const areaH = border.h - stripH - gap;
-  const schedW = opts.schedule === false ? 0 : Math.round(Math.min(3.4 * dpi, Math.max(2.4 * dpi, border.w * 0.22)));
-  const schedule = schedW ? rect(border.x + border.w - schedW, border.y, schedW, areaH) : null;
-  const drawingArea = rect(border.x, border.y, border.w - (schedW ? schedW + gap : 0), areaH);
+  const drawingArea = rect(border.x, border.y, border.w, border.h - stripH - gap);
 
   const single = opts.views && opts.views !== 'quad' ? (opts.views as ViewKey) : null;
   const keys: ViewKey[] = single ? [single] : ['top', 'iso', 'front', 'right'];
 
-  // Cells. Third angle: Top above Front (same column), Right beside Front (same row).
-  const cols = single ? 1 : 2;
-  const rows = single ? 1 : 2;
-  const cellW = Math.floor(drawingArea.w / cols);
-  const cellH = Math.floor(drawingArea.h / rows);
-  const slot: Record<ViewKey, { c: number; r: number }> = {
-    top: { c: 0, r: 0 }, iso: { c: 1, r: 0 }, front: { c: 0, r: 1 }, right: { c: 1, r: 1 },
-  };
-
   // Clear space inside a cell: the pad all round, plus a strip under the view for its label and
   // the overall dimension line that sits below it.
   const labelH = Math.round(0.42 * dpi);
-  const fitW = cellW - pad * 2;
-  const fitH = cellH - pad * 2 - labelH;
-
-  // The scale answers to the views that are actually drawn to scale.
   const scaled = keys.filter(k => k !== 'iso');
-  const needs = (scaled.length ? scaled : (['front'] as ViewKey[])).map(k => {
-    const v = viewExtents(extents, k);
-    return { needW: v.w, needH: v.h, cellW: fitW, cellH: fitH };
-  });
-  const { scaleDenom, pxPerIn, overflow } = pickScale(needs, dpi);
+  const answer = (cells: Partial<Record<ViewKey, Rect>>) => pickScale((scaled.length ? scaled : (['front'] as ViewKey[])).map(k => {
+    const v = viewExtents(extents, k), c = cells[k] ?? cells[keys[0]]!;
+    return { needW: v.w, needH: v.h, cellW: c.w - pad * 2, cellH: c.h - pad * 2 - labelH };
+  }), dpi);
+
+  // Cells. Third angle: Top above Front (same column), Right beside Front (same row). The column
+  // and row lines move with what the cells hold (Front's width against Right's depth, Top's depth
+  // against Front's height), so a long, shallow build is drawn large rather than in a quarter of
+  // the sheet. The split giving the finest standard scale wins; a tie goes to the evener split,
+  // which keeps the iso cell roomy.
+  const quad = (sc: number, sr: number): Record<ViewKey, Rect> => {
+    const w0 = Math.floor(drawingArea.w * sc), h1 = Math.floor(drawingArea.h * sr);
+    const x1 = drawingArea.x + w0, y1 = drawingArea.y + drawingArea.h - h1;
+    return {
+      top: rect(drawingArea.x, drawingArea.y, w0, y1 - drawingArea.y),
+      iso: rect(x1, drawingArea.y, drawingArea.w - w0, y1 - drawingArea.y),
+      front: rect(drawingArea.x, y1, w0, h1),
+      right: rect(x1, y1, drawingArea.w - w0, h1),
+    };
+  };
+  let cells: Partial<Record<ViewKey, Rect>> = single ? { [single]: { ...drawingArea } } : quad(0.5, 0.5);
+  let best = answer(cells);
+  if (!single) {
+    let bestSkew = 0;
+    for (const sc of QUAD_SHARES) for (const sr of QUAD_SHARES) {
+      const c = quad(sc, sr), r = answer(c), skew = Math.abs(sc - 0.5) + Math.abs(sr - 0.5);
+      if (r.scaleDenom < best.scaleDenom || (r.scaleDenom === best.scaleDenom && skew < bestSkew)) {
+        cells = c; best = r; bestSkew = skew;
+      }
+    }
+  }
+  const { scaleDenom, pxPerIn, overflow } = best;
 
   const views: Viewport[] = keys.map(key => {
-    const s = single ? { c: 0, r: 0 } : slot[key];
-    const x = drawingArea.x + s.c * cellW;
-    const y = drawingArea.y + s.r * cellH;
+    const { x, y, w, h } = cells[key]!;
     const v = viewExtents(extents, key);
     const toScale = key !== 'iso';
-    const fit = rect(x + pad, y + pad, fitW, fitH);
+    const fit = rect(x + pad, y + pad, Math.max(1, w - pad * 2), Math.max(1, h - pad * 2 - labelH));
     return {
-      key, label: VIEW_LABELS[key], x, y, w: cellW, h: cellH,
+      key, label: VIEW_LABELS[key], x, y, w, h,
       cx: fit.x + fit.w / 2, cy: fit.y + fit.h / 2, fit,
       drawnW: toScale ? v.w * pxPerIn : 0,
       drawnH: toScale ? v.h * pxPerIn : 0,
@@ -209,7 +216,7 @@ export function sheetLayout(extents: Extents, opts: SheetOptions = {}): SheetLay
     };
   });
 
-  return { paper, dpi, wPx, hPx, border, titleBlock, drawingArea, schedule, views, labelH, scaleDenom, pxPerIn, overflow };
+  return { paper, dpi, wPx, hPx, border, titleBlock, drawingArea, views, labelH, scaleDenom, pxPerIn, overflow };
 }
 
 /** Look a view up by key. */

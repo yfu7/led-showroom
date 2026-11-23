@@ -1,12 +1,12 @@
 /**
- * "Generate render": a CAD drawing sheet of the show, as a PNG.
+ * "Generate CAD": a drawing sheet of the show, as a PNG, made to hand to the client.
  *
  *   ┌──────────────┬──────────────┐
  *   │     TOP      │  ISOMETRIC   │   third-angle projection, one shared scale, hidden lines
  *   ├──────────────┼──────────────┤   removed; the iso is a pictorial and says NTS
  *   │    FRONT     │    RIGHT     │
  *   ├──────────────┴──────────────┤
- *   │ PROJECT · DATE · OVERALL …  │   title strip: what it is, how big, at what scale
+ *   │ LOGO · PROJECT · OVERALL …  │   title strip: whose, what it is, how big, at what scale
  *   └─────────────────────────────┘
  *
  * Three decisions worth knowing about:
@@ -28,7 +28,8 @@ import type { Document } from '../document/types';
 import { formatArea, formatDims, formatLength, type Unit } from '../units';
 import { filledCount, wallDims } from '../ledwall/layout';
 import { buildLineArt } from './lineArt';
-import { chainEdges, levels, sheetSchedule, wallTags, zoneCounts, type ScheduleSection } from './sheetDetail';
+import { chainEdges, levels, wallTags, zoneCounts } from './sheetDetail';
+import { LOGO_COLOR, LOGO_H, LOGO_PATH, LOGO_W } from './logo';
 import { canvasToBlob, downloadBlob, timestampName } from './composite';
 import {
   PAPERS, scaleBar, sheetLayout, viewOf,
@@ -281,67 +282,6 @@ function viewDims(extents: Extents, key: ViewKey): { across: number; down: numbe
   }
 }
 
-/** `text` broken into lines no wider than `maxW` at the current font; a word too long for a line stands alone. */
-function wrap(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
-  const out: string[] = [];
-  let line = '';
-  for (const word of text.split(' ')) {
-    const next = line ? `${line} ${word}` : word;
-    if (line && ctx.measureText(next).width > maxW) { out.push(line); line = word; } else line = next;
-  }
-  if (line) out.push(line);
-  return out;
-}
-
-/**
- * The schedule column: a black band for each section's title and its rows under it, wrapped to the
- * column. The type shrinks to fit, down to a floor; past that the rows that do not fit are counted.
- */
-function drawSchedule(ctx: CanvasRenderingContext2D, r: Rect, sections: ScheduleSection[], dpi: number): void {
-  strokeRect(ctx, r, Math.max(1, 0.008 * dpi));
-  const padX = 0.1 * dpi, indent = 0.14 * dpi, bottom = r.y + r.h - 0.08 * dpi;
-  // Measured at the weight each row is drawn in: a bold heading is wider than the same text at 500.
-  const lay = (size: number) => sections.map(s => s.rows.map(row => {
-    ctx.font = font(size, row.strong ? 700 : 500);
-    return wrap(ctx, row.text, r.w - padX * 2 - (row.indent ? indent : 0));
-  }));
-  let size = 0.1 * dpi;
-  let wrapped = lay(size);
-  const height = (sz: number, w: string[][][]) =>
-    w.reduce((h, rows) => h + sz * 2.1 + rows.reduce((n, lines) => n + lines.length, 0) * sz * 1.32, 0) + 0.08 * dpi;
-  while (size > 0.058 * dpi && height(size, wrapped) > r.h) { size -= 0.004 * dpi; wrapped = lay(size); }
-  const lineH = size * 1.32, headH = size * 1.55;
-
-  ctx.save();
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'left';
-  let y = r.y + 0.08 * dpi;
-  let cut = 0;
-  sections.forEach((s, si) => {
-    if (cut || y + headH + lineH > bottom) { cut += s.rows.length; return; }
-    ctx.fillStyle = INK;
-    ctx.fillRect(r.x + 0.04 * dpi, y, r.w - 0.08 * dpi, headH);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = font(size * 0.95, 700);
-    ctx.fillText(s.title, r.x + padX, y + headH / 2);
-    y += headH + size * 0.35;
-    s.rows.forEach((row, ri) => {
-      const lines = wrapped[si][ri];
-      if (cut || y + lines.length * lineH > bottom - lineH) { cut++; return; }
-      ctx.fillStyle = row.strong ? INK : '#333333';
-      ctx.font = font(size, row.strong ? 700 : 500);
-      for (const l of lines) { ctx.fillText(l, r.x + padX + (row.indent ? indent : 0), y + lineH / 2); y += lineH; }
-    });
-    y += size * 0.2;
-  });
-  if (cut) {
-    ctx.fillStyle = '#b00020';
-    ctx.font = font(size, 600);
-    ctx.fillText(`... ${cut} more not shown`, r.x + padX, bottom - lineH / 2);
-  }
-  ctx.restore();
-}
-
 /** Zone references round the border: numbers along the top and bottom, letters down the sides. */
 function drawZones(ctx: CanvasRenderingContext2D, layout: SheetLayout): void {
   const { border: b, dpi } = layout;
@@ -379,22 +319,6 @@ function drawZones(ctx: CanvasRenderingContext2D, layout: SheetLayout): void {
   ctx.restore();
 }
 
-/** A tag balloon: the wall's tag in a circle, nudged down off any tag already placed. */
-function balloon(ctx: CanvasRenderingContext2D, x: number, y: number, tag: string, dpi: number, placed: { x: number; y: number }[]): void {
-  const r = 0.085 * dpi;
-  while (placed.some(p => Math.hypot(p.x - x, p.y - y) < r * 2.2)) y += r * 2.4;
-  placed.push({ x, y });
-  ctx.save();
-  ctx.fillStyle = '#ffffff'; ctx.strokeStyle = INK;
-  ctx.lineWidth = Math.max(1, 0.01 * dpi);
-  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = INK;
-  ctx.font = font(r * 0.95, 700);
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(tag, x, y + r * 0.05);
-  ctx.restore();
-}
-
 /** A level mark: a short line at height `y` ending at `x`, a datum triangle on it, the height to its left. */
 function levelMark(ctx: CanvasRenderingContext2D, x: number, y: number, text: string, dpi: number, minX: number): void {
   const len = 0.2 * dpi, t = 0.045 * dpi;
@@ -421,8 +345,7 @@ function levelMark(ctx: CanvasRenderingContext2D, x: number, y: number, text: st
 }
 
 /**
- * Each wall on the to-scale views: its tag on the Front and Top views, a chain of its edges across
- * the top of the Front view where there is more than the overall width to say, and the heights of
+ * Each wall on the to-scale views: a chain of its edges across the top of the Front view where there is more than the overall width to say, and the heights of
  * its top and (off the floor) bottom. A flat projection: sheet px = cell centre + (world - bounds
  * centre) x pxPerIn, y flipped on the Front view, +Z down the page on the Top view.
  */
@@ -452,20 +375,8 @@ function drawWallDetail(
     for (const y of levels(walls.flatMap(w => [w.b.min.y, w.b.max.y]).filter(y => y > 0.5))) {
       levelMark(ctx, fx(bounds.min.x) - 0.05 * dpi, fy(y), `+${formatLength(y, unit)}`, dpi, front.x + 0.06 * dpi);
     }
-    const placed: { x: number; y: number }[] = [];
-    for (const w of walls) {
-      const m = w.b.getCenter(new THREE.Vector3());
-      balloon(ctx, fx(m.x), fy(m.y), w.tag, dpi, placed);
-    }
   }
   if (top?.toScale) {
-    if (walls.length) {
-      const placed: { x: number; y: number }[] = [];
-      for (const w of walls) {
-        const m = w.b.getCenter(new THREE.Vector3());
-        balloon(ctx, top.cx + (m.x - c.x) * k, top.cy + (m.z - c.z) * k, w.tag, dpi, placed);
-      }
-    }
     // Which way the build faces: +Z, down the page on the Top view.
     const x0 = top.x + 0.2 * dpi, y1 = top.y + top.h - 0.12 * dpi, y0 = y1 - 0.22 * dpi;
     ctx.save();
@@ -480,16 +391,33 @@ function drawWallDetail(
   }
 }
 
+/** The Veloxity wordmark in its blue, `h` px tall with its left edge at `x`, centred on `cy`. */
+function drawLogo(ctx: CanvasRenderingContext2D, x: number, cy: number, h: number): void {
+  if (typeof Path2D === 'undefined' || !LOGO_PATH) return;
+  const k = h / LOGO_H;
+  ctx.save();
+  ctx.translate(x, cy - h / 2);
+  ctx.scale(k, k);
+  ctx.fillStyle = LOGO_COLOR;
+  ctx.fill(new Path2D(LOGO_PATH));
+  ctx.restore();
+}
+
 function drawTitleBlock(ctx: CanvasRenderingContext2D, layout: SheetLayout, fields: TitleField[], toScale: boolean): void {
   const tb = layout.titleBlock, dpi = layout.dpi;
   strokeRect(ctx, tb, Math.max(1.5, 0.012 * dpi));
 
+  // The logo opens the strip in a cell of its own; the fields share the rest.
+  const logoH = Math.min(tb.h * 0.34, 0.3 * dpi);
+  const logoCell = logoH * (LOGO_W / LOGO_H) + 0.4 * dpi;
+  drawLogo(ctx, tb.x + 0.2 * dpi, tb.y + tb.h / 2, logoH);
+
   // The scale bar gets the last cell, so it sits under the printed ratio.
   const total = fields.reduce((s, f) => s + f.weight, 0);
-  let x = tb.x;
+  let x = tb.x + logoCell;
   fields.forEach((f, i) => {
-    const w = (tb.w * f.weight) / total;
-    if (i > 0) {
+    const w = ((tb.w - logoCell) * f.weight) / total;
+    if (logoCell > 0 || i > 0) {
       ctx.save();
       ctx.strokeStyle = INK;
       ctx.lineWidth = Math.max(1, 0.008 * dpi);
@@ -603,15 +531,12 @@ export async function generateDrawing(engine: Engine, opts: DrawingOptions = {})
       ctx.fillText(tag, v.x + v.w / 2, v.y + v.h - 0.07 * dpi);
     }
 
-    // Walls: tags, a chain of their edges, their heights. Then the schedule the tags point into,
-    // and the zone references round the border.
+    // Walls: a chain of their edges and their heights. Then the zone references round the border.
+    // Nothing of how the build is put together (parts, stock, notes): the sheet goes to clients.
     const tags = wallTags(engine.doc);
     if (!empty) {
       const walls = tags.map(t => ({ tag: t.tag, b: engine.boundsOf([t.wall.id]) })).filter(w => !w.b.isEmpty());
       drawWallDetail(ctx, layout, art.bounds, unit, walls);
-    }
-    if (layout.schedule) {
-      drawSchedule(ctx, layout.schedule, sheetSchedule(engine.doc, unit, { isoNts: layout.views.some(v => v.key === 'iso') }), dpi);
     }
     drawZones(ctx, layout);
 
