@@ -410,7 +410,8 @@ function levelMark(ctx: CanvasRenderingContext2D, x: number, y: number, text: st
   // Left of the mark where there is room; otherwise over its line, ending at the mark's end, so the
   // figure never covers the line and datum it labels nor reaches the model right of them.
   const roomLeft = x - len - 0.03 * dpi - w >= minX;
-  const right = roomLeft ? x - len - 0.03 * dpi : x;
+  // Above the line it may start no further left than the cell allows, even if it then runs past the mark.
+  const right = roomLeft ? x - len - 0.03 * dpi : Math.max(x, minX + w + 2);
   const cy = roomLeft ? y : y - t - 0.05 * dpi;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(right - w - 2, cy - 0.05 * dpi, w + 4, 0.1 * dpi);

@@ -20,6 +20,7 @@ import { ToggleRow } from '@/app/components/Toggle';
 import { Prop, Section } from '@/app/components/Section';
 import { saveImage } from '@/engine/export/image';
 import { recordVideo, previewMp4Codec, TURNTABLE_TURN_SEC } from '@/engine/export/video';
+import { TURNTABLE_FILL } from '@/engine/scene/turntable';
 import { exportGltf } from '@/engine/export/gltf';
 import { generateDrawing, type DrawingStats } from '@/engine/export/drawing';
 import { buildLineArt } from '@/engine/export/lineArt';
@@ -221,7 +222,31 @@ export function RecordVideoDialog({ onClose }: { onClose(): void }) {
         <span className="hint">Container</span>
         <span className="label">{badge}</span>
       </div>
+      <TurntableDiagnostics turntable={turntable} duration={duration} />
     </Dialog>
+  );
+}
+
+/** Admin view only: the turntable the take would frame, from the current scene and camera. */
+function TurntableDiagnostics({ turntable, duration }: { turntable: boolean; duration: Duration }) {
+  const god = useStore(s => s.godMode);
+  const engine = useEngine();
+  if (!god) return null;
+  const bounds = engine.buildBounds();
+  const fit = engine.camera.turntablePlan(bounds);
+  const size = bounds.isEmpty() ? null : bounds.getSize(new Vector3());
+  const n = (v: number) => v.toFixed(2);
+  const turnSec = Math.max(TURNTABLE_TURN_SEC, duration === 'manual' ? TURNTABLE_TURN_SEC : Number(duration));
+  return (
+    <Section title="Diagnostics">
+      <Raw label="turntable" value={turntable ? 'on' : 'off'} />
+      <Raw label="build bounds (in)" value={size ? `${n(size.x)} x ${n(size.y)} x ${n(size.z)}` : 'empty'} />
+      <Raw label="fit distance (in)" value={fit ? n(fit.distance) : '-'} />
+      <Raw label="fit pitch (deg)" value={fit ? n(fit.pitch) : '-'} />
+      <Raw label="fit target" value={fit ? fit.target.toArray().map(n).join(', ') : '-'} />
+      <Raw label="fill at widest" value={TURNTABLE_FILL} />
+      <Raw label="turn s / take s" value={`${turnSec} / ${duration}`} />
+    </Section>
   );
 }
 
@@ -371,6 +396,7 @@ function DrawingDiagnostics({ paper, dpi, sheet, view, stats }: {
       <Raw label="pxPerIn" value={layout.pxPerIn.toFixed(4)} />
       <Raw label="sheet px" value={`${layout.wPx} x ${layout.hPx}`} />
       <Raw label="titleBlock" value={`${layout.titleBlock.w} x ${layout.titleBlock.h} @ ${layout.titleBlock.x},${layout.titleBlock.y}`} />
+      <Raw label="schedule" value={layout.schedule ? `${layout.schedule.w} x ${layout.schedule.h} @ ${layout.schedule.x},${layout.schedule.y}` : 'none'} />
       {layout.views.map(v => (
         <Raw key={v.key} label={v.key}
           value={`fit ${v.fit.w}x${v.fit.h} @ ${v.fit.x},${v.fit.y} | drawn ${n(v.drawnW)}x${n(v.drawnH)} | ${v.toScale ? 'to scale' : 'NTS'}`} />

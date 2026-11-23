@@ -10,7 +10,7 @@ import { Emitter } from '../events';
 import { clamp, type Vec3 } from '../math';
 import type { ViewState } from '../document/types';
 import { CONTEXT_DRAG_PX } from '../tools/Tool';
-import { turntableFit } from './turntable';
+import { turntableFit, type TurntableFit } from './turntable';
 
 export type ViewPreset = 'home' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'iso' | 'three-quarter' | 'eye-level';
 export type Projection = 'perspective' | 'orthographic';
@@ -252,11 +252,20 @@ export class CameraRig extends Emitter<CameraRigEvents> {
    */
   frameTurntable(bounds: THREE.Box3): void {
     if (bounds.isEmpty()) return;
+    // A tween still running would carry the camera (and the target) off the fit on the next frame.
+    this.tween = null;
+    if (this.flyMode) this.setFlyMode(false);
     if (this.projection === 'orthographic') this.setProjection('perspective');
+    const fit = this.turntablePlan(bounds);
+    if (fit) this.moveTo(fit.position, fit.target, false);
+  }
+
+  /** Where `frameTurntable` would stand, without moving: for the diagnostics. */
+  turntablePlan(bounds: THREE.Box3): TurntableFit | null {
+    if (bounds.isEmpty()) return null;
     const dir = new THREE.Vector3().subVectors(this.camera.position, this.controls.target);
     if (dir.lengthSq() < 1e-6) dir.set(0, 0.35, 1);
-    const fit = turntableFit(bounds, dir.normalize(), this.persp.fov, this.aspect);
-    this.moveTo(fit.position, fit.target, false);
+    return turntableFit(bounds, dir.normalize(), this.persp.fov, this.aspect);
   }
 
   /**
@@ -265,6 +274,7 @@ export class CameraRig extends Emitter<CameraRigEvents> {
    * clamps to 0.1 s and would leave a slow take short of a full turn. `null` stops it.
    */
   setSpin(turnSec: number | null): void {
+    this.tween = null;
     this.spin = turnSec && turnSec > 0
       ? { t0: performance.now(), turnSec, offset: this.camera.position.clone().sub(this.controls.target) }
       : null;
@@ -417,7 +427,7 @@ export class CameraRig extends Emitter<CameraRigEvents> {
   /** Called once per frame. */
   update(dt: number): boolean {
     let changed = false;
-    if (this.spin) {
+    if (this.spin && !this.flyMode) {
       const s = this.spin;
       const angle = (2 * Math.PI * (performance.now() - s.t0)) / 1000 / s.turnSec;
       this.camera.position.copy(this.controls.target).add(s.offset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle));
