@@ -48,8 +48,9 @@ them to buy. The CAD sheet already drew every part solid. A video take and a GLB
 overlap: the ghosts stay real until the last of them ends, and a ghost edited mid-take is set real
 again on the next frame.
 
-The CAD sheet's graphic scale drops to inches (1, 2, 3 or 6 in) when a foot would overrun its cell,
-as at 1:8 on ANSI A; before, the bar ran past the title block.
+The CAD sheet's graphic scale drops to inches (¼, ½, 1, 2, 3 or 6 in) when a foot would overrun
+its cell, as at 1:8 on ANSI A; before, the bar ran past the title block. Checked on every paper at
+every standard scale.
 
 ### Header toggle: cheapest or hide couplers
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { buildExportRoot, INCH_TO_METRE } from './gltf';
-import { buildViewerHtml, bytesToBase64, dimSetOf, lightDir, scriptSafeJson, suggestViewerFilename, utf8ToBase64 } from './viewer';
+import { buildViewerHtml, bytesToBase64, dimSetOf, dimsOf, lightDir, scriptSafeJson, suggestViewerFilename, utf8ToBase64 } from './viewer';
 import type { ViewerConfig } from '@/viewer/config';
 
 const config = (over: Partial<ViewerConfig> = {}): ViewerConfig => ({
@@ -136,5 +136,31 @@ describe('viewer dimensions', () => {
     });
     expect(scriptText(html, 'viewer-config')).not.toContain('</script');
     expect(JSON.parse(scriptText(html, 'viewer-config')).dims[0].labels[0].text).toBe('</script><!--');
+  });
+});
+
+describe('dimsOf: tape measurements', () => {
+  const engineWith = (...tapes: { a: [number, number, number]; b: [number, number, number] }[]) => {
+    const world = new THREE.Group();
+    const entities = tapes.map((t, i) => ({ id: `d${i}`, type: 'dimension', visible: true, ...t }));
+    return {
+      doc: { entities, settings: { units: 'in' } },
+      scene: { world, get: () => ({ root: world }) },
+    } as unknown as Parameters<typeof dimsOf>[0];
+  };
+
+  it('sends a tape off the axes with its dashed dx / dy / dz legs, in metres', () => {
+    const sets = dimsOf(engineWith({ a: [0, 0, 0], b: [10, 20, 30] }));
+    const solid = sets.find(s => s.kind === 'measure' && !s.dashed)!;
+    const legs = sets.find(s => s.dashed)!;
+    expect(solid.segs).toHaveLength(6);
+    expect(legs.opacity).toBe(0.3);
+    expect(legs.segs).toHaveLength(18); // three legs
+    expect(legs.segs.slice(0, 6)).toEqual([0, 0, 0, 0.254, 0, 0]);
+    expect(legs.segs.slice(-3)).toEqual([0.254, 0.508, 0.762]);
+  });
+
+  it('sends no legs for a tape along an axis', () => {
+    expect(dimsOf(engineWith({ a: [0, 0, 0], b: [10, 0, 0] })).some(s => s.dashed)).toBe(false);
   });
 });

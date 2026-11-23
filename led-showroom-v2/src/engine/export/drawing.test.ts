@@ -5,8 +5,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { titleFields, viewCamera } from './drawing';
-import { sheetLayout, viewOf, type ViewKey } from './sheet';
+import { scaleBarRoom, titleCells, titleFields, viewCamera } from './drawing';
+import { PAPERS, scaleBar, sheetLayout, STANDARD_SCALES, viewOf, type PaperId, type ViewKey } from './sheet';
 import { createDocument, createLedWall } from '../document/defaults';
 import type { Document, LedWallEntity } from '../document/types';
 import { wallDims } from '../ledwall/layout';
@@ -171,5 +171,23 @@ describe('titleFields', () => {
     // The rest of the strip still identifies the sheet.
     expect(empty('PROJECT')).toBe('Main Atrium');
     expect(empty('DATE')).toBe('18/11/2026');
+  });
+});
+
+describe('graphic scale in the title strip', () => {
+  it('stays inside the SCALE cell on every paper at every standard scale', () => {
+    const doc = createDocument();
+    for (const paper of Object.keys(PAPERS) as PaperId[]) {
+      const base = sheetLayout({ w: 120, h: 96, d: 24 }, { paper, dpi: 150 });
+      const fields = titleFields(doc, { w: 120, h: 96, d: 24 }, 'in', { date: '2026-11-23', scaleDenom: 8, toScale: true, paper });
+      const { cells } = titleCells(base, fields);
+      const { x, w } = cells[fields.findIndex(f => f.label === 'SCALE')];
+      for (const denom of STANDARD_SCALES) {
+        const bar = scaleBar(base.dpi / denom, scaleBarRoom(w, base.dpi));
+        const end = x + 0.1 * base.dpi + bar.px;
+        // The end label is centred on the bar's end; give it a generous half-width.
+        expect(end + 0.15 * base.dpi, `${paper} 1:${denom} ${bar.label}`).toBeLessThanOrEqual(x + w);
+      }
+    }
   });
 });

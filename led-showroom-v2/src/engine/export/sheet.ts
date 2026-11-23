@@ -224,18 +224,20 @@ export const viewOf = (layout: SheetLayout, key: ViewKey): Viewport | undefined 
 
 /**
  * A scale bar whose length is a round number: the longest of 1 to 200 ft that fits `maxPx` at the
- * sheet scale, or of 1, 2, 3 or 6 in when not even a foot fits (a fine scale in a narrow cell).
- * When nothing fits, one foot: a bar that overruns a little still reads, a zero-length one does not.
+ * sheet scale, or of ¼, ½, 1, 2, 3 or 6 in when not even a foot fits (a fine scale in a narrow
+ * cell: at 1 : 1 on ANSI A an inch overruns the SCALE cell). When not even ¼ in fits, ¼ in
+ * anyway: the shortest overrun, and a zero-length bar reads as nothing.
  */
 export function scaleBar(pxPerIn: number, maxPx: number): { feet: number; px: number; ticks: number; label: string } {
   const feetSteps = [1, 2, 5, 10, 20, 50, 100, 200];
-  const inchSteps = [6, 3, 2, 1];
+  const inchSteps = [6, 3, 2, 1, 0.5, 0.25];
   let feet = 0;
   for (const s of feetSteps) if (s * 12 * pxPerIn <= maxPx) feet = s;
   if (!feet) {
     const inches = inchSteps.find(s => s * pxPerIn <= maxPx);
-    if (inches) return { feet: inches / 12, px: inches * pxPerIn, ticks: inches === 1 ? 2 : inches, label: `${inches} in` };
-    feet = 1;
+    const i = inches ?? 0.25;
+    const label = i === 0.5 ? '½ in' : i === 0.25 ? '¼ in' : `${i} in`;
+    return { feet: i / 12, px: i * pxPerIn, ticks: i <= 1 ? 2 : i, label };
   }
   return { feet, px: feet * 12 * pxPerIn, ticks: feet <= 2 ? feet * 2 : 4, label: `${feet} ft` };
 }

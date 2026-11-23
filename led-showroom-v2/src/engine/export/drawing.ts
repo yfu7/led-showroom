@@ -403,20 +403,42 @@ function drawLogo(ctx: CanvasRenderingContext2D, x: number, cy: number, h: numbe
   ctx.restore();
 }
 
+/**
+ * The title strip's cells: the logo's (`logoH` tall, `logoCell` wide) opens it, then the fields
+ * share the rest by weight. Pure, so the scale bar's room can be checked against real sheets.
+ */
+export function titleCells(layout: SheetLayout, fields: TitleField[]): { logoH: number; logoCell: number; cells: { x: number; w: number }[] } {
+  const tb = layout.titleBlock, dpi = layout.dpi;
+  const logoH = Math.min(tb.h * 0.34, 0.3 * dpi);
+  const logoCell = logoH * (LOGO_W / LOGO_H) + 0.4 * dpi;
+  const total = fields.reduce((s, f) => s + f.weight, 0);
+  let x = tb.x + logoCell;
+  const cells = fields.map(f => {
+    const w = ((tb.w - logoCell) * f.weight) / total;
+    const c = { x, w };
+    x += w;
+    return c;
+  });
+  return { logoH, logoCell, cells };
+}
+
+/**
+ * Room for the graphic scale in a cell `w` wide: the bar starts 0.1 in in and its end label,
+ * centred on the bar's end, needs ~0.32 in clear of the cell's right edge.
+ */
+export const scaleBarRoom = (w: number, dpi: number): number => w - 0.42 * dpi;
+
 function drawTitleBlock(ctx: CanvasRenderingContext2D, layout: SheetLayout, fields: TitleField[], toScale: boolean): void {
   const tb = layout.titleBlock, dpi = layout.dpi;
   strokeRect(ctx, tb, Math.max(1.5, 0.012 * dpi));
 
   // The logo opens the strip in a cell of its own; the fields share the rest.
-  const logoH = Math.min(tb.h * 0.34, 0.3 * dpi);
-  const logoCell = logoH * (LOGO_W / LOGO_H) + 0.4 * dpi;
+  const { logoH, logoCell, cells } = titleCells(layout, fields);
   drawLogo(ctx, tb.x + 0.2 * dpi, tb.y + tb.h / 2, logoH);
 
   // The scale bar gets the last cell, so it sits under the printed ratio.
-  const total = fields.reduce((s, f) => s + f.weight, 0);
-  let x = tb.x + logoCell;
   fields.forEach((f, i) => {
-    const w = ((tb.w - logoCell) * f.weight) / total;
+    const { x, w } = cells[i];
     if (logoCell > 0 || i > 0) {
       ctx.save();
       ctx.strokeStyle = INK;
@@ -443,7 +465,7 @@ function drawTitleBlock(ctx: CanvasRenderingContext2D, layout: SheetLayout, fiel
 
     if (f.label === 'SCALE' && toScale) {
       // A graphic scale, so the sheet stays measurable after someone prints it at the wrong size.
-      const bar = scaleBar(layout.pxPerIn, w - 0.42 * dpi);
+      const bar = scaleBar(layout.pxPerIn, scaleBarRoom(w, dpi));
       const by = tb.y + tb.h - 0.3 * dpi;
       const bh = 0.058 * dpi;
       ctx.save();
@@ -461,7 +483,6 @@ function drawTitleBlock(ctx: CanvasRenderingContext2D, layout: SheetLayout, fiel
       ctx.textAlign = 'center'; ctx.fillText(bar.label, px + bar.px, by + bh + 0.03 * dpi);
       ctx.restore();
     }
-    x += w;
   });
 }
 
