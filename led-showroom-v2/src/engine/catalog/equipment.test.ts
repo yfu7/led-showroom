@@ -31,7 +31,7 @@ describe('the truss inventory', () => {
     expect(ownedCount(equipmentDef(id))).toBe(owned);
   });
 
-  it('is every truss part on the paperwork, the coupler, and the 3 ft stick to buy', () => {
+  it('is every truss part on the paperwork, the coupler, and the 3 ft and 2 ft sticks to buy', () => {
     expect(TRUSS_INVENTORY.map(d => d.id).sort()).toEqual([...HELD.map(([id]) => id), 'clamp-8002'].sort());
   });
 
@@ -46,7 +46,7 @@ describe('the truss inventory', () => {
     const def = equipmentDef('gp-truss-2ft');
     expect(def?.dims).toEqual([24, 11.16, 11.16]);
     expect(ownedCount(def)).toBe(0);
-    expect(def?.specs?.find(s => s.label === 'Part no.')?.value).toMatch(/^GP0131 - DT-GP2-BLK/);
+    expect(def?.specs?.find(s => s.label === 'Part no.')?.value).toMatch(/^GP0222 - DT-GP2 /);
     expect(def?.specs?.find(s => s.label === 'Unit price')?.value).toMatch(/^\$407\.00 \(estimate/);
   });
 

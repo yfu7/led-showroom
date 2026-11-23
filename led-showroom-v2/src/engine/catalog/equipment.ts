@@ -242,9 +242,9 @@ export const TRUSS_INVENTORY: EquipmentDef[] = [
     dims: [24, 11.16, 11.16], color: '#17181b',
     description: '2 ft end-plated DT-GP box truss, black. Not one of ours: a stick to buy, so a leg of a 5 ft and a 2 ft lands the header on the lintel of a walk-through arch as a 4 ft and a 3 ft do.',
     specs: [
-      { label: 'Part no.', value: 'GP0131 - DT-GP2-BLK (from retailer listings; not on any order. Global Truss lists the DT-GP2 as GP0222, colour not stated)' },
+      { label: 'Part no.', value: 'GP0222 - DT-GP2 (Global Truss; retailers list it in black. Not on any order)' },
       { label: 'Owned', value: '0 (on none of our orders)' },
-      { label: 'Unit price', value: '$407.00 (estimate: retailer listings for the DT-GP2-BLK, not a quote or an order)' },
+      { label: 'Unit price', value: '$407.00 (estimate: retailer listings for the black DT-GP2, not a quote or an order; Stage Lighting Store lists the DT-GP2 at $350, colour not stated)' },
       { label: 'Link', value: 'https://www.globaltruss.com/dt-gp2' },
       GP_SYSTEM, GP_SECTION, GP_BUILD, GP_CONN, GP_SPAN, GP_BASIS, GP_ENGR,
     ],

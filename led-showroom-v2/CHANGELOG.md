@@ -4,7 +4,7 @@
 
 ### The 2 ft DT-GP2, a stick to buy
 
-The catalog has the DT-GP2-BLK 2 ft stick (GP0131 in retailer listings), with none owned and priced
+The catalog has the DT-GP2 2 ft stick in black (Global Truss GP0222), with none owned and priced
 at a retailer's $407, an estimate. Auto truss can put one in a frame's leg where the 3 ft could go:
 a 5 ft and a 2 ft stand as high as a 4 ft and a 3 ft, and cost $71 less to buy. The 30 x 7 arch's
 legs are now a 5 ft and a 2 ft each, three 2 ft to buy, $213 less than three 3 ft.
@@ -41,7 +41,7 @@ when layouts are compared.
 
 An arch's header still couples to the lintel's lowest row of holes. No leg of real sticks and
 blocks puts a header chord on any other row within the quarter-inch shim, so the 30 x 7 arch stands
-each frame leg on a 4 ft and a 3 ft to buy under a spare block, as before. Where a header could
+each frame leg on 7 ft of stick, one of them to buy, under a spare block, as before. Where a header could
 take another row for the same money, the rig with fewest couplers bare under a lintel is chosen.
 
 ### Dimension labels scale with zoom; the turntable turns slower
@@ -121,13 +121,13 @@ the wall.
 planner puts one only in a frame's leg, only where it lands the header on a row of holes, and takes
 such a rig only where it supports more columns than every rig of our own sticks. The stick is drawn
 as a ghost, and the planner says how many to buy. A 2 ft DT-GP2 does the same job beside a 5 ft
-stick (a 4 and a 3 make 7 ft, as a 5 and a 2 do), but the planner draws the 3 ft.
+stick (a 4 and a 3 make 7 ft, as a 5 and a 2 do), and costs less: see the DT-GP2 above.
 
 **A 30 x 7 arch under a two-row lintel now frames.** A leg behind each pier stands on a plate, a
-4 ft and a 3 ft stick and two blocks, the lower one a spacer: 107.82 in. Spans run block face to
+5 ft and a 2 ft stick and two blocks, the lower one a spacer: 107.82 in. Spans run block face to
 block face behind both doorways, and the header's bottom chord lands on the lintel's low holes, on a
 0.15 in shim. 28 of the 30 columns have couplers and all 30 are supported, where three towers gave 3
-and 6. It takes three 3 ft sticks to buy, and 52 couplers where we have 38.
+and 6. It takes three 2 ft sticks to buy, and 52 couplers where we have 38.
 
 Those low holes stand 1.20 in above the lintel's bottom edge, and a coupler's body reaches 1.38 in
 each way from its bolt, so 39 of the couplers over the doorways hang 0.18 in below the lintel, where
