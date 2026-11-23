@@ -35,4 +35,19 @@ export interface ViewerConfig {
   /** Scene box in metres, for walking bounds and the shadow camera. */
   bounds: { min: V3; max: V3 };
   glbBytes: number;
+  /** The measurements, shown by the Dimensions toggle (off when the page opens). Empty: no toggle. */
+  dims: ViewerDimSet[];
+}
+
+/** One kind of measurement as the app draws it, in metres. */
+export interface ViewerDimSet {
+  /** The walls' own dimensions, or tape measurements placed in the app. */
+  kind: 'wall' | 'measure';
+  /** Line and label text colours (CSS). */
+  line: string;
+  text: string;
+  /** Line pieces, six numbers each: x1 y1 z1 x2 y2 z2. */
+  segs: number[];
+  /** `h`: the label's base height, before it is held readable from afar. */
+  labels: { text: string; p: V3; h: number }[];
 }

@@ -13,10 +13,13 @@
  */
 import * as THREE from 'three';
 import type { Engine } from '../Engine';
-import type { LedWallEntity } from '../document/types';
+import type { DimensionEntity, LedWallEntity } from '../document/types';
+import { LedWallRenderer } from '../entities/LedWallRenderer';
+import { dimensionLabelPosition, dimensionLabelText, MEASURE_COLOR, MEASURE_LABEL_HEIGHT_IN } from '../entities/DimensionRenderer';
+import { DIMENSION_LINE_COLOR, DIMENSION_TEXT_COLOR, type DimensionPieces } from '../ledwall/dimensions';
 import { exportGltf, INCH_TO_METRE } from './gltf';
 import { downloadBlob } from './composite';
-import type { ViewerConfig, ViewerLight } from '@/viewer/config';
+import type { ViewerConfig, ViewerDimSet, ViewerLight } from '@/viewer/config';
 import { viewerPresets, type Box, type V3, type WallView } from '@/viewer/presets';
 
 const escapeHtml = (s: string): string =>
@@ -167,6 +170,54 @@ export function wallViews(engine: Engine): WallView[] {
   return out;
 }
 
+/** Inches to metres, to a tenth of a millimetre: the page carries no more than it can show. */
+const mm10 = (inches: number): number => Math.round(inches * INCH_TO_METRE * 1e4) / 1e4;
+
+/** Pieces in world inches as a page's set in metres; null when there is nothing to show. */
+export function dimSetOf(kind: ViewerDimSet['kind'], line: string, text: string, p: DimensionPieces): ViewerDimSet | null {
+  if (!p.segs.length && !p.labels.length) return null;
+  return {
+    kind, line, text,
+    segs: p.segs.map(mm10),
+    labels: p.labels.map(l => ({ text: l.text, p: [mm10(l.p[0]), mm10(l.p[1]), mm10(l.p[2])], h: mm10(l.h) })),
+  };
+}
+
+/** True when the object and every parent are shown. */
+const shown = (o: THREE.Object3D | undefined): boolean => {
+  if (!o) return false;
+  for (let x: THREE.Object3D | null = o; x; x = x.parent) if (!x.visible) return false;
+  return true;
+};
+
+/**
+ * Every shown wall's dimensions (whether or not they are switched on in the app) and every shown
+ * tape measurement, as the app draws them, in the display unit.
+ */
+export function dimsOf(engine: Engine): ViewerDimSet[] {
+  const walls: DimensionPieces = { segs: [], labels: [] }, tape: DimensionPieces = { segs: [], labels: [] };
+  const unit = engine.doc.settings.units;
+  engine.scene.world.updateWorldMatrix(true, true);
+  for (const e of engine.doc.entities) {
+    const r = engine.scene.get(e.id);
+    if (!r || !shown(r.root)) continue;
+    if (e.type === 'led-wall' && r instanceof LedWallRenderer) {
+      const p = r.dimensionPieces();
+      for (const n of p.segs) walls.segs.push(n);
+      for (const l of p.labels) walls.labels.push(l);
+    } else if (e.type === 'dimension') {
+      const { a, b, label } = e as DimensionEntity;
+      tape.segs.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+      tape.labels.push({ text: dimensionLabelText(a, b, unit, label), p: dimensionLabelPosition(a, b), h: MEASURE_LABEL_HEIGHT_IN });
+    }
+  }
+  const css = (n: number): string => `#${n.toString(16).padStart(6, '0')}`;
+  return [
+    dimSetOf('wall', css(DIMENSION_LINE_COLOR), DIMENSION_TEXT_COLOR, walls),
+    dimSetOf('measure', css(MEASURE_COLOR), DIMENSION_TEXT_COLOR, tape),
+  ].filter((s): s is ViewerDimSet => !!s);
+}
+
 /** Export the scene as a standalone viewer page and download it. */
 export async function exportViewer(engine: Engine): Promise<ViewerExportResult> {
   const t0 = performance.now();
@@ -212,6 +263,7 @@ export async function exportViewer(engine: Engine): Promise<ViewerExportResult> 
     start: { position: toM(cam.position), target: toM(target) },
     bounds: boxM(sceneBox),
     glbBytes: glbBytes.length,
+    dims: dimsOf(engine),
   };
   const html = buildViewerHtml({ config, glbBase64: bytesToBase64(glbBytes), runtime });
   const filename = suggestViewerFilename(config.title);

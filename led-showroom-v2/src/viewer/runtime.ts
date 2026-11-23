@@ -20,6 +20,36 @@ const WALK_SPEED = 1.4; // m/s, a stroll
 const RUN = 3;
 const LOOK = 0.0022; // rad per pixel of mouse
 const TOUCH_LOOK = 0.005;
+/** Dimension labels as the app sizes them: twice their base height, held readable from afar. */
+const LABEL_SCALE = 2;
+const LABEL_REF_M = 200 * 0.0254;
+const LABEL_FAR = 0.5;
+
+/** A dimension label as the app draws it: bold monospace on a dark rounded plate, always on top. */
+function labelSprite(text: string, color: string): THREE.Sprite {
+  const fontPx = 56, pad = 20, font = `bold ${fontPx}px "Courier New", monospace`;
+  const h = Math.ceil(fontPx * 1.4 + pad * 2);
+  let w = Math.ceil(text.length * fontPx * 0.6 + pad * 2);
+  let map: THREE.CanvasTexture | null = null;
+  const c = document.createElement('canvas'), x = c.getContext('2d');
+  if (x) {
+    x.font = font;
+    w = Math.ceil(x.measureText(text).width + pad * 2);
+    c.width = w; c.height = h;
+    x.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    if (typeof x.roundRect === 'function') { x.beginPath(); x.roundRect(0, 0, w, h, 10); x.fill(); } else x.fillRect(0, 0, w, h);
+    x.font = font; x.fillStyle = color; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText(text, w / 2, h / 2);
+    map = new THREE.CanvasTexture(c);
+    map.minFilter = THREE.LinearFilter;
+  }
+  const mat = new THREE.SpriteMaterial({ map, transparent: true, depthTest: false });
+  if (!map) mat.color.set(color);
+  const s = new THREE.Sprite(mat);
+  s.renderOrder = 1000;
+  s.userData.aspect = w / h;
+  return s;
+}
 
 const byId = <T extends HTMLElement>(id: string): T | null => document.getElementById(id) as T | null;
 
@@ -151,6 +181,9 @@ function main(): void {
     bar.appendChild(b);
   }
   bar.appendChild(el('span', { class: 'v-sep' }));
+  const dimSets = cfg.dims ?? [];
+  const dimsBtn = el('button', { 'aria-pressed': 'false', title: 'Show the measurements (M)' }, 'Dimensions');
+  if (dimSets.length) bar.append(dimsBtn, el('span', { class: 'v-sep' }));
   const resetBtn = el('button', { title: 'Back to where the page opened' }, 'Reset');
   bar.appendChild(resetBtn);
   const hint = el('div', { class: 'v-hint' });
@@ -162,6 +195,45 @@ function main(): void {
   const pinIn = el('input', { type: 'password', inputmode: 'numeric', placeholder: 'PIN', 'aria-label': 'PIN', autocomplete: 'off' });
   pinBox.appendChild(pinIn);
   document.body.append(top, bar, hint, stick, god, pinBox);
+
+  /* ───────── dimensions ───────── */
+  // Drawn over the model (no depth test), as in the app. Off when the page opens.
+  const dimGroup = new THREE.Group();
+  dimGroup.visible = false;
+  const dimLabels: THREE.Sprite[] = [];
+  let dimLines = 0;
+  for (const s of dimSets) {
+    const n = s.segs.length - (s.segs.length % 6);
+    if (n) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(s.segs.slice(0, n), 3));
+      const lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: s.line, depthTest: false, transparent: true }));
+      lines.renderOrder = 999;
+      lines.frustumCulled = false;
+      dimGroup.add(lines);
+      dimLines += n / 6;
+    }
+    for (const l of s.labels) {
+      const sp = labelSprite(l.text, s.text);
+      sp.position.set(l.p[0], l.p[1], l.p[2]);
+      sp.userData.h = l.h;
+      dimGroup.add(sp);
+      dimLabels.push(sp);
+    }
+  }
+  scene.add(dimGroup);
+  function setDims(on: boolean): void {
+    dimGroup.visible = on;
+    dimsBtn.setAttribute('aria-pressed', String(on));
+  }
+  dimsBtn.onclick = () => setDims(!dimGroup.visible);
+  function scaleLabels(): void {
+    for (const s of dimLabels) {
+      const d = camera.position.distanceTo(s.position);
+      const h = s.userData.h * Math.max(LABEL_SCALE, (d / LABEL_REF_M) * LABEL_FAR);
+      s.scale.set(h * s.userData.aspect, h, 1);
+    }
+  }
 
   /* ───────── camera moves ───────── */
   type Mode = 'orbit' | 'walk';
@@ -283,7 +355,9 @@ function main(): void {
   window.addEventListener('keydown', e => {
     if (e.target instanceof HTMLInputElement) return;
     keys.add(e.code);
-    if (e.code === 'KeyF' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) setMode(mode === 'walk' ? 'orbit' : 'walk');
+    if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.code === 'KeyF') setMode(mode === 'walk' ? 'orbit' : 'walk');
+    if (e.code === 'KeyM' && dimSets.length) setDims(!dimGroup.visible);
   });
   window.addEventListener('keyup', e => keys.delete(e.code));
   window.addEventListener('blur', () => keys.clear());
@@ -338,6 +412,7 @@ function main(): void {
       ['fov / aspect', `${camera.fov.toFixed(1)} / ${camera.aspect.toFixed(3)}`],
       ['pixel ratio', String(gl.getPixelRatio())],
       ['shadows', String(cfg.shadows)],
+      ['dimensions', dimSets.length ? `${dimGroup.visible ? 'on' : 'off'} · ${dimLines} lines · ${dimLabels.length} labels (${dimSets.map(s => s.kind).join(', ')})` : 'none'],
       ['bounds min (m)', cfg.bounds.min.map(n => n.toFixed(2)).join(', ')],
       ['bounds max (m)', cfg.bounds.max.map(n => n.toFixed(2)).join(', ')],
       ['presets', cfg.presets.map(p => p.id).join(' ')],
@@ -371,6 +446,7 @@ function main(): void {
       if (k >= 1) tween = null;
     }
     if (mode === 'walk') walkStep(dt); else orbit.update();
+    if (dimGroup.visible) scaleLabels();
     gl.render(scene, camera);
     frames++;
     if (now - fpsT >= 1000) { fps = Math.round((frames * 1000) / (now - fpsT)); frames = 0; fpsT = now; }

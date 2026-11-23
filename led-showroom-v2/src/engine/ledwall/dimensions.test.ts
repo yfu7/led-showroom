@@ -9,6 +9,7 @@ import {
   DIMENSION_Z_STANDOFF_IN,
   buildWallDimensions,
   createLabelSprite,
+  dimensionPiecesOf,
   disposeDimensionGroup,
   formatDimensionLength,
   formatEdgeDimensionLabel,
@@ -337,5 +338,37 @@ describe('disposeDimensionGroup', () => {
     expect(lineMatDisposed).toBe(0);
     expect(g.children.length).toBe(0);
     expect(parent.children.length).toBe(0);
+  });
+});
+
+describe('dimensionPiecesOf', () => {
+  it('flattens lines and labels to world space, skipping hidden ones', () => {
+    const parent = new THREE.Group();
+    parent.position.set(10, 0, -5);
+    parent.rotation.y = Math.PI / 2;
+    const g = new THREE.Group();
+    parent.add(g);
+    const seg = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0), new THREE.Vector3(4, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 2, 0),
+    ]));
+    const strip = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 3, 0), new THREE.Vector3(0, 3, 1),
+    ]));
+    const hidden = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(1, 1, 1)]));
+    hidden.visible = false;
+    const label = createLabelSprite('125.9"', { heightIn: 6 });
+    label.position.set(2, 1, 0);
+    g.add(seg, strip, hidden, label);
+    parent.updateWorldMatrix(true, true);
+
+    const p = dimensionPiecesOf(g);
+    // Two pieces from the LineSegments, two from the strip; nothing from the hidden one.
+    expect(p.segs.length).toBe(4 * 6);
+    // (4,0,0) turned a quarter about y lands at (0,0,-4), then moves by the parent's offset.
+    expect(p.segs.slice(3, 6).map(n => +n.toFixed(9) + 0)).toEqual([10, 0, -9]);
+    expect(p.labels).toHaveLength(1);
+    expect(p.labels[0].text).toBe('125.9"');
+    expect(p.labels[0].h).toBe(6);
+    expect(p.labels[0].p.map(n => +n.toFixed(9) + 0)).toEqual([10, 1, -7]);
   });
 });

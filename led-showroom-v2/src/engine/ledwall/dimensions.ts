@@ -610,3 +610,43 @@ export function disposeDimensionGroup(group: THREE.Object3D): void {
   group.clear();
   group.removeFromParent();
 }
+
+/** Dimension drawing flattened for export, in world inches: line pieces and labels. */
+export interface DimensionPieces {
+  /** Line pieces, six numbers each: x1 y1 z1 x2 y2 z2. */
+  segs: number[];
+  /** Label text, anchor and base height (before the on-screen scaling). */
+  labels: { text: string; p: [number, number, number]; h: number }[];
+}
+
+/**
+ * Flatten a built dimension group to world-space pieces, skipping anything hidden. World matrices
+ * must be current (`updateWorldMatrix(true, true)`). `LineSegments` give their vertex pairs; any
+ * other line gives each consecutive pair. Labels are the sprites `createLabelSprite` made.
+ */
+export function dimensionPiecesOf(group: THREE.Object3D, out: DimensionPieces = { segs: [], labels: [] }): DimensionPieces {
+  const v = new THREE.Vector3();
+  group.traverseVisible(o => {
+    const line = o as THREE.Line;
+    if (line.isLine) {
+      const pos = line.geometry.getAttribute('position');
+      if (!pos) return;
+      const idx = line.geometry.getIndex();
+      const n = idx ? idx.count : pos.count;
+      const push = (i: number): void => {
+        v.fromBufferAttribute(pos, idx ? idx.getX(i) : i).applyMatrix4(line.matrixWorld);
+        out.segs.push(v.x, v.y, v.z);
+      };
+      const step = (line as THREE.LineSegments).isLineSegments ? 2 : 1;
+      for (let i = 0; i + 1 < n; i += step) { push(i); push(i + 1); }
+      return;
+    }
+    const s = o as THREE.Sprite;
+    const ud = s.userData as Partial<LabelSpriteUserData>;
+    if (s.isSprite && typeof ud.label === 'string') {
+      s.getWorldPosition(v);
+      out.labels.push({ text: ud.label, p: [v.x, v.y, v.z], h: ud.dimBaseH ?? LABEL_BASE_HEIGHT_IN });
+    }
+  });
+  return out;
+}

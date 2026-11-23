@@ -25,7 +25,7 @@ import {
   gridOpacityForDistance, gridPlaneForSegment, makePixelGridMaterial, perpendicularDistanceToFace, segmentHasFilledCells,
   segmentMiterExtensions,
 } from '../ledwall/pixelGrid';
-import { buildWallDimensions, disposeDimensionGroup, updateLabelSpriteScale } from '../ledwall/dimensions';
+import { buildWallDimensions, dimensionPiecesOf, disposeDimensionGroup, updateLabelSpriteScale, type DimensionPieces } from '../ledwall/dimensions';
 import { clampWindowRect, spanInfo, windowAtPixel } from '../ledwall/contentWindows';
 import { WEBSITE_IFRAME_SANDBOX, acquireMedia, proxyUrl, releaseMedia, sourceKey, type ContentMedia } from '../content/ContentLayer';
 import { formatLength } from '../units';
@@ -327,6 +327,19 @@ export class LedWallRenderer implements EntityRenderer<LedWallEntity> {
     this.dimGroup = buildWallDimensions({ wall: this.entity, dims: this.dims, layout: this.layout, segments: this.segments, unit: this.ctx.unit });
     this.dimGroup.traverse(o => { o.userData.unpickable = true; o.userData.helper = true; });
     this.inner.add(this.dimGroup);
+  }
+
+  /**
+   * The wall's dimensions as the app draws them, whether or not they are switched on, flattened
+   * to world inches. For the viewer export; the scene is left as it was.
+   */
+  dimensionPieces(): DimensionPieces {
+    const g = buildWallDimensions({ wall: this.entity, dims: this.dims, layout: this.layout, segments: this.segments, unit: this.ctx.unit });
+    this.inner.add(g);
+    g.updateWorldMatrix(true, true);
+    const out = dimensionPiecesOf(g);
+    disposeDimensionGroup(g);
+    return out;
   }
 
   /* ───────────────────────── content ───────────────────────── */

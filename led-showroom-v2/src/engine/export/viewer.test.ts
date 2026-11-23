@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { buildExportRoot, INCH_TO_METRE } from './gltf';
-import { buildViewerHtml, bytesToBase64, lightDir, scriptSafeJson, suggestViewerFilename, utf8ToBase64 } from './viewer';
+import { buildViewerHtml, bytesToBase64, dimSetOf, lightDir, scriptSafeJson, suggestViewerFilename, utf8ToBase64 } from './viewer';
 import type { ViewerConfig } from '@/viewer/config';
 
 const config = (over: Partial<ViewerConfig> = {}): ViewerConfig => ({
@@ -10,7 +10,7 @@ const config = (over: Partial<ViewerConfig> = {}): ViewerConfig => ({
   floor: { visible: true, color: '#0d1218', sizeM: 36.576, shadowCatcher: false },
   backdrop: 'radial-gradient(ellipse at 50% 65%, #16202b 0%, #05070a 70%)',
   presets: [], start: { position: [0, 1.6, 5], target: [0, 1, 0] },
-  bounds: { min: [-1, 0, -1], max: [1, 2, 1] }, glbBytes: 4, ...over,
+  bounds: { min: [-1, 0, -1], max: [1, 2, 1] }, glbBytes: 4, dims: [], ...over,
 });
 
 /** The text of the script element with this id. */
@@ -112,5 +112,27 @@ describe('viewer page', () => {
     const n2 = new THREE.Vector3(0, 0, 1).applyQuaternion(exported.getWorldQuaternion(new THREE.Quaternion()));
     expect(n2.distanceTo(normal)).toBeLessThan(1e-9);
     expect(normal.x).toBeCloseTo(1, 9);
+  });
+});
+
+describe('viewer dimensions', () => {
+  it('carries a set in metres to a tenth of a millimetre, and nothing when empty', () => {
+    expect(dimSetOf('wall', '#00bbff', '#00ccff', { segs: [], labels: [] })).toBeNull();
+    const s = dimSetOf('wall', '#00bbff', '#00ccff', {
+      segs: [0, 0, 0, 100, 48, -1 / 3],
+      labels: [{ text: '100"', p: [50, -4, 1.15], h: 6 }],
+    })!;
+    expect(s.segs).toEqual([0, 0, 0, 2.54, 1.2192, -0.0085]);
+    expect(s.labels).toEqual([{ text: '100"', p: [1.27, -0.1016, 0.0292], h: 0.1524 }]);
+    expect(s.kind).toBe('wall');
+  });
+
+  it('lets the page carry label text safely', () => {
+    const html = buildViewerHtml({
+      config: config({ dims: [{ kind: 'measure', line: '#eab308', text: '#00ccff', segs: [], labels: [{ text: '</script><!--', p: [0, 0, 0], h: 0.15 }] }] }),
+      glbBase64: '', runtime: '',
+    });
+    expect(scriptText(html, 'viewer-config')).not.toContain('</script');
+    expect(JSON.parse(scriptText(html, 'viewer-config')).dims[0].labels[0].text).toBe('</script><!--');
   });
 });

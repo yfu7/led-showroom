@@ -248,3 +248,25 @@ describe('accessories', () => {
     r.dispose();
   });
 });
+
+describe('dimensions for the viewer export', () => {
+  it('gives the wall dimensions with them switched off, and leaves the scene as it was', () => {
+    const wall = wallWith([{ afterCol: 1, angle: 90 }]);
+    wall.showDimensions = false;
+    const r = new LedWallRenderer(wall, ctx());
+    r.root.position.set(100, 0, 30);
+    let before = 0;
+    r.root.traverse(() => { before++; });
+    const p = r.dimensionPieces();
+    let after = 0;
+    r.root.traverse(() => { after++; });
+    expect(after).toBe(before);
+    expect(p.segs.length).toBeGreaterThan(0);
+    expect(p.segs.length % 6).toBe(0);
+    expect(p.labels.length).toBeGreaterThan(0);
+    // In world space: the root's offset carries through.
+    const xs = p.labels.map(l => l.p[0]);
+    expect(Math.min(...xs)).toBeGreaterThan(100 - wallDims(wall).totalW);
+    r.dispose();
+  });
+});

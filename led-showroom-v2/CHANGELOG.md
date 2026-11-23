@@ -12,6 +12,9 @@ so it can be emailed. It is view only:
   W A S D or the arrows (Shift hurries, F switches mode). On a phone, use the thumb stick and drag to look.
 - **Stands**: Overview, Front, Top and one square on to each wall (walls that share a name are
   numbered), plus Reset back to where the page opened. Each stand fits the window it is opened in.
+- **Dimensions** (or M) shows the measurements as the app draws them, over the model: every wall's
+  dimensions, whether or not they were switched on in the app, and the tape measurements placed in
+  it, in the display unit. Off when the page opens; the button is left out when there are none.
 
 The room carries over: lighting, floor, shadows and the backdrop. A staged venue photo is embedded;
 if its host will not hand it over, the toast says so and the plain backdrop is used. Each wall shows
